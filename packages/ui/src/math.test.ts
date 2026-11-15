@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { mathText } from './math.ts'
+import { mathSpans, mathText } from './math.ts'
 
 test('leaves text without math as it is', () => {
   expect(mathText('Plain **text**, no math.')).toBe('Plain **text**, no math.')
@@ -57,4 +57,30 @@ test('an unclosed $$ (a reply still streaming) stays text', () => {
   expect(mathText('$$\\frac{1}{2')).toBe('\\$\\$\\frac{1}{2')
   expect(mathText('so $x + ')).toBe('so \\$x + ')
   expect(mathText('so \\(x + ')).toBe('so \\(x + ')
+})
+
+// What the Notes editor draws: [tex, display, source] for each formula.
+const spans = (text: string) => mathSpans(text).map((s) => [s.tex, s.display, text.slice(s.from, s.to)])
+
+test('mathSpans finds the formulas chat draws, in both delimiter styles', () => {
+  expect(spans('$$\nx_1 = y\n$$')).toEqual([['x_1 = y', true, '$$\nx_1 = y\n$$']])
+  expect(spans('\\[\n\\int f\n\\]')).toEqual([['\\int f', true, '\\[\n\\int f\n\\]']])
+  expect(spans('$$E=mc^2$$.')).toEqual([['E=mc^2.', true, '$$E=mc^2$$.']])
+  expect(spans('a $x_1$ and \\(y_2\\) and $$z$$ mid')).toEqual([
+    ['x_1', false, '$x_1$'],
+    ['y_2', false, '\\(y_2\\)'],
+    ['z', false, '$$z$$'],
+  ])
+})
+
+test('mathSpans leaves dollar amounts, code and an unclosed block alone', () => {
+  expect(spans('costs $5 and $10, or $1,200.50, see $HOME:$PATH')).toEqual([])
+  expect(spans('`$a$` and\n\n```\n$$\nb\n$$\n```')).toEqual([])
+  expect(spans('$$\nx = 1 \\\\\ny = ')).toEqual([])
+  expect(spans('no math here')).toEqual([])
+})
+
+test('mathSpans takes code ranges from the caller when it has them', () => {
+  // The caller says the first formula is code, so only the second is math.
+  expect(mathSpans('$a$ $b$', { inline: [[0, 3]], block: [] }).map((s) => s.tex)).toEqual(['b'])
 })

@@ -13,8 +13,10 @@ import {
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from '@codemirror/commands'
 import { defineLanguageFacet, Language, syntaxTree } from '@codemirror/language'
 import { GFM, type MarkdownConfig, parser as baseParser } from '@lezer/markdown'
+import katex from 'katex'
 import { Button } from './controls.tsx'
 import { highlightRanges } from './highlight.ts'
+import { KATEX_OPTIONS, type KeptRanges, type MathSpan, mathSpans } from './math.ts'
 
 /**
  * A Markdown editor with live preview, as Obsidian's: the text stays plain Markdown, but on lines the cursor isn't on,
@@ -25,7 +27,7 @@ import { highlightRanges } from './highlight.ts'
  * [[wikilinks]] and #tags are parsed too; clicking one calls onLink or onTag, and a web link opens in the browser. On
  * the line being edited, ⌘-click (Ctrl elsewhere) follows it, so a plain click can still place the cursor. Enter carries
  * a list on, Tab and Shift-Tab indent, pasting a URL over selected text makes a link, and typing [[ offers the names
- * in completions.
+ * in completions. Math ($$…$$, \[…\], $…$, \(…\)) reads as KaTeX by chat's rules (math.ts) until the cursor enters it.
  */
 
 const OPEN = 91 // [
@@ -390,6 +392,129 @@ export function previewDecorations(state: EditorState, active: Set<number>, from
   return found
 }
 
+// Rendered formulas by kind and source, so a keystroke elsewhere never sets one again. The least recently used go first.
+const MATH_CACHE_MAX = 500
+const renderedMath = new Map<string, string>()
+
+/** A formula's KaTeX HTML, from the cache when it's been drawn before. Never throws: a bad formula shows its source in red. */
+export function mathHtml(tex: string, display: boolean): string {
+  const key = `${display ? 'D' : 'I'}${tex}`
+  let html = renderedMath.get(key)
+  if (html !== undefined) renderedMath.delete(key)
+  else {
+    try {
+      html = katex.renderToString(tex, { ...KATEX_OPTIONS, displayMode: display })
+    } catch {
+      const span = document.createElement('span')
+      span.className = 'katex-error'
+      span.style.color = KATEX_OPTIONS.errorColor
+      span.textContent = tex
+      html = span.outerHTML
+    }
+    if (renderedMath.size >= MATH_CACHE_MAX) renderedMath.delete(renderedMath.keys().next().value!)
+  }
+  renderedMath.set(key, html)
+  return html
+}
+
+// A formula, drawn, in place of its source. Clicking it puts the cursor at its start (see the mousedown handler), which
+// shows the source to edit.
+class MathWidget extends WidgetType {
+  readonly tex: string
+  readonly display: boolean
+  constructor(tex: string, display: boolean) {
+    super()
+    this.tex = tex
+    this.display = display
+  }
+  eq(other: MathWidget) {
+    return other.tex === this.tex && other.display === this.display
+  }
+  toDOM() {
+    const el = document.createElement(this.display ? 'div' : 'span')
+    el.className = this.display ? 'cm-md-math cm-md-math-block' : 'cm-md-math'
+    el.innerHTML = mathHtml(this.tex, this.display)
+    return el
+  }
+  ignoreEvent() {
+    return false
+  }
+}
+
+// Kept from math: code, HTML, autolinks and wikilinks, from the editor's own tree (no second parse per keystroke).
+const KEPT_BLOCK = new Set(['FencedCode', 'CodeBlock'])
+const KEPT_INLINE = new Set(['InlineCode', 'HTMLTag', 'HTMLBlock', 'Comment', 'CommentBlock', 'ProcessingInstructionBlock', 'Autolink', 'WikiLink'])
+
+/** Where math may not be found, from the syntax tree: code blocks, and inline code, HTML, autolinks and wikilinks. */
+export function keptFromTree(state: EditorState): KeptRanges {
+  const kept: KeptRanges = { inline: [], block: [] }
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (KEPT_BLOCK.has(node.name)) kept.block.push([node.from, node.to])
+      else if (KEPT_INLINE.has(node.name) || (node.name === 'URL' && !/^(Link|Image)$/.test(node.node.parent?.name ?? ''))) {
+        kept.inline.push([node.from, node.to])
+      } else return
+      return false
+    },
+  })
+  return kept
+}
+
+/**
+ * The math's decorations: each formula the selection doesn't touch, drawn (a display block as a block over its lines);
+ * one it touches, its source, marked. A display block counts as touched on any of its lines, as a table does.
+ */
+export function mathDecorations(state: EditorState, spans: MathSpan[]): DecorationSet {
+  const found: Range<Decoration>[] = []
+  const lines = activeLines(state)
+  const ranges = state.selection.ranges
+  for (const span of spans) {
+    const first = state.doc.lineAt(span.from)
+    const last = state.doc.lineAt(span.to)
+    let touched = false
+    if (span.display) for (let n = first.number; n <= last.number && !touched; n++) touched = lines.has(n)
+    else touched = ranges.some((r) => r.from <= span.to && r.to >= span.from)
+    if (touched) found.push(mark('cm-md-math-source').range(span.from, span.to))
+    else if (span.display) found.push(Decoration.replace({ widget: new MathWidget(span.tex, true), block: true }).range(first.from, span.to))
+    else found.push(Decoration.replace({ widget: new MathWidget(span.tex, false) }).range(span.from, span.to))
+  }
+  return Decoration.set(found, true)
+}
+
+type MathState = { spans: MathSpan[]; decorations: DecorationSet }
+const mathOf = (state: EditorState, spans = mathSpans(state.doc.toString(), keptFromTree(state))): MathState => ({
+  spans,
+  decorations: mathDecorations(state, spans),
+})
+
+// A field, not a plugin: a display block replaces whole lines. The formulas are found again only when the text or its
+// tree changes; a cursor move only redraws which show their source.
+const math = StateField.define<MathState>({
+  create: (state) => mathOf(state),
+  update(value, tr) {
+    if (tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state)) return mathOf(tr.state)
+    if (tr.selection) return mathOf(tr.state, value.spans)
+    return value
+  },
+  provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
+})
+
+/** The decorations outside every formula: Markdown read inside TeX (a_1 b_2 as emphasis) isn't Markdown. */
+export function outsideMath(ranges: Range<Decoration>[], spans: MathSpan[]): Range<Decoration>[] {
+  if (!spans.length) return ranges
+  const sorted = [...ranges].sort((a, b) => a.from - b.from)
+  const out: Range<Decoration>[] = []
+  let i = 0
+  for (const range of sorted) {
+    while (i < spans.length && spans[i]!.to <= range.from) i++
+    const span = spans[i]
+    // Line decorations (no width) stay: a line's class never touches the formula's text.
+    if (range.from < range.to && span && span.from < range.to) continue
+    out.push(range)
+  }
+  return out
+}
+
 const preview = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet
@@ -404,7 +529,7 @@ const preview = ViewPlugin.fromClass(
     build(view: EditorView) {
       const active = view.hasFocus ? activeLines(view.state) : new Set<number>()
       const ranges = view.visibleRanges.flatMap(({ from, to }) => previewDecorations(view.state, active, from, to))
-      return Decoration.set(ranges, true)
+      return Decoration.set(outsideMath(ranges, view.state.field(math, false)?.spans ?? []), true)
     }
   },
   { decorations: (plugin) => plugin.decorations },
@@ -797,6 +922,7 @@ export function MarkdownEditor({ docKey, text, label, placeholder, autofocus, co
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': label ?? 'Editor', spellcheck: 'true' }),
           ...(placeholder ? [placeholderText(placeholder)] : []),
+          math,
           preview,
           tables,
           pictureSource.of((src) => {
@@ -818,6 +944,13 @@ export function MarkdownEditor({ docKey, text, label, placeholder, autofocus, co
               if (table) {
                 e.preventDefault()
                 v.dispatch({ selection: { anchor: Number(table.dataset.tableFrom) } })
+                v.focus()
+                return true
+              }
+              const formula = target?.closest<HTMLElement>('.cm-md-math')
+              if (formula) {
+                e.preventDefault()
+                v.dispatch({ selection: { anchor: v.posAtDOM(formula) } })
                 v.focus()
                 return true
               }

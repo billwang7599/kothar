@@ -11,8 +11,11 @@ import {
   continueList,
   EDITOR_SAVE_MS,
   linkQuery,
+  keptFromTree,
   linkTarget,
   MarkdownEditor,
+  mathDecorations,
+  mathHtml,
   MAX_PASTE_BYTES,
   pastedName,
   picturePath,
@@ -22,6 +25,7 @@ import {
   tableRows,
   wikiLinksIn,
 } from './markdown-editor.tsx'
+import { mathSpans } from './math.ts'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -432,4 +436,79 @@ test('without files or a paste action, a pasted picture adds nothing', () => {
   act(() => view().contentDOM.dispatchEvent(paste))
   expect(view().state.doc.toString()).toBe('x')
   expect(saved).toEqual([])
+})
+
+// The math the editor draws: [kind, source] for each formula, kind 'block', 'inline' or 'source' (the cursor's in it).
+function formulas(state: EditorState) {
+  ensureSyntaxTree(state, state.doc.length, 5000)
+  const out: [string, string][] = []
+  mathDecorations(state, mathSpans(state.doc.toString(), keptFromTree(state))).between(0, state.doc.length, (from, to, value) => {
+    const spec = value.spec as { widget?: { display: boolean }; class?: string }
+    out.push([spec.widget ? (spec.widget.display ? 'block' : 'inline') : (spec.class ?? ''), state.doc.sliceString(from, to)])
+  })
+  return out
+}
+
+test('math reads as KaTeX in both delimiter styles, block and inline', () => {
+  const text = 'Top\n\n$$\nx_1 = \\frac{1}{r_{wp}}\n$$\n\n\\[\n\\int_0^1 f\n\\]\n\nInline $a*b*c$ and \\(b^2\\) end'
+  const { view } = mount({ text, docKey: 'math' })
+  // Cursor on the first line, outside every formula.
+  act(() => view().dispatch({ selection: { anchor: 0 } }))
+  expect(formulas(view().state)).toEqual([
+    ['block', '$$\nx_1 = \\frac{1}{r_{wp}}\n$$'],
+    ['block', '\\[\n\\int_0^1 f\n\\]'],
+    ['inline', '$a*b*c$'],
+    ['inline', '\\(b^2\\)'],
+  ])
+  // Drawn in the editor; the *b* inside TeX isn't read as emphasis.
+  expect(host.querySelectorAll('.cm-md-math-block .katex-display')).toHaveLength(2)
+  expect(host.querySelectorAll('span.cm-md-math .katex')).toHaveLength(2)
+  expect(host.querySelector('.cm-md-em')).toBeNull()
+})
+
+test('the cursor in a formula shows its source; leaving draws it again', () => {
+  const text = 'Inline $a_1$ here\n\n$$\ny\n$$'
+  const { view } = mount({ text, docKey: 'math-cursor' })
+  act(() => view().dispatch({ selection: { anchor: text.indexOf('a_1') } }))
+  expect(formulas(view().state)).toEqual([
+    ['cm-md-math-source', '$a_1$'],
+    ['block', '$$\ny\n$$'],
+  ])
+  // Any line of a display block counts, as in a table.
+  act(() => view().dispatch({ selection: { anchor: text.indexOf('y') } }))
+  expect(formulas(view().state)).toEqual([
+    ['inline', '$a_1$'],
+    ['cm-md-math-source', '$$\ny\n$$'],
+  ])
+  // Clicking a drawn formula puts the cursor at its start, which shows its source.
+  const widget = host.querySelector<HTMLElement>('span.cm-md-math')!
+  act(() => widget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })))
+  expect(view().state.selection.main.head).toBe(text.indexOf('$a_1$'))
+  expect(formulas(view().state)[0]).toEqual(['cm-md-math-source', '$a_1$'])
+})
+
+test('dollar amounts, code and an unclosed block stay text in the editor', () => {
+  const text = 'Costs $5 and $10.\n\nRun `echo $a$` now.\n\n```sh\n$$\nb\n$$\n```\n\n$$\nx = still typing'
+  const { view } = mount({ text, docKey: 'math-text' })
+  act(() => view().dispatch({ selection: { anchor: 0 } }))
+  expect(formulas(view().state)).toEqual([])
+  expect(host.querySelector('.cm-md-math')).toBeNull()
+})
+
+test('a formula KaTeX cannot read shows its source in red and never throws', () => {
+  const text = 'Top\n\nBad $\\frac{1}{$ and $\\notacommand x$ end'
+  const { view } = mount({ text, docKey: 'math-bad' })
+  act(() => view().dispatch({ selection: { anchor: 0 } }))
+  const errors = host.querySelectorAll<HTMLElement>('.cm-md-math .katex-error')
+  expect(errors.length).toBeGreaterThan(0)
+  expect(errors[0]!.style.color).toBe('var(--red)')
+  // Links stay off: trust is never on.
+  expect(mathHtml('\\href{https://x.test}{y}', false)).not.toContain('<a ')
+})
+
+test('a drawn formula is cached by its source', () => {
+  const tex = `q_{${Math.random()}}`
+  const first = mathHtml(tex, false)
+  expect(mathHtml(tex, false)).toBe(first)
+  expect(mathHtml(tex, true)).not.toBe(first)
 })

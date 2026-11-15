@@ -15,6 +15,16 @@ import { unified } from 'unified'
 
 type Edit = { at: number; length: number; text: string }
 type Range = [number, number]
+/** One formula in a text: where it is (the delimiters included), its TeX and whether it's a display block. */
+export type MathSpan = { from: number; to: number; tex: string; display: boolean }
+/** Where a text may not be touched: inline code, HTML and autolinks (inline), code blocks (block). */
+export type KeptRanges = { inline: Range[]; block: Range[] }
+
+/**
+ * KaTeX's options wherever Kothar draws math. A formula it can't read shows its source in the theme's red rather than
+ * breaking the text. trust stays off: no \href, \url or \includegraphics.
+ */
+export const KATEX_OPTIONS = { throwOnError: false, errorColor: 'var(--red)', strict: 'ignore' } as const
 type Node = { type: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: Node[] }
 
 const parser = unified().use(remarkParse).use(remarkGfm)
@@ -23,7 +33,7 @@ const parser = unified().use(remarkParse).use(remarkGfm)
 const KEPT = new Set(['code', 'inlineCode', 'html'])
 
 // Where the text may not be touched: code, HTML and autolinks (a link whose source isn't "[…](…)").
-function keptRanges(text: string): { inline: Range[]; block: Range[] } {
+export function keptRanges(text: string): KeptRanges {
   const inline: Range[] = []
   const block: Range[] = []
   const walk = (node: Node) => {
@@ -47,7 +57,7 @@ function keptRanges(text: string): { inline: Range[]; block: Range[] } {
 
 // The text with kept characters blanked out (lines stay lines), so the scans below never see them: inline code as \uE000,
 // block code as \uE001, which also ends a paragraph for pairing.
-function masked(text: string, { inline, block }: { inline: Range[]; block: Range[] }) {
+function masked(text: string, { inline, block }: KeptRanges) {
   const chars = text.split('')
   const blank = ([start, end]: Range, mark: string) => {
     for (let i = start; i < end; i++) if (chars[i] !== '\n') chars[i] = mark
@@ -76,7 +86,7 @@ const indentAt = (text: string, i: number) => text.slice(lineStart(text, i), i)
 const inside = (ranges: Range[], i: number) => ranges.some(([start, end]) => i >= start && i < end)
 
 // Display blocks, $$…$$ or \[…\], that start a line. Each becomes "$$\n…\n$$" on lines of its own.
-function displayBlocks(text: string, edits: Edit[], done: Range[]) {
+function displayBlocks(text: string, edits: Edit[], done: Range[], spans: MathSpan[]) {
   const opener = /\$\$|\\\[/g
   for (let match = opener.exec(text); match; match = opener.exec(text)) {
     const at = match.index
@@ -102,13 +112,14 @@ function displayBlocks(text: string, edits: Edit[], done: Range[]) {
     const stop = tail[1] ?? ''
     edits.push({ at, length: lineEnd(text, end) - at, text: `$$\n${indent}${inner}${stop}\n${indent}$$` })
     done.push([at, lineEnd(text, end)])
+    spans.push({ from: at, to: lineEnd(text, end), tex: `${inner}${stop}`, display: true })
     opener.lastIndex = lineEnd(text, end)
   }
 }
 
 // \[…\] in the middle of a line: math, though not on lines of its own, so remark-math's $$…$$ in text.
 // \(…\) anywhere: inline math. Neither crosses a blank line or code.
-function bracketPairs(text: string, edits: Edit[], done: Range[]) {
+function bracketPairs(text: string, edits: Edit[], done: Range[], spans: MathSpan[]) {
   const opener = /\\\(|\\\[/g
   for (let match = opener.exec(text); match; match = opener.exec(text)) {
     const at = match.index
@@ -122,6 +133,7 @@ function bracketPairs(text: string, edits: Edit[], done: Range[]) {
     const fence = match[0] === '\\(' ? '$' : '$$'
     edits.push({ at, length: end + 2 - at, text: `${fence}${body.trim()}${fence}` })
     done.push([at, end + 2])
+    spans.push({ from: at, to: end + 2, tex: body.trim(), display: false })
     opener.lastIndex = end + 2
   }
 }
@@ -133,7 +145,7 @@ const BLANK = /\n[ \t]*\n/y
 const blankAt = (text: string, i: number) => ((BLANK.lastIndex = i), BLANK.test(text))
 
 // Lone dollars: kept in pairs that read as math, escaped otherwise.
-function dollarPairs(text: string, edits: Edit[], done: Range[]) {
+function dollarPairs(text: string, edits: Edit[], done: Range[], spans: MathSpan[]) {
   const isLone = (i: number) => text[i] === '$' && text[i - 1] !== '$' && text[i + 1] !== '$' && !escaped(text, i) && !inside(done, i)
   const opens = (i: number) => /\S/.test(text[i + 1] ?? '') && !money(text, i)
   const closes = (i: number) => /\S/.test(text[i - 1] ?? '') && !/[\p{L}\p{N}]/u.test(text[i + 1] ?? '')
@@ -154,19 +166,52 @@ function dollarPairs(text: string, edits: Edit[], done: Range[]) {
       edits.push({ at: i, length: 1, text: '\\$' })
       continue
     }
+    const tex = text.slice(i + 1, pair)
+    if (!/[\uE000\uE001]/.test(tex)) spans.push({ from: i, to: pair + 1, tex, display: false })
     i = pair
   }
+}
+
+// $$…$$ that doesn't open a line (or does, with more text after its closer): remark-math reads it as math in the
+// text, needing no rewrite. Found so its inside isn't paired again, and so the editor draws it.
+function textDoubles(text: string, done: Range[], spans: MathSpan[]) {
+  const isFence = (i: number) => text.startsWith('$$', i) && text[i + 2] !== '$' && text[i - 1] !== '$' && !escaped(text, i)
+  for (let i = text.indexOf('$$'); i !== -1; i = text.indexOf('$$', i + 1)) {
+    if (inside(done, i) || !isFence(i)) continue
+    let end = -1
+    for (let j = i + 2; j < text.length; j++) {
+      if (text[j] === '\uE001' || (text[j] === '\n' && blankAt(text, j))) break
+      if (isFence(j)) {
+        end = j
+        break
+      }
+    }
+    if (end === -1) continue
+    const tex = text.slice(i + 2, end)
+    if (tex.trim() && !/[\uE000\uE001]/.test(tex)) {
+      done.push([i, end + 2])
+      spans.push({ from: i, to: end + 2, tex: tex.trim(), display: false })
+    }
+    i = end + 1
+  }
+}
+
+function scan(text: string, kept: KeptRanges) {
+  const masks = masked(text, kept)
+  const edits: Edit[] = []
+  const done: Range[] = []
+  const spans: MathSpan[] = []
+  displayBlocks(masks, edits, done, spans)
+  bracketPairs(masks, edits, done, spans)
+  textDoubles(masks, done, spans)
+  dollarPairs(masks, edits, done, spans)
+  return { edits, spans: spans.sort((a, b) => a.from - b.from) }
 }
 
 /** The text with its math written the way remark-math reads it, and every dollar that isn't math escaped. */
 export function mathText(text: string): string {
   if (!/[$\\]/.test(text)) return text
-  const scan = masked(text, keptRanges(text))
-  const edits: Edit[] = []
-  const done: Range[] = []
-  displayBlocks(scan, edits, done)
-  bracketPairs(scan, edits, done)
-  dollarPairs(scan, edits, done)
+  const { edits } = scan(text, keptRanges(text))
   if (!edits.length) return text
   edits.sort((a, b) => a.at - b.at)
   let out = ''
@@ -177,4 +222,14 @@ export function mathText(text: string): string {
     at = edit.at + edit.length
   }
   return out + text.slice(at)
+}
+
+/**
+ * The formulas in a text, by the same rules as mathText, in order: what chat draws as math, the Notes editor draws
+ * too. kept: where code, HTML and autolinks are, when the caller already knows (the editor, from its own syntax tree);
+ * otherwise the text is parsed for them.
+ */
+export function mathSpans(text: string, kept: KeptRanges = keptRanges(text)): MathSpan[] {
+  if (!/[$\\]/.test(text)) return []
+  return scan(text, kept).spans
 }
