@@ -4,6 +4,7 @@ import { type AccountStatus, type Adapter, type EngineToolSpec, type Machine, ty
 import { onJsonLines } from './jsonl.ts'
 import { processUserEnv, type UserEnv } from './user-env.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
+import { withImages } from './tool-images.ts'
 
 // Claude Code's own wording (2.1): "Unable to connect to API", but not its TLS and certificate errors, which waiting
 // won't fix; and the service shedding load in words that would otherwise read as a usage limit.
@@ -440,7 +441,7 @@ export function createClaudeCode(user: UserEnv = processUserEnv()): Adapter {
                 typeof block.content === 'string'
                   ? block.content
                   : (block.content ?? []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
-              emit({ type: 'tool.completed', toolId: block.tool_use_id, output, isError: block.is_error === true })
+              emit({ type: 'tool.completed', toolId: block.tool_use_id, output, isError: block.is_error === true, ...withImages(block.content) })
             }
             return
           case 'control_request': {

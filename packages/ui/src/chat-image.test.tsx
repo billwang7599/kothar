@@ -5,7 +5,7 @@ import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { ClientMessage } from '@kothar/core/shared'
-import { ChatImages, imageSource } from './chat-image.tsx'
+import { ChatImages, imageSource, ToolImages } from './chat-image.tsx'
 import { fileLinksChecked, forgetFileLinks } from './file-links.tsx'
 import { Markdown } from './markdown.tsx'
 
@@ -147,4 +147,24 @@ test('a click opens the image full size, with Open and Show in Finder; Esc close
   })
   // Closed, and fading out: jsdom never ends the exit animation.
   expect(dialog()?.getAttribute('data-state') ?? 'closed').toBe('closed')
+})
+
+test("a tool result's pictures show as thumbnails that open full size", () => {
+  const paths = ['/g/chats/space/tool-images/a-t1-0.png', '/g/chats/space/tool-images/a-t1-1.png']
+  act(() =>
+    root.render(
+      <LazyMotion features={domAnimation} strict>
+        <MotionConfig transition={{ duration: 0 }}>
+          <ChatImages.Provider value={{ chatId: 'space', send: (m) => sent.push(m), connected: true }}>
+            <ToolImages paths={paths} />
+          </ChatImages.Provider>
+        </MotionConfig>
+      </LazyMotion>,
+    ),
+  )
+  expect(images().map(pathOf)).toEqual(paths)
+  act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Open a-t1-1.png full size"]')!.click())
+  expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe('a-t1-1.png')
+  act(() => images()[0]!.dispatchEvent(new Event('error')))
+  expect(host.textContent).toContain('Image not found: a-t1-0.png')
 })

@@ -14,6 +14,8 @@ import { onJsonLines } from './jsonl.ts'
 import { rpcClient } from './rpc.ts'
 import { processUserEnv, type UserEnv } from './user-env.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
+import type { ToolImage } from '@kothar/extension-api'
+import { withImages } from './tool-images.ts'
 
 // Codex's own wording (0.167): reqwest's "error sending request", hyper's DNS and TCP errors, an SSE stream cut off;
 // but a content filter ending the stream isn't the connection's fault.
@@ -309,7 +311,7 @@ function toolOf(item: any): Extract<EngineEvent, { type: 'tool.started' }> | und
 const textOf = (content: unknown) =>
   (Array.isArray(content) ? content : []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join('\n')
 
-function resultOf(item: any): { output: string; isError: boolean } {
+function resultOf(item: any): { output: string; isError: boolean; images?: ToolImage[] } {
   switch (item.type) {
     case 'commandExecution':
       return { output: item.aggregatedOutput ?? '', isError: item.status !== 'completed' || (item.exitCode ?? 0) !== 0 }
@@ -320,7 +322,7 @@ function resultOf(item: any): { output: string; isError: boolean } {
     case 'mcpToolCall':
       return item.error
         ? { output: String(item.error.message ?? ''), isError: true }
-        : { output: textOf(item.result?.content), isError: item.status === 'failed' }
+        : { output: textOf(item.result?.content), isError: item.status === 'failed', ...withImages(item.result?.content) }
     case 'dynamicToolCall':
       return { output: textOf(item.contentItems?.map((c: any) => ({ type: 'text', text: c.text ?? '' }))), isError: item.success === false }
     default:

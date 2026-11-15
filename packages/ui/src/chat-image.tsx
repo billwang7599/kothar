@@ -151,6 +151,47 @@ function WebImage({ url, alt }: { url: string; alt: string }) {
   )
 }
 
+/** A tool result's pictures as small thumbnails under its row, each opening full size. */
+export function ToolImages({ paths }: { paths: string[] }) {
+  return (
+    <div className="flex flex-wrap gap-6 pl-26" data-tool-images="">
+      {paths.map((path) => (
+        <ToolThumbnail key={path} path={path} />
+      ))}
+    </div>
+  )
+}
+
+function ToolThumbnail({ path }: { path: string }) {
+  const scope = useContext(ChatImages)
+  const [open, setOpen] = useState(false)
+  const [failed, setFailed] = useState(false)
+  if (!scope) return null
+  const name = path.split('/').at(-1) ?? path
+  if (failed) return <span className={NOTE}>Image not found: {name}</span>
+  const url = windowChatImageUrl(scope.chatId, path)
+  return (
+    <>
+      <button
+        type="button"
+        className="block cursor-zoom-in rounded-lg focus-visible:outline-2"
+        aria-label={`Open ${name} full size`}
+        onClick={() => setOpen(true)}
+      >
+        <img
+          src={url}
+          alt={name}
+          title={name}
+          decoding="async"
+          className="block h-64 max-w-160 rounded-lg border bg-raised object-cover"
+          onError={() => setFailed(true)}
+        />
+      </button>
+      <ImageLightbox open={open} onOpenChange={setOpen} url={url} title={name} path={path} />
+    </>
+  )
+}
+
 /** A picture full size over the window. With path (a file in the chat's places), buttons open it or show it in Finder. */
 export function ImageLightbox(props: {
   open: boolean

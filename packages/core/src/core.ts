@@ -56,6 +56,7 @@ import { placeAccess, placesOf } from './folder-modes.ts'
 import { extensionPicture, extensionStorageDir } from './extension-files.ts'
 import { openExtensionHosts } from './extension-host.ts'
 import { appendEntry, openSettings, saveChatFile } from './chat-store.ts'
+import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
 
@@ -64,7 +65,7 @@ export { CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './i
 
 export const STOP_GRACE_MS = 60_000
 // A chat's own files, which extensions' chat storage can't touch.
-const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, 'attachments']
+const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, 'attachments', TOOL_IMAGES_DIR]
 
 
 export type Core = ReturnType<typeof openCore>

@@ -51,6 +51,7 @@ import {
   type SessionOptions,
   type Upload,
 } from './shared.ts'
+import { saveToolImages } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
 
 // Where the Machine can't sandbox (Linux, Windows for now), a chat runs only once the user allows edits anywhere.
@@ -846,8 +847,16 @@ export function openTurns(deps: TurnDeps) {
         lostChat(chat, error)
       }
     }
-    const handleEvent = (event: EngineEvent) => {
+    const handleEvent = (sent: EngineEvent) => {
       if (chat.session !== ref.session) return
+      // A tool result's pictures go to the chat's folder first, so extensions, the log and the window get paths.
+      const event: EngineEvent =
+        sent.type === 'tool.completed' && sent.images
+          ? (({ images, ...rest }) => {
+              const saved = saveToolImages(chat.dir, sent.toolId, images ?? [])
+              return saved.length ? { ...rest, images: saved } : rest
+            })(sent)
+          : sent
       const at = now().toISOString()
       for (const extension of watchersOf('onEvent')) callExtension(extension, () => extension.onEvent!(detailOf(chat), event, contextOf(extension)))
       if (event.type === 'tools.listed') return deps.toolsListed?.(engine, event.names)

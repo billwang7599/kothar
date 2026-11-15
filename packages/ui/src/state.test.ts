@@ -351,6 +351,21 @@ describe('reduce', () => {
     expect(items(state)[0]).toMatchObject({ toolId: 't1', state: 'stopped', output: 'Cut short' })
   })
 
+  it("keeps a tool result's saved pictures as paths on its row", () => {
+    const state = run(
+      snapshot([chat('a')]),
+      entry('a', { type: 'tool.started', toolId: 't1', name: 'browser_screenshot', kind: 'other', summary: '', input: {} }),
+      entry('a', {
+        type: 'tool.completed',
+        toolId: 't1',
+        output: 'Screenshot',
+        isError: false,
+        images: [{ mimeType: 'image/png', path: '/g/chats/a/tool-images/x-t1-0.png' }, { mimeType: 'image/png', data: 'AAAA' }],
+      }),
+    )
+    expect(items(state)[0]).toMatchObject({ state: 'done', images: ['/g/chats/a/tool-images/x-t1-0.png'] })
+  })
+
   it('appends entries to the right chat', () => {
     const state = run(
       snapshot([chat('a'), chat('b')]),
