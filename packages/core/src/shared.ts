@@ -725,9 +725,9 @@ export type ClientMessage =
   // Which of the paths a chat's messages mention exist in its folders, checkouts, work folder or garage folder, as
   // written (relative or absolute, without :line). Replies files.checked.
   | { type: 'files.check'; chatId: string; paths: string[] }
-  // Opens a path files.checked found: with the editor in settings (at line and col where it can), or a terminal at
-  // its folder. Errors come back as an error toast.
-  | { type: 'file.open'; chatId: string; path: string; line?: number; col?: number; in?: 'editor' | 'terminal' }
+  // Opens a path files.checked found: with the editor in settings (at line and col where it can), with the system's
+  // default app ('app', for a picture), or a terminal at its folder. Errors come back as an error toast.
+  | { type: 'file.open'; chatId: string; path: string; line?: number; col?: number; in?: 'editor' | 'app' | 'terminal' }
   // 'system' for the system's default app, 'custom' for command, or one of WorkFolder.editors by id.
   | { type: 'editor.set'; editor: string; command?: string }
 

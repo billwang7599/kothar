@@ -1134,6 +1134,11 @@ function assembleCore(options: {
       const sent = chat.entries.flatMap((e) => (e.type === 'user.message' ? (e.attachments ?? []) : []))
       return [...sent, ...chat.queue.flatMap((q) => q.attachments ?? [])].find((a) => a.path === path)
     },
+    // A picture a chat's reply shows inline (file-links.ts image); undefined for an unknown or hidden chat.
+    chatImage(chatId: string, path: string) {
+      const chat = chats.get(chatId)
+      return chat && shown(chat) ? fileLinks.image(chat, path) : undefined
+    },
     // A picture in one of an extension's own folders, for the window to show (extension-files.ts); undefined if it may
     // not be served, or the extension is unknown or off.
     extensionFile(extensionId: string, path: string) {

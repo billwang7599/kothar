@@ -82,7 +82,8 @@ export function editorLabel(workFolder: Pick<WorkFolder, 'editor' | 'editors'>) 
   return name ? `Open in ${name}` : 'Open with the default app'
 }
 
-function useFound(scope: FileLinkScope | undefined, path: string) {
+/** The absolute path the core found for path in scope's chat, once it answers; asks if it hasn't been asked. */
+export function useFound(scope: Pick<FileLinkScope, 'chatId' | 'send'> | undefined, path: string) {
   const found = useSyncExternalStore(subscribe, () => (scope ? answers.get(keyOf(scope.chatId, path))?.path : undefined))
   const { chatId, send } = scope ?? {}
   useEffect(() => {

@@ -1,9 +1,10 @@
 import { memo } from 'react'
-import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import type { PluggableList } from 'unified'
+import { keepImageSrc, MarkdownImage } from './chat-image.tsx'
 import { CopyBlock } from './controls.tsx'
 import { FileLink } from './file-links.tsx'
 import { codeRef, fileRefsIn, type FileRef } from './file-refs.ts'
@@ -71,8 +72,13 @@ type HastNode = NonNullable<ExtraProps['node']>['children'][number]
 const textOf = (node: HastNode): string =>
   'value' in node ? node.value : 'children' in node ? node.children.map(textOf).join('') : ''
 
+// An image's src stays as written (a local path or file:// would otherwise be dropped): MarkdownImage decides what
+// it may show. Every other URL is cleaned as usual.
+const urlTransform = keepImageSrc(defaultUrlTransform)
+
 const components: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  img: ({ src, alt }) => (typeof src === 'string' && src ? <MarkdownImage src={src} alt={alt ?? ''} /> : null),
   span: ({ node: _node, ...props }) => {
     const { 'data-file-ref': path, 'data-line': line, 'data-col': col, ...rest } = props as typeof props & Record<`data-${string}`, unknown>
     if (typeof path !== 'string') return <span {...rest} />
@@ -94,7 +100,7 @@ const components: Components = {
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className: string }) {
   return (
     <div className={`markdown ${className}`}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components} urlTransform={urlTransform}>
         {mathText(text)}
       </ReactMarkdown>
     </div>
