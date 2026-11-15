@@ -1,4 +1,6 @@
 @import 'tailwindcss' source('.');
+/* KaTeX's own styles and fonts, bundled (nothing loads from the web), in the base layer so the math rules below win. */
+@import 'katex/dist/katex.min.css' layer(base);
 
 :root {
   --text-xs: 11px;
@@ -352,6 +354,26 @@
     font: inherit;
     background: none;
     padding: 0;
+  }
+
+  /* Math (KaTeX): a wide formula scrolls on its own rather than widening the chat column. Colours come from the text's. */
+  .markdown .katex {
+    font-size: 1.1em;
+  }
+
+  .markdown .katex-display {
+    margin: 0 0 10px;
+    padding: 2px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .markdown .katex-display > .katex {
+    white-space: nowrap;
+  }
+
+  .markdown .katex-error {
+    font: 0.89em var(--mono);
   }
 
   .markdown blockquote {

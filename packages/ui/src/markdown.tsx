@@ -1,9 +1,13 @@
 import { memo } from 'react'
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
+import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import type { PluggableList } from 'unified'
 import { CopyBlock } from './controls.tsx'
 import { FileLink } from './file-links.tsx'
 import { codeRef, fileRefsIn, type FileRef } from './file-refs.ts'
+import { mathText } from './math.ts'
 
 // Agents often write `<br>` for a line break, mostly inside table cells where Markdown has no other way to break a
 // line. Raw HTML stays text (agent output is untrusted), so turn just that one tag into a real break. Code spans and
@@ -55,7 +59,12 @@ const markRefs = (node: MdNode) => {
 }
 const remarkFileRefs = () => markRefs
 
-const remarkPlugins = [remarkGfm, remarkBr, remarkFileRefs]
+// Math nodes are their own type, so file refs never reach inside a formula. mathText (math.ts) has already escaped
+// every $ that isn't math, so a lone $ pair is safe to read as math.
+const remarkPlugins: PluggableList = [remarkGfm, [remarkMath, { singleDollarTextMath: true }], remarkBr, remarkFileRefs]
+// A formula KaTeX can't read shows its source in the theme's red rather than breaking the message. trust stays off:
+// no \href, \url or \includegraphics from agent output.
+const rehypePlugins: PluggableList = [[rehypeKatex, { throwOnError: false, errorColor: 'var(--red)', strict: 'ignore' }]]
 
 const numberOf = (value: unknown) => (value === undefined || value === '' ? undefined : Number(value) || undefined)
 
@@ -86,8 +95,8 @@ const components: Components = {
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className: string }) {
   return (
     <div className={`markdown ${className}`}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-        {text}
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+        {mathText(text)}
       </ReactMarkdown>
     </div>
   )

@@ -92,6 +92,9 @@ What works today:
   your editor at its line (Settings → Work folder → Open files with: the system's default app, VS Code, Cursor,
   Windsurf, Zed, Sublime Text or a command of your own); right-click opens a terminal at its folder, shows it in
   Finder or copies the path.
+- **Math:** replies and extension Markdown render LaTeX with KaTeX, bundled so nothing loads from the web: `$$…$$` and
+  `\[…\]` as blocks, `$…$` and `\(…\)` inline. Dollar amounts ("$5 and $10") stay text, a block still streaming stays
+  text until it closes, and a formula KaTeX can't read shows its source in red. Notes' editor doesn't render math yet.
 - **Setups, themes, the marketplace,** and the built-in extensions in `extensions/`: Artifacts, Browser, Git, Home,
   Inspector, MCP servers, Memory, Notes, Pins, Plan, Processes, Reconnect, Skills, Deep Research and Account rotation. MCP servers connects
   GitHub, Linear, Notion and other MCP servers to every engine through Kothar, which is their only client, so keys stay in Kothar
