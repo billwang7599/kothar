@@ -27,6 +27,19 @@ export function attachmentUrl(socketUrl: string, chatId: string, path: string) {
   return url.href
 }
 
+/** Where a picture a chat's reply shows is served (core.chatImage); the core finds the path in the chat's places. */
+export function chatImageUrl(socketUrl: string, chatId: string, path: string) {
+  const url = new URL(socketUrl)
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
+  url.pathname = `/chats/${encodeURIComponent(chatId)}/image`
+  url.searchParams.set('path', path)
+  return url.href
+}
+
+/** The URL of a picture a chat's reply shows, from this window (its core and token). */
+export const windowChatImageUrl = (chatId: string, path: string) =>
+  chatImageUrl(coreUrl(import.meta.env, location, readToken('', sessionStorage)), chatId, path)
+
 /** Where a picture in an extension's own folders is served (core.extensionFile); the core checks the path. */
 export function extensionFileUrl(socketUrl: string, extension: string, path: string) {
   const url = new URL(socketUrl)

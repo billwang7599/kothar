@@ -1,4 +1,6 @@
 @import 'tailwindcss' source('.');
+/* KaTeX's own styles and fonts, bundled (nothing loads from the web), in the base layer so the math rules below win. */
+@import 'katex/dist/katex.min.css' layer(base);
 
 :root {
   --text-xs: 11px;
@@ -354,6 +356,26 @@
     padding: 0;
   }
 
+  /* Math (KaTeX): a wide formula scrolls on its own rather than widening the chat column. Colours come from the text's. */
+  .markdown .katex {
+    font-size: 1.1em;
+  }
+
+  .markdown .katex-display {
+    margin: 0 0 10px;
+    padding: 2px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .markdown .katex-display > .katex {
+    white-space: nowrap;
+  }
+
+  .markdown .katex-error {
+    font: 0.89em var(--mono);
+  }
+
   .markdown blockquote {
     padding-left: 12px;
     border-left: 2px solid var(--border);
@@ -590,6 +612,31 @@
 .markdown-editor .cm-md-table th {
   font-weight: 600;
   background: var(--raised);
+}
+/* Math (KaTeX), as in chat: a wide formula scrolls on its own, colours come from the text's. */
+.markdown-editor .cm-md-math {
+  cursor: text;
+}
+.markdown-editor .cm-md-math .katex {
+  font-size: 1.1em;
+}
+.markdown-editor .cm-md-math-block {
+  padding: 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.markdown-editor .cm-md-math-block .katex-display {
+  margin: 0;
+}
+.markdown-editor .cm-md-math-block .katex-display > .katex {
+  white-space: nowrap;
+}
+.markdown-editor .cm-md-math .katex-error {
+  font: 0.89em var(--mono);
+}
+.markdown-editor .cm-md-math-source {
+  font-family: var(--mono);
+  font-size: 0.92em;
 }
 .markdown-editor .cm-tok-keyword {
   color: var(--accent);

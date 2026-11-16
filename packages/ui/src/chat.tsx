@@ -46,6 +46,7 @@ import { Composer } from './chat/composer.tsx'
 import { Dots, Row } from './chat/parts.tsx'
 import { ItemView, StreamingText } from './chat/transcript-items.tsx'
 import { editorLabel, FileLinks } from './file-links.tsx'
+import { ChatImages } from './chat-image.tsx'
 
 const INTERRUPT_SEND_TEXT = 'Interrupt and send now?'
 const FORCE_STOP_TEXT = 'Force stop? The engine and any command it started get a few seconds to exit, then are killed.'
@@ -137,6 +138,8 @@ export function Chat(props: ChatProps) {
   const reportsShown = useReportsShown(chat.id, ...line.slice(1).map((c) => c.id))
   const editor = editorLabel(workFolder)
   const fileLinks = useMemo(() => ({ chatId: chat.id, send, connected, editor }), [chat.id, send, connected, editor])
+  // Kept apart from file links, which a reply still streaming turns off: a picture shows once its ![..](..) closes.
+  const images = useMemo(() => ({ chatId: chat.id, send, connected }), [chat.id, send, connected])
   const viewOnly = !!chat.worker
   // Workers never ask in their own view: their requests wait in the space above them.
   const requests = viewOnly ? [] : workerRequests(props.chats, chat.id)
@@ -383,6 +386,7 @@ export function Chat(props: ChatProps) {
           onKeyDown={userScrolls}
         >
           <div className="mx-auto flex w-full max-w-column flex-1 flex-col gap-10" ref={contentRef}>
+            <ChatImages.Provider value={images}>
             <FileLinks.Provider value={fileLinks}>
             <StepsOpen.Provider value={stepsShown}>
               <ReportsOpen.Provider value={reportsShown}>
@@ -444,6 +448,7 @@ export function Chat(props: ChatProps) {
               </ReportsOpen.Provider>
             </StepsOpen.Provider>
             </FileLinks.Provider>
+            </ChatImages.Provider>
           </div>
         </div>
         <div ref={bottomRef} className="relative shrink-0 px-24 pb-16">

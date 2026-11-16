@@ -2,6 +2,7 @@ import type { McpServer } from '@kothar/extension-api'
 import type { EngineEvent, EngineProcess, ImageInput, Session, ThinkingLevel, ToolKind } from '../shared.ts'
 import { type RpcError, rpcClient } from './rpc.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
+import { withImages } from './tool-images.ts'
 
 // The Agent Client Protocol (agentclientprotocol.com): JSON-RPC 2.0 over an agent's stdio, one message per line. This
 // module is the protocol half any ACP engine needs: one session mapped to Kothar's events, over the JSON-RPC client in
@@ -215,7 +216,8 @@ export function startAcpSession(
         tools.delete(call.id)
         started.delete(call.id)
         const output = textOf(update.content) || textOf(update.rawOutput?.content) || stringOf(update.rawOutput?.output)
-        emit({ type: 'tool.completed', toolId: call.id, output, isError: update.status === 'failed' })
+        const images = withImages(update.content)
+        emit({ type: 'tool.completed', toolId: call.id, output, isError: update.status === 'failed', ...(images.images ? images : withImages(update.rawOutput?.content)) })
       }
     }
   }

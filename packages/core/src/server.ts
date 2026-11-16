@@ -23,6 +23,9 @@ const CONTENT_TYPES: Record<string, string> = {
 }
 
 const ATTACHMENT_PATH = /^\/chats\/([^/]+)\/attachments\/([^/]+)$/
+const CHAT_IMAGE_PATH = /^\/chats\/([^/]+)\/image$/
+// Why a chat's image wasn't served, as the status the window reads (file-links.ts ChatImageRefusal).
+const REFUSED_STATUS = { 'not-found': 404, 'not-image': 415, 'too-big': 413 } as const
 const EXTENSION_FILE_PATH = /^\/extensions\/([a-z0-9-]+)\/files$/
 
 export async function startServer(options: {
@@ -66,6 +69,31 @@ export async function startServer(options: {
         'access-control-allow-origin': uiOrigin,
         ...(!inline && { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(found.name)}` }),
       })
+      return void createReadStream(found.path).pipe(response)
+    }
+    // A picture a chat's reply shows inline (core.chatImage): only from the chat's own places, only picture types.
+    const chatImage = url.pathname.match(CHAT_IMAGE_PATH)
+    if (chatImage) {
+      if (request.method !== 'GET' && request.method !== 'HEAD') return response.writeHead(405).end()
+      if (!sameToken(url.searchParams.get('token') ?? '', token)) return response.writeHead(401).end()
+      let found
+      try {
+        found = core.chatImage(decodeURIComponent(chatImage[1]!), url.searchParams.get('path') ?? '')
+      } catch {}
+      const cors = { 'access-control-allow-origin': uiOrigin }
+      if (!found) return response.writeHead(404, cors).end()
+      if ('error' in found) return response.writeHead(REFUSED_STATUS[found.error], cors).end()
+      response.writeHead(200, {
+        'content-type': found.mimeType,
+        'content-length': String(found.size),
+        'x-content-type-options': 'nosniff',
+        // An SVG opened on its own runs nothing and loads nothing; through <img>, as the window shows it, it never
+        // could. The UI shares this origin in the desktop app.
+        'content-security-policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+        'cache-control': 'no-cache',
+        ...cors,
+      })
+      if (request.method === 'HEAD') return response.end()
       return void createReadStream(found.path).pipe(response)
     }
     // A picture from an extension's own folders (core.extensionFile), such as one pasted into a note.

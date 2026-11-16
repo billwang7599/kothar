@@ -63,7 +63,8 @@ export type EngineEvent =
       path?: string
     }
   // stopped: the call was cut short and the engine never reported its result (shown as stopped, not done or failed).
-  | { type: 'tool.completed'; toolId: string; output: string; isError: boolean; stopped?: boolean }
+  // images: pictures the result carries (a screenshot, a picture the agent read), shown as thumbnails on the row.
+  | { type: 'tool.completed'; toolId: string; output: string; isError: boolean; stopped?: boolean; images?: ToolImage[] }
   | {
       type: 'permission.requested'
       requestId: string
@@ -130,6 +131,10 @@ export type SpaceDetail = {
   folders: { path: string; git: boolean }[]
   checkouts: Checkout[]
 }
+
+// A picture in a tool's result. An adapter sends it as data (base64); the core saves it in the chat's folder
+// (tool-images/) and passes on only its path, so the log, the window and extensions never carry the bytes.
+export type ToolImage = { mimeType: string; data?: string; path?: string }
 
 export type Attachment = { name: string; path: string; mimeType: string; size: number }
 

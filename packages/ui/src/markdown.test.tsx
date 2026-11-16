@@ -118,3 +118,61 @@ test('a copy that fails says so on the button instead of throwing', async () => 
     expect(label()).toBe("Couldn't copy")
   }
 })
+
+test('renders display math in both styles', () => {
+  for (const text of ['$$\nx^2 + y^2\n$$', '\\[\nx^2 + y^2\n\\]', '$$x^2 + y^2$$']) {
+    const html = render(text)
+    expect(html).toContain('class="katex-display"')
+    expect(html).not.toContain('$$')
+  }
+})
+
+test('renders inline math in both styles', () => {
+  for (const text of ['so $x^2$ grows', 'so \\(x^2\\) grows']) {
+    const html = render(text)
+    expect(html).toContain('class="katex"')
+    expect(html).not.toContain('katex-display')
+    expect(html).toContain('so ')
+    expect(html).toContain(' grows')
+  }
+})
+
+test('keeps the underscores in a formula rather than reading them as italics', () => {
+  const html = render('$$\n{l:r} = \\frac{1}{r_{wp}} \\sum_{i} a_i b_i\n$$')
+  expect(html).not.toContain('<em>')
+  // The MathML copy keeps the TeX source.
+  expect(html).toContain('r_{wp}')
+})
+
+test('leaves dollar amounts as text', () => {
+  const html = render('It costs $5 and $10, or $1,200.50 in total.')
+  expect(html).not.toContain('katex')
+  expect(html).toContain('It costs $5 and $10, or $1,200.50 in total.')
+})
+
+test('leaves math in code as code', () => {
+  const html = render('Run `echo $x$` then:\n\n```\n$$\na_1\n$$\n```')
+  expect(html).not.toContain('katex')
+  expect(html).toContain('<code>echo $x$</code>')
+  expect(html).toContain('$$\na_1\n$$')
+})
+
+test('a $$ block still streaming stays text until it closes', () => {
+  const partial = render('The ratio:\n\n$$\n\\frac{1}{r_')
+  expect(partial).not.toContain('katex')
+  expect(partial).toContain('$$')
+  expect(render('The ratio:\n\n$$\n\\frac{1}{r_{wp}}\n$$')).toContain('katex-display')
+})
+
+test('shows a formula KaTeX cannot read as its source, in red, without throwing', () => {
+  const html = render('$$\n\\frac{1}{\n$$\n\nand $\\notacommand{x}$ after')
+  expect(html).toContain('katex-error')
+  expect(html).toContain('var(--red)')
+  expect(html).toContain('\\notacommand{x}')
+  expect(html).toContain('after')
+})
+
+test('never runs \\href from a formula', () => {
+  const html = render('$\\href{https://example.com}{x}$')
+  expect(html).not.toContain('href="https://example.com"')
+})

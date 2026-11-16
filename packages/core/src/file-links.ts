@@ -3,7 +3,8 @@
 // work folder and files, and its folder in the garage (attachments). Anything else is refused, checked through
 // symlinks, so a link can't point the user's apps anywhere else.
 import { existsSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Chat } from './chat.ts'
 import { editorLaunch, type FileSpot } from './editors.ts'
 import { realOr } from './folder-access.ts'
@@ -17,6 +18,24 @@ const CHECK_TTL_MS = 10_000
 export const MAX_CHECKED = 200
 const MAX_PATH = 1024
 const OPEN_TIMEOUT_MS = 15_000
+
+// Pictures a reply may show inline (GET /chats/<id>/image?path=…, server.ts), by extension. SVG is served under a
+// CSP that runs nothing, and the window only ever shows it through <img>, where scripts never run anyway.
+export const CHAT_IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+}
+export const MAX_CHAT_IMAGE_BYTES = 25 * 1024 * 1024
+
+/** Why a chat's image wasn't served: each becomes its own HTTP status, which the window turns into a message. */
+export type ChatImageRefusal = 'not-found' | 'not-image' | 'too-big'
+export type ChatImage = { path: string; mimeType: string; size: number } | { error: ChatImageRefusal }
 
 export type FileLinkDeps = {
   home: string
@@ -99,12 +118,13 @@ export function openFileLinks(deps: FileLinkDeps) {
     typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
 
   // Opens a file (or folder) with the editor in settings, at its line where the editor can.
-  const openFile = async (chat: Chat, rawPath: unknown, rawLine?: unknown, rawCol?: unknown) => {
+  // app: 'default' opens it with the system's default app instead (a picture in Preview), whatever the setting.
+  const openFile = async (chat: Chat, rawPath: unknown, rawLine?: unknown, rawCol?: unknown, app?: 'default') => {
     const file = checked(chat, rawPath)
     const line = lineOf(rawLine)
     const col = line === undefined ? undefined : lineOf(rawCol)
     const spot: FileSpot = { file, ...(line !== undefined && { line }), ...(col !== undefined && { col }) }
-    const { choice, command } = deps.editor()
+    const { choice, command } = app === 'default' ? { choice: undefined, command: undefined } : deps.editor()
     const launch = editorLaunch(spot, { choice, command, platform, home, exists })
     const { code, stderr } = await deps.machine
       .run(launch.command, launch.args, { cwd: dirname(file), timeoutMs: OPEN_TIMEOUT_MS })
@@ -121,5 +141,35 @@ export function openFileLinks(deps: FileLinkDeps) {
     await deps.openTerminalAt(statSync(path).isDirectory() ? path : dirname(path))
   }
 
-  return { checkPaths, openFile, openTerminalAtFile }
+  // A picture a reply shows inline: an absolute path, ~/…, file://… or a path relative to the chat's places, found
+  // as a file link is. Only inside the chat's places, through symlinks, and only picture types (by the real file's
+  // name too, so a link named .png can't serve another kind of file). Outside the chat's places reads as not found,
+  // so the answer doesn't tell what exists elsewhere.
+  const image = (chat: Chat, rawPath: unknown): ChatImage => {
+    let path = typeof rawPath === 'string' ? rawPath.trim() : ''
+    if (/^file:\/\//i.test(path)) {
+      try {
+        path = fileURLToPath(path)
+      } catch {
+        return { error: 'not-found' }
+      }
+    }
+    const mimeType = CHAT_IMAGE_TYPES[extname(path).toLowerCase()]
+    if (!mimeType) return { error: 'not-image' }
+    const found = find(chat, path)
+    if (!found) return { error: 'not-found' }
+    const real = realOr(found)
+    if (CHAT_IMAGE_TYPES[extname(real).toLowerCase()] !== mimeType) return { error: 'not-image' }
+    let stat
+    try {
+      stat = statSync(real)
+    } catch {
+      return { error: 'not-found' }
+    }
+    if (!stat.isFile()) return { error: 'not-found' }
+    if (stat.size > MAX_CHAT_IMAGE_BYTES) return { error: 'too-big' }
+    return { path: real, mimeType, size: stat.size }
+  }
+
+  return { checkPaths, openFile, openTerminalAtFile, image }
 }

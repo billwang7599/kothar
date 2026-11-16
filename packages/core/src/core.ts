@@ -56,6 +56,7 @@ import { placeAccess, placesOf } from './folder-modes.ts'
 import { extensionPicture, extensionStorageDir } from './extension-files.ts'
 import { openExtensionHosts } from './extension-host.ts'
 import { appendEntry, openSettings, saveChatFile } from './chat-store.ts'
+import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
 
@@ -64,7 +65,7 @@ export { CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './i
 
 export const STOP_GRACE_MS = 60_000
 // A chat's own files, which extensions' chat storage can't touch.
-const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, 'attachments']
+const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, 'attachments', TOOL_IMAGES_DIR]
 
 
 export type Core = ReturnType<typeof openCore>
@@ -1133,6 +1134,11 @@ function assembleCore(options: {
       const path = join(attachmentsDirOf(chat), file)
       const sent = chat.entries.flatMap((e) => (e.type === 'user.message' ? (e.attachments ?? []) : []))
       return [...sent, ...chat.queue.flatMap((q) => q.attachments ?? [])].find((a) => a.path === path)
+    },
+    // A picture a chat's reply shows inline (file-links.ts image); undefined for an unknown or hidden chat.
+    chatImage(chatId: string, path: string) {
+      const chat = chats.get(chatId)
+      return chat && shown(chat) ? fileLinks.image(chat, path) : undefined
     },
     // A picture in one of an extension's own folders, for the window to show (extension-files.ts); undefined if it may
     // not be served, or the extension is unknown or off.

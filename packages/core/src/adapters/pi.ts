@@ -3,6 +3,7 @@ import { type Adapter, type EngineToolSpec, type Sandbox, type SessionOptions, t
 import { onJsonLines } from './jsonl.ts'
 import { processUserEnv, type UserEnv } from './user-env.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
+import { withImages } from './tool-images.ts'
 
 // pi's own wording (pi-ai 1.1): a provider stream cut off ("Anthropic stream ended before message_stop").
 export const PI_ERRORS: EngineErrors = { network: /stream ended (?:without|before)/i }
@@ -251,7 +252,7 @@ export function createPi(user: UserEnv = processUserEnv()): Adapter {
             return
           }
           case 'tool_execution_end':
-            emit({ type: 'tool.completed', toolId: msg.toolCallId, output: textOf(msg.result?.content), isError: msg.isError === true })
+            emit({ type: 'tool.completed', toolId: msg.toolCallId, output: textOf(msg.result?.content), isError: msg.isError === true, ...withImages(msg.result?.content) })
             return
           case 'agent_settled':
             // An abort during a tool call ends the next message with stopReason "error", so `aborted` wins.

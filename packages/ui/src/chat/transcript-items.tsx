@@ -7,6 +7,7 @@ import { NoteView } from './note-view.tsx'
 import { Chevron, CopyBlock, CopyButton, ErrorText, MOTION } from '../controls.tsx'
 import { LinkedText, NoFileLinks } from '../file-links.tsx'
 import { Markdown } from '../markdown.tsx'
+import { ToolImages } from '../chat-image.tsx'
 import { UserText } from '../lists.tsx'
 import { useReveal, type RevealFrom } from '../smooth.ts'
 import { openReportCard, reportCardKey, ReportsOpen, useReportCardChoice } from '../steps.ts'
@@ -314,6 +315,8 @@ export function ItemView(props: ItemProps) {
                   <Dots label="running" />
                 ) : item.state === 'waiting' ? (
                   'Waiting for approval…'
+                ) : item.images?.length ? (
+                  'No text output'
                 ) : (
                   'No output'
                 ))}
@@ -321,10 +324,18 @@ export function ItemView(props: ItemProps) {
           </CopyBlock>
         </Row>
       )
-      if (item.permission?.outcome !== 'pending') return row
+      const shown = item.images?.length ? (
+        <div className="flex flex-col gap-4">
+          {row}
+          <ToolImages paths={item.images} />
+        </div>
+      ) : (
+        row
+      )
+      if (item.permission?.outcome !== 'pending') return shown
       return (
         <div className="flex flex-col gap-6">
-          {row}
+          {shown}
           <PermissionPrompt permission={item.permission} {...promptProps} />
         </div>
       )

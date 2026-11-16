@@ -62,6 +62,8 @@ export type Item =
       summary: string
       state: 'running' | 'waiting' | 'done' | 'error' | 'stopped'
       output: string
+      // Pictures the result carried, saved in the chat's folder: their paths.
+      images?: string[]
       permission?: Permission
     }
   | ({ kind: 'permission' } & Permission)
@@ -252,7 +254,14 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
     case 'tool.completed':
       return items.map((i) =>
         i.kind === 'tool' && i.toolId === entry.toolId
-          ? { ...i, state: entry.stopped ? 'stopped' : entry.isError ? 'error' : 'done', output: entry.output }
+          ? {
+              ...i,
+              state: entry.stopped ? 'stopped' : entry.isError ? 'error' : 'done',
+              output: entry.output,
+              ...(entry.images?.some((image) => image.path) && {
+                images: entry.images.flatMap((image) => (image.path ? [image.path] : [])),
+              }),
+            }
           : i,
       )
     case 'permission.requested': {

@@ -414,7 +414,7 @@ export function openProtocol(deps: ProtocolDeps) {
       const opened =
         message.in === 'terminal'
           ? deps.fileLinks.openTerminalAtFile(chat, message.path)
-          : deps.fileLinks.openFile(chat, message.path, message.line, message.col)
+          : deps.fileLinks.openFile(chat, message.path, message.line, message.col, message.in === 'app' ? 'default' : undefined)
       return void opened.catch((error) => reply({ type: 'error', message: messageOf(error) }))
     },
   } satisfies Handlers
