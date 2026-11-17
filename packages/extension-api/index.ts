@@ -670,8 +670,11 @@ export type ExtensionJson = string | number | boolean | null | ExtensionJson[] |
 export type ExtensionListItem = {
   key: string
   label: string
-  // A second, quieter line or column.
+  // A second, quieter column at the end of the row, for something short such as a count or a status. Long text is cut
+  // (whole on hover); use description for a sentence.
   detail?: string
+  // A sentence or two under the label, such as what a catalog entry does. Wraps to two lines, whole on hover.
+  description?: string
   // A live time since this moment (epoch ms), such as an uptime, in place of detail. The UI ticks it itself, so the
   // extension needn't redraw the panel to keep it current. Shown as 5s, 2m 5s, 1h 2m, 1d 1h.
   since?: number

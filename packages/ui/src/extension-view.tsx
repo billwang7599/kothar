@@ -310,30 +310,49 @@ function List({ node, act }: { node: Extract<ExtensionView, { type: 'list' }>; a
   return (
     <ul className="flex flex-col" aria-label={node.label} onKeyDown={moveAlong}>
       {node.items.map((item) => {
+        // Label and badges share the first line (the badges wrap under it when the row is narrow); the excerpt and the
+        // description sit below. Nothing in a row keeps its width, so a long text is cut or wrapped, never pushed past
+        // the row's end over the buttons after it.
         const body = (
           <>
-            {item.dot && <span className={`size-7 shrink-0 rounded-full ${DOTS[item.dot]}`} data-tone={item.dot} />}
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className={`min-w-0 truncate ${item.mono ? 'font-mono text-xs' : ''}`}>
-                <Marked text={item.label} marks={item.marks} />
+            {item.dot && <span className={`size-7 shrink-0 self-start mt-7 rounded-full ${DOTS[item.dot]}`} data-tone={item.dot} />}
+            <span className="flex min-w-0 flex-1 flex-col gap-2">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-4" data-row-head>
+                <span className={`min-w-0 max-w-full truncate ${item.mono ? 'font-mono text-xs' : ''}`}>
+                  <Marked text={item.label} marks={item.marks} />
+                </span>
+                {item.badges?.length ? (
+                  <span className="flex min-w-0 flex-wrap items-center gap-4" data-badges>
+                    <Badges badges={item.badges} />
+                  </span>
+                ) : null}
               </span>
               {item.excerpt && (
                 <span className="min-w-0 truncate text-xs text-muted" data-excerpt>
                   <Marked text={item.excerpt.text} marks={item.excerpt.marks} />
                 </span>
               )}
+              {item.description && (
+                <span className="line-clamp-2 min-w-0 text-sm text-muted [overflow-wrap:anywhere]" title={item.description} data-description>
+                  {item.description}
+                </span>
+              )}
             </span>
             {item.since !== undefined ? (
-              <Elapsed since={item.since} className="shrink-0 font-mono text-xs text-faint" />
+              <Elapsed since={item.since} className="shrink-0 self-start mt-2 font-mono text-xs text-faint" />
             ) : (
-              item.detail && <span className="shrink-0 font-mono text-xs text-faint">{item.detail}</span>
+              item.detail && (
+                <span className="min-w-0 max-w-[45%] shrink self-start mt-2 truncate font-mono text-xs text-faint" title={item.detail} data-detail>
+                  {item.detail}
+                </span>
+              )
             )}
-            <Badges badges={item.badges} />
           </>
         )
         const row = 'flex w-full min-w-0 items-center gap-8 rounded px-6 py-4 text-left'
+        const actions = item.button || item.link
         return (
-          <li key={item.key} className="flex min-w-0 items-center gap-8">
+          <li key={item.key} className="flex min-w-0 items-start gap-8">
             <div className="flex min-w-0 flex-1 flex-col">
               {/* The hint goes on the row itself, so a row with one still takes the full width. */}
               <RowHint hint={item.hint}>
@@ -351,16 +370,15 @@ function List({ node, act }: { node: Extract<ExtensionView, { type: 'list' }>; a
                 )}
               </RowHint>
             </div>
-            {item.button && <RowButton button={item.button} act={act} />}
-            {item.link && (
-              <a
-                className="shrink-0 font-mono text-xs text-accent hover:underline"
-                href={item.link.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {item.link.text}
-              </a>
+            {actions && (
+              <span className="flex shrink-0 items-center gap-8 pt-2" data-row-actions>
+                {item.button && <RowButton button={item.button} act={act} />}
+                {item.link && (
+                  <a className="text-xs text-accent hover:underline" href={item.link.url} target="_blank" rel="noreferrer">
+                    {item.link.text}
+                  </a>
+                )}
+              </span>
             )}
           </li>
         )
