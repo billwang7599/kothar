@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "checked": "2026-11-12",
+  "checked": "2026-11-17",
   "servers": [
     {
       "id": "github",
@@ -162,6 +162,106 @@
       "transport": "http",
       "url": "https://mcp.exa.ai/mcp",
       "auth": { "kinds": ["none"] }
+    },
+    {
+      "id": "zapier",
+      "name": "Zapier",
+      "description": "Actions in thousands of apps through your Zapier account, such as Google Drive, Gmail, Google Calendar and Slack. You pick the actions at mcp.zapier.com.",
+      "publisher": "Zapier",
+      "official": true,
+      "docs": "https://docs.zapier.com/mcp/get-started/authentication",
+      "transport": "http",
+      "url": "https://mcp.zapier.com/api/v1/connect",
+      "auth": {
+        "kinds": ["oauth", "token"],
+        "token": { "label": "Connection token", "header": "Authorization", "prefix": "Bearer ", "help": "Make one on your server's Connect tab at mcp.zapier.com." }
+      }
+    },
+    {
+      "id": "dropbox",
+      "name": "Dropbox",
+      "description": "Search, read, move and share files and folders in your Dropbox. In beta.",
+      "publisher": "Dropbox",
+      "official": true,
+      "docs": "https://help.dropbox.com/integrations/connect-dropbox-mcp-server",
+      "transport": "http",
+      "url": "https://mcp.dropbox.com/mcp",
+      "auth": { "kinds": ["oauth"] }
+    },
+    {
+      "id": "airtable",
+      "name": "Airtable",
+      "description": "Read and update records, tables and bases in Airtable.",
+      "publisher": "Airtable",
+      "official": true,
+      "docs": "https://airtable.com/developers/agents/mcp/getting-started",
+      "transport": "http",
+      "url": "https://mcp.airtable.com/mcp",
+      "auth": {
+        "kinds": ["oauth", "token"],
+        "token": { "label": "Personal access token", "header": "Authorization", "prefix": "Bearer ", "help": "Make one at airtable.com/create/tokens, with the scopes and bases it may use." }
+      }
+    },
+    {
+      "id": "todoist",
+      "name": "Todoist",
+      "description": "Find, add and complete tasks and projects in Todoist.",
+      "publisher": "Doist",
+      "official": true,
+      "docs": "https://github.com/Doist/todoist-mcp",
+      "transport": "http",
+      "url": "https://ai.todoist.net/mcp",
+      "auth": { "kinds": ["oauth"] }
+    },
+    {
+      "id": "monday",
+      "name": "monday.com",
+      "description": "Boards, items and updates in monday.com. Your account admin may need to approve the connection.",
+      "publisher": "monday.com",
+      "official": true,
+      "docs": "https://developer.monday.com/api-reference/docs/mondaycom-mcp",
+      "transport": "http",
+      "url": "https://mcp.monday.com/mcp",
+      "auth": { "kinds": ["oauth"] }
+    },
+    {
+      "id": "intercom",
+      "name": "Intercom",
+      "description": "Search conversations, contacts and articles in Intercom. For US-hosted workspaces.",
+      "publisher": "Intercom",
+      "official": true,
+      "docs": "https://developers.intercom.com/docs/guides/mcp",
+      "transport": "http",
+      "url": "https://mcp.intercom.com/mcp",
+      "auth": {
+        "kinds": ["oauth", "token"],
+        "token": { "label": "Access token", "header": "Authorization", "prefix": "Bearer ", "help": "An Intercom access token from the Developer Hub, with the scopes its tools need." }
+      }
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "description": "Search models, datasets, Spaces, papers and docs on the Hugging Face Hub.",
+      "publisher": "Hugging Face",
+      "official": true,
+      "docs": "https://huggingface.co/docs/hub/en/hf-mcp-server",
+      "transport": "http",
+      "url": "https://huggingface.co/mcp",
+      "auth": { "kinds": ["oauth"] }
+    },
+    {
+      "id": "neon",
+      "name": "Neon",
+      "description": "Manage Neon Postgres projects, branches and queries. For development databases, not production.",
+      "publisher": "Neon",
+      "official": true,
+      "docs": "https://neon.com/docs/ai/neon-mcp-server",
+      "transport": "http",
+      "url": "https://mcp.neon.tech/mcp",
+      "auth": {
+        "kinds": ["oauth", "token"],
+        "token": { "label": "API key", "header": "Authorization", "prefix": "Bearer ", "help": "Make one in the Neon Console." }
+      }
     },
     {
       "id": "playwright",
