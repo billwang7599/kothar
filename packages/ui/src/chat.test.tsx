@@ -1458,6 +1458,43 @@ test("extensions' composer toggles show as chips beside Attach, pressed while on
   expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'other', toggle: 'web', on: true })
 })
 
+test('in a narrow composer, icon chips show only the icon but keep their name for screen readers and the hint', () => {
+  const toggles = [
+    { extension: 'deep-research', id: 'research', label: 'Deep research', icon: 'search' as const, on: false, hint: 'Research your next messages in depth' },
+    { extension: 'plan', id: 'plan', label: 'Plan first', icon: 'book' as const, on: false, hint: 'Plan first: the agent only reads' },
+    { extension: 'other', id: 'web', label: 'Web', on: false },
+  ]
+  render({}, () => {}, { extensionUi: { chatId: 'c1', panels: [], commands: [], toggles } })
+  const chip = (id: string) => container.querySelector<HTMLButtonElement>(`[data-composer-toggle="${id}"]`)!
+  // Icon chips: the label collapses by the composer's width (a container query), and stays in the accessible name.
+  for (const id of ['research', 'plan']) {
+    const label = chip(id).querySelector('span')!
+    expect(label.className).toContain('@max-[600px]:sr-only')
+    expect(chip(id).hasAttribute('data-icon-only')).toBe(true)
+    expect(chip(id).querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  }
+  expect(chip('research').textContent).toBe('Deep research')
+  // The hint names the switch even when its own text doesn't.
+  expect(chip('research').getAttribute('data-hint')).toBe('')
+  // A chip with no icon keeps its label, cut short.
+  expect(chip('web').querySelector('span')!.className).not.toContain('sr-only')
+  expect(chip('web').hasAttribute('data-icon-only')).toBe(false)
+})
+
+test("the composer's toolbar wraps instead of letting its two groups overlap", () => {
+  const toggles = [{ extension: 'plan', id: 'plan', label: 'Plan first', icon: 'book' as const, on: false }]
+  render({}, () => {}, { extensionUi: { chatId: 'c1', panels: [], commands: [], toggles } })
+  const toolbar = container.querySelector<HTMLElement>('[data-composer-toolbar]')!
+  expect(toolbar.className.split(' ')).toContain('flex-wrap')
+  const [left, right] = [...toolbar.children] as HTMLElement[]
+  // The chips' group may only shrink when it is alone on its line, and then wraps its chips.
+  expect(left!.className.split(' ')).toContain('flex-wrap')
+  expect(left!.className.split(' ')).not.toContain('flex-1')
+  // The pickers and Send keep a floor, below which they move to a line of their own.
+  expect(right!.className).toMatch(/\bbasis-\d+\b/)
+  expect(right!.className.split(' ')).toContain('grow')
+})
+
 test("another chat's composer toggles aren't shown", () => {
   const toggles = [{ extension: 'deep-research', id: 'research', label: 'Deep research', on: true }]
   render({}, () => {}, { extensionUi: { chatId: 'other', panels: [], commands: [], toggles } })

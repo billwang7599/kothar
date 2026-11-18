@@ -263,16 +263,18 @@ type SelectProps = {
   hint?: string
   disabled?: boolean
   variant?: keyof typeof SELECT_TRIGGERS
+  /** Extra classes on the trigger, such as how it shrinks in a row. */
+  className?: string
 }
 
-export function Select({ label, value, options, onChange, placeholder, hint, disabled, variant = 'field' }: SelectProps) {
+export function Select({ label, value, options, onChange, placeholder, hint, disabled, variant = 'field', className = '' }: SelectProps) {
   const [open, setOpen] = useState(false)
   return (
     <SelectPrimitive.Root value={value} onValueChange={onChange} disabled={disabled} open={open} onOpenChange={setOpen}>
       <SelectPrimitive.Trigger asChild aria-label={label}>
         <Hint text={!open && hint}>
           <button
-            className={`flex min-w-0 items-center whitespace-nowrap transition-[background-color,border-color,color,box-shadow] data-placeholder:text-muted ${SELECT_TRIGGERS[variant]}`}
+            className={`flex min-w-0 items-center whitespace-nowrap transition-[background-color,border-color,color,box-shadow] data-placeholder:text-muted ${SELECT_TRIGGERS[variant]} ${className}`}
           >
             <span className="min-w-0 truncate">
               <SelectPrimitive.Value placeholder={placeholder} />

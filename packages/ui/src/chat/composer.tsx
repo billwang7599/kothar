@@ -145,8 +145,16 @@ export function Composer(props: ComposerProps) {
           }}
         />
       </div>
-      <div className="flex items-center gap-8 px-6 pb-6">
-        <span className="flex min-w-0 flex-1 items-center gap-6">
+      {/*
+        The toolbar narrows in steps, by the composer's width (its @container), never by drawing one thing over another:
+        1. Extensions' chips with an icon show only the icon (composer-toggles.tsx).
+        2. The model name is cut short with an ellipsis; the thinking level, Send and Attach keep their size.
+        3. When the right-hand group would get narrower than its floor, it wraps onto a line of its own.
+        The left group is never squeezed beside the right one, so its chips can't spill under it; alone on a line, its
+        chips wrap.
+      */}
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-4 px-6 pb-6" data-composer-toolbar>
+        <span className="flex min-w-0 flex-wrap items-center gap-6">
           <Hint text="Attach files">
             <Button
               variant="ghost"
@@ -173,10 +181,13 @@ export function Composer(props: ComposerProps) {
             <ComposerToggles toggles={props.toggles} chatId={chat.id} disabled={!connected || archived} send={props.send} />
           )}
         </span>
-        <span className="flex min-w-0 flex-wrap items-center justify-end gap-6">
+        <span
+          className={`ml-auto flex min-w-0 grow items-center justify-end gap-6 ${busy && hasContent ? 'basis-280' : 'basis-200'}`}
+        >
           {menu.value && (
             <Select
               variant="chip"
+              className="shrink"
               label="Model"
               hint={MODEL_HINT}
               value={menu.value}
@@ -188,6 +199,7 @@ export function Composer(props: ComposerProps) {
           {menu.levels.length > 0 && (
             <Select
               variant="chip"
+              className="shrink-0"
               label="Thinking"
               hint={THINKING_HINT}
               value={menu.thinking ?? ''}
@@ -201,7 +213,7 @@ export function Composer(props: ComposerProps) {
             <>
               {hasContent && (
                 <Hint text={steers ? STEER_HINT : QUEUE_HINT}>
-                  <Button size="small" disabled={!canQueue} onClick={() => submit()}>
+                  <Button size="small" className="shrink-0" disabled={!canQueue} onClick={() => submit()}>
                     Queue
                   </Button>
                 </Hint>
@@ -209,7 +221,7 @@ export function Composer(props: ComposerProps) {
               <Hint text={chat.status === 'stopping' && FORCE_STOP_HINT}>
                 <Button
                   variant="danger"
-                  className={chat.status === 'stopping' ? 'enabled:animate-[blink_1.4s_ease-in-out_infinite]' : ''}
+                  className={`shrink-0 ${chat.status === 'stopping' ? 'enabled:animate-[blink_1.4s_ease-in-out_infinite]' : ''}`}
                   disabled={!connected}
                   onClick={stop}
                 >
@@ -219,7 +231,7 @@ export function Composer(props: ComposerProps) {
             </>
           ) : (
             <Hint text={SEND_HINT}>
-              <span className="flex">
+              <span className="flex shrink-0">
                 <Button
                   variant="primary"
                   className="disabled:pointer-events-none"
