@@ -43,6 +43,9 @@ export function QuestionCard({ item, chat, connected, send }: { item: QuestionIt
     return other ? [...labels, other] : labels
   }
   const firstOpen = questions.findIndex((_, i) => answerOf(i).length === 0)
+  // Before the last question the main button is Next; on the last it's Submit.
+  const last = shown === questions.length - 1
+  const answered = answerOf(shown).length > 0
 
   const choose = (n: number) => {
     const mine = picked[shown]!
@@ -60,6 +63,10 @@ export function QuestionCard({ item, chat, connected, send }: { item: QuestionIt
     setTyped(typed.with(shown, undefined))
     if (shown + 1 < questions.length) setShown(shown + 1)
   }
+  const next = () => {
+    if (live && answered && !last) setShown(shown + 1)
+  }
+  // Submit with an earlier question still open shows that question instead.
   const submit = () => {
     if (!live) return
     if (firstOpen >= 0) return setShown(firstOpen)
@@ -84,7 +91,7 @@ export function QuestionCard({ item, chat, connected, send }: { item: QuestionIt
       if (e.key === 'Enter') {
         if (!typing && e.target instanceof Element && e.target.closest('[data-action]')) return
         e.preventDefault()
-        return submit()
+        return last ? submit() : next()
       }
       if (typing) return
       const step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0
@@ -175,16 +182,25 @@ export function QuestionCard({ item, chat, connected, send }: { item: QuestionIt
       </div>
       {asking ? (
         <div className="flex items-center gap-8">
-          <Hint text={`Enter to submit · 1–${otherAt + 1} to pick${questions.length > 1 ? ' · ←→ switch questions' : ''}`}>
+          {shown > 0 && (
+            <Hint text="Previous question · ←">
+              <Button variant="ghost" data-action disabled={!live} onClick={() => setShown(shown - 1)}>
+                Back
+              </Button>
+            </Hint>
+          )}
+          <Hint
+            text={`${last ? 'Enter to submit' : 'Enter for the next question'} · 1–${otherAt + 1} to pick${questions.length > 1 ? ' · ←→ switch questions' : ''}`}
+          >
             <span className="flex">
               <Button
                 variant="primary"
                 data-action
                 className="disabled:pointer-events-none"
-                disabled={!live || firstOpen >= 0}
-                onClick={submit}
+                disabled={!live || (!last && !answered)}
+                onClick={last ? submit : next}
               >
-                Submit
+                {last ? 'Submit' : 'Next'}
               </Button>
             </span>
           </Hint>
