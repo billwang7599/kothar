@@ -652,19 +652,55 @@ test('a pending question is a card: a tab per question, option rows, number keys
   ])
 })
 
-test('Submit waits for an answer to every question, Enter shows the first one left, and Skip declines', () => {
+test('before the last question the main button is Next, then Back returns and Submit shows on the last', () => {
+  const sent: ClientMessage[] = []
+  render({ status: 'waiting', items: [USER, question()] }, (m) => sent.push(m))
+  const tab = (name: string) =>
+    [...card()!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent?.includes(name))!
+  expect(buttonNamed('Submit')).toBeUndefined()
+  expect(buttonNamed('Back')).toBeUndefined()
+  expect(buttonNamed('Next').disabled).toBe(true)
+  press('Enter')
+  expect(tab('Format').getAttribute('aria-selected')).toBe('true')
+
+  // A multi-select question never moves on by itself, so Next does.
+  act(() => tab('Sections').click())
+  act(() => choices()[1]!.click())
+  act(() => buttonNamed('Back').click())
+  expect(tab('Format').getAttribute('aria-selected')).toBe('true')
+  expect(buttonNamed('Next')).toBeDefined()
+  press('1')
+  expect(tab('Sections').getAttribute('aria-selected')).toBe('true')
+  press('ArrowLeft')
+  expect(buttonNamed('Next').disabled).toBe(false)
+  act(() => buttonNamed('Next').click())
+  expect(tab('Sections').getAttribute('aria-selected')).toBe('true')
+  expect(buttonNamed('Next')).toBeUndefined()
+  press('ArrowLeft')
+  press('Enter')
+  expect(tab('Sections').getAttribute('aria-selected')).toBe('true')
+  expect(sent.filter((m) => m.type === 'question.respond')).toEqual([])
+  act(() => buttonNamed('Submit').click())
+  expect(sent.filter((m) => m.type === 'question.respond')).toEqual([
+    { type: 'question.respond', chatId: 'c1', requestId: 'q1', answers: { [FORMAT]: ['Summary'], [SECTIONS]: ['Body'] } },
+  ])
+})
+
+test('Submit with an earlier question open shows that question, and Skip declines', () => {
   const sent: ClientMessage[] = []
   render({ status: 'waiting', items: [USER, question()] }, (m) => sent.push(m))
   const tabs = () => [...card()!.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
   const tab = (name: string) => tabs().find((t) => t.textContent?.includes(name))!
   act(() => tab('Sections').click())
   act(() => choices()[1]!.click())
-  expect(buttonNamed('Submit').disabled).toBe(true)
-  press('Enter')
+  expect(buttonNamed('Submit').disabled).toBe(false)
+  act(() => buttonNamed('Submit').click())
   expect(sent.filter((m) => m.type === 'question.respond')).toEqual([])
   expect(tab('Format').getAttribute('aria-selected')).toBe('true')
+  act(() => tab('Sections').click())
+  press('Enter')
+  expect(tab('Format').getAttribute('aria-selected')).toBe('true')
   act(() => choices()[0]!.click())
-  expect(buttonNamed('Submit').disabled).toBe(false)
   act(() => buttonNamed('Submit').click())
   press('Enter')
   expect(sent.filter((m) => m.type === 'question.respond')).toEqual([
@@ -680,6 +716,9 @@ test('Submit waits for an answer to every question, Enter shows the first one le
 test('one question shows no tabs, and keys typed elsewhere never pick an option', () => {
   render({ status: 'waiting', items: [USER, question({ questions: QUESTIONS.slice(0, 1) })] })
   expect(card()!.querySelector('[role="tab"]')).toBeNull()
+  expect(buttonNamed('Submit').disabled).toBe(false)
+  expect(buttonNamed('Next')).toBeUndefined()
+  expect(buttonNamed('Back')).toBeUndefined()
   const composer = container.querySelector('textarea')!
   composer.focus()
   press('1', composer)
