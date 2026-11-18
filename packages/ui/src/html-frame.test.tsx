@@ -194,7 +194,7 @@ test('a code view colours a known language and numbers its lines; a markdown vie
   expect(host.querySelector('pre')!.className).toContain('max-h-480')
   show({ type: 'markdown', text: '# Plan\n\n- [x] one\n\n<script>alert(1)</script>' })
   expect(host.querySelector('.markdown h1')!.textContent).toBe('Plan')
-  expect(host.querySelector('.markdown input[type="checkbox"]')).not.toBeNull()
+  expect(host.querySelector('.markdown .task-check[role="checkbox"][aria-checked="true"]')).not.toBeNull()
   expect(host.querySelector('.markdown script')).toBeNull()
 })
 

@@ -63,8 +63,43 @@ const remarkFileRefs = () => markRefs
 // Math nodes are their own type, so file refs never reach inside a formula. mathText (math.ts) has already escaped
 // every $ that isn't math, so a lone $ pair is safe to read as math.
 const remarkPlugins: PluggableList = [remarkGfm, [remarkMath, { singleDollarTextMath: true }], remarkBr, remarkFileRefs]
+// GFM task list items (`- [ ] item`): remark-gfm puts the checkbox first in the item, or first in its paragraph when
+// the list is loose, followed by a space. The space would push the first line's text right of the wrapped lines, so it
+// goes; the checkbox itself hangs in the list's indent (styles.css, .task-check).
+type HastEl = { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: HastEl[] }
+const isCheckbox = (node: HastEl | undefined) => node?.tagName === 'input' && node.properties?.type === 'checkbox'
+const trimTaskItems = (node: HastEl) => {
+  for (const child of node.children ?? []) {
+    const classes = child.properties?.className
+    if (child.tagName === 'li' && Array.isArray(classes) && classes.includes('task-list-item')) {
+      const first = child.children?.find((c) => c.type === 'element')
+      const holder = isCheckbox(first) ? child : first?.tagName === 'p' && isCheckbox(first.children?.[0]) ? first : undefined
+      const kids = holder?.children ?? []
+      const at = kids.findIndex(isCheckbox)
+      const next = kids[at + 1]
+      if (at >= 0 && next?.type === 'text') next.value = next.value!.replace(/^\s+/, '')
+    }
+    trimTaskItems(child)
+  }
+}
+const rehypeTaskItems = () => trimTaskItems
+
 // KATEX_OPTIONS: a bad formula shows its source in red, and trust stays off (no \href from agent output).
-const rehypePlugins: PluggableList = [[rehypeKatex, KATEX_OPTIONS]]
+const rehypePlugins: PluggableList = [[rehypeKatex, KATEX_OPTIONS], rehypeTaskItems]
+
+// A task's checkbox, read-only as in the source, drawn like the question card's (ChoiceMark) rather than as a native
+// input, which the app's input styles would size like a text field.
+function TaskCheck({ checked }: { checked: boolean }) {
+  return (
+    <span className="task-check" role="checkbox" aria-checked={checked} aria-readonly="true" data-checked={checked || undefined}>
+      {checked && (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M2 5.2 4.2 7.4 8 3" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
+  )
+}
 
 const numberOf = (value: unknown) => (value === undefined || value === '' ? undefined : Number(value) || undefined)
 
@@ -78,6 +113,8 @@ const urlTransform = keepImageSrc(defaultUrlTransform)
 
 const components: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  input: ({ node: _node, ...props }) =>
+    props.type === 'checkbox' ? <TaskCheck checked={Boolean(props.checked)} /> : <input {...props} />,
   img: ({ src, alt }) => (typeof src === 'string' && src ? <MarkdownImage src={src} alt={alt ?? ''} /> : null),
   span: ({ node: _node, ...props }) => {
     const { 'data-file-ref': path, 'data-line': line, 'data-col': col, ...rest } = props as typeof props & Record<`data-${string}`, unknown>
