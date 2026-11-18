@@ -1,5 +1,7 @@
 // Extensions' switches in the composer (ExtensionComposerToggle): a chip each, beside Attach, pressed while it's on in
 // this chat. The core keeps the state; a click asks it to flip, and the chip follows what the core says back.
+// In a narrow composer (its @container) a chip with an icon shows only the icon: the label stays for screen readers
+// and the hover hint names it. One without an icon keeps its label, cut short.
 import type { ClientMessage, ComposerToggleInfo } from '@kothar/core/shared'
 import { Hint } from '../controls.tsx'
 
@@ -21,6 +23,9 @@ function ToggleIcon({ icon }: { icon: Icon }) {
   )
 }
 
+// Below this composer width, an icon chip drops its visible label (kept for screen readers).
+export const COLLAPSED_LABEL = 'truncate @max-[600px]:sr-only'
+
 type Props = {
   toggles: readonly ComposerToggleInfo[]
   chatId: string
@@ -30,7 +35,9 @@ type Props = {
 
 export function ComposerToggles({ toggles, chatId, disabled, send }: Props) {
   return toggles.map((t) => {
-    const hint = (t.on ? t.activeHint : t.hint) ?? t.label
+    // The hint always names the switch, as the label may be hidden.
+    const said = (t.on ? t.activeHint : t.hint) ?? t.label
+    const hint = said.toLowerCase().includes(t.label.toLowerCase()) ? said : `${t.label}: ${said}`
     return (
       <Hint key={`${t.extension}\n${t.id}`} text={hint}>
         <button
@@ -38,13 +45,14 @@ export function ComposerToggles({ toggles, chatId, disabled, send }: Props) {
           aria-pressed={t.on}
           data-composer-toggle={t.id}
           disabled={disabled}
-          className={`flex h-24 shrink-0 items-center gap-4 rounded-full border px-8 text-[12px] leading-none transition-[background-color,border-color,color] duration-150 disabled:cursor-default disabled:opacity-50 ${
+          data-icon-only={t.icon ? '' : undefined}
+          className={`flex h-24 shrink-0 items-center gap-4 rounded-full border px-8 ${t.icon ? '@max-[600px]:px-5' : ''} text-[12px] leading-none transition-[background-color,border-color,color] duration-150 disabled:cursor-default disabled:opacity-50 ${
             t.on ? 'border-accent bg-accent/10 text-accent' : 'border-transparent text-muted hover:bg-raised hover:text-text'
           }`}
           onClick={() => send({ type: 'extension.toggle', chatId, extension: t.extension, toggle: t.id, on: !t.on })}
         >
           {t.icon && <ToggleIcon icon={t.icon} />}
-          <span className="truncate">{t.label}</span>
+          <span className={t.icon ? COLLAPSED_LABEL : 'max-w-96 truncate'}>{t.label}</span>
         </button>
       </Hint>
     )
