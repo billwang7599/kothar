@@ -306,14 +306,33 @@
     list-style: decimal;
   }
 
-  /* GFM task lists: the checkbox is the marker. */
+  /* GFM task lists: the checkbox is the marker. It hangs in the list's indent, centred on the item's first line, so
+     every line of the text starts at the same edge. In a loose list it sits inside the item's first <p>, which starts
+     at the item's top, so the item positions it either way. */
   .markdown li.task-list-item {
+    position: relative;
     list-style: none;
   }
 
-  .markdown li.task-list-item > input {
-    margin: 0 6px 0 -18px;
-    vertical-align: -1px;
+  .markdown .task-check {
+    position: absolute;
+    left: -19px;
+    top: calc((1lh - 14px) / 2);
+    display: grid;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    box-shadow: var(--shadow-sunken);
+  }
+
+  .markdown .task-check[data-checked] {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: none;
   }
 
   .markdown li + li {

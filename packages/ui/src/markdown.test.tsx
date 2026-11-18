@@ -61,7 +61,7 @@ test('other HTML tags still render as text, next to a <br>', () => {
 test('entities, strikethrough and task lists', () => {
   const html = render('a&nbsp;b &lt;tag&gt; ~~gone~~\n\n- [x] done\n- [ ] todo')
   expect(html).toContain('a\u00a0b &lt;tag&gt; <del>gone</del>')
-  expect(html).toContain('<li class="task-list-item"><input type="checkbox" disabled="" checked=""/> done</li>')
+  expect(html).toMatch(/aria-checked="true"[^>]*><svg[^>]*>.*?<\/svg><\/span>done<\/li>/)
 })
 
 let root: Root
@@ -175,4 +175,27 @@ test('shows a formula KaTeX cannot read as its source, in red, without throwing'
 test('never runs \\href from a formula', () => {
   const html = render('$\\href{https://example.com}{x}$')
   expect(html).not.toContain('href="https://example.com"')
+})
+
+test('draws a tight task list with themed, read-only checkboxes and no gap before the text', () => {
+  const html = render('- [ ] **Old flow** or new\n- [x] done')
+  expect(html).not.toContain('<input')
+  expect(html).toContain(
+    '<li class="task-list-item"><span class="task-check" role="checkbox" aria-checked="false" aria-readonly="true"></span><strong>Old flow</strong> or new</li>',
+  )
+  expect(html).toMatch(/<span class="task-check" role="checkbox" aria-checked="true" aria-readonly="true" data-checked="true"><svg[^>]*>.*?<\/svg><\/span>done<\/li>/)
+})
+
+test('draws a loose task list the same way, with the checkbox inside the first paragraph', () => {
+  const html = render('- [ ] first\n\n- [x] second\n  - [ ] nested')
+  expect(html).not.toContain('<input')
+  expect(html).toContain('<li class="task-list-item">\n<p><span class="task-check" role="checkbox" aria-checked="false" aria-readonly="true"></span>first</p>')
+  expect(html).toMatch(/<p><span class="task-check"[^>]*data-checked="true"><svg[^>]*>.*?<\/svg><\/span>second<\/p>/)
+  expect(html).toContain('<li class="task-list-item"><span class="task-check" role="checkbox" aria-checked="false" aria-readonly="true"></span>nested</li>')
+})
+
+test('leaves plain list items and text starting with a space alone', () => {
+  const html = render('- plain\n- `[ ]` code')
+  expect(html).not.toContain('task-check')
+  expect(html).toContain('<li>plain</li>')
 })
