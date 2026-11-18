@@ -22,9 +22,15 @@ describe('catalog', () => {
     expect(BUNDLED.length).toBe(raw.length)
     expect(BUNDLED.map((e) => e.id)).toEqual([
       'github', 'linear', 'notion', 'sentry', 'atlassian', 'figma', 'figma-desktop', 'stripe', 'supabase', 'vercel',
-      'cloudflare-docs', 'context7', 'exa', 'playwright', 'filesystem', 'fetch', 'memory', 'brave-search',
+      'cloudflare-docs', 'context7', 'exa', 'zapier', 'dropbox', 'airtable', 'todoist', 'monday', 'intercom', 'huggingface',
+      'neon', 'playwright', 'filesystem', 'fetch', 'memory', 'brave-search',
     ])
     for (const entry of BUNDLED) expect(entry.docs ?? '').toMatch(/^https:\/\//)
+    // No two entries share a name or a remote address, and every remote one is reached over https (or on this Mac).
+    expect(new Set(BUNDLED.map((e) => e.name)).size).toBe(BUNDLED.length)
+    const remote = BUNDLED.filter((e) => e.transport !== 'stdio')
+    expect(new Set(remote.map((e) => e.url)).size).toBe(remote.length)
+    for (const entry of remote) expect(entry.url).toMatch(/^(https:\/\/|http:\/\/127\.0\.0\.1:)/)
   })
 
   it('drops broken entries and lets a remote one replace a bundled one', () => {
@@ -40,6 +46,8 @@ describe('catalog', () => {
   it('searches by name, publisher and description', () => {
     expect(searched(BUNDLED, 'jira').map((e) => e.id)).toEqual(['atlassian'])
     expect(searched(BUNDLED, 'figma').map((e) => e.id)).toEqual(['figma', 'figma-desktop'])
+    // Google's own Workspace servers need an OAuth client of your own; Zapier reaches Drive and Gmail meanwhile.
+    expect(searched(BUNDLED, 'google drive').map((e) => e.id)).toEqual(['zapier'])
     expect(searched(BUNDLED, '')).toHaveLength(BUNDLED.length)
   })
 

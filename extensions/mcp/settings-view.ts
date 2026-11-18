@@ -97,7 +97,7 @@ export function renderPage(state: PageState, deps: PageDeps): ExtensionView {
     items: searched(deps.catalog(), state.query).map((entry) => ({
       key: entry.id,
       label: entry.name,
-      detail: entry.description,
+      description: entry.description,
       badges: [
         { text: entry.publisher, tone: 'muted' },
         { text: entry.transport === 'stdio' ? 'Runs on your Mac' : 'Remote', tone: 'faint' },
@@ -241,7 +241,7 @@ function serverCard(server: ServerConfig, state: PageState, deps: PageDeps): Ext
             key: tool.name,
             label: tool.name,
             mono: true,
-            detail: tool.description?.split('\n')[0] ?? '',
+            ...(tool.description && { description: tool.description.split('\n')[0] }),
             ...(tool.annotations?.readOnlyHint && { badges: [{ text: 'read-only', tone: 'muted' as const }] }),
           })),
         },
