@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildInstructions, CHECKOUT_RULES, contextTextOf, FOLDER_RULES, type InstructionParts, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
+import { BROWSER_LAUNCH_RULES, buildInstructions, CHECKOUT_RULES, contextTextOf, FOLDER_RULES, type InstructionParts, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
 import type { ContextItem } from './shared.ts'
 
 const item = (section: ContextItem['section'], path: string, text: string, more: Partial<ContextItem> = {}): ContextItem => ({
@@ -36,7 +36,7 @@ describe('buildInstructions', () => {
     })
     expect(instructions.split('\n\n')).toEqual([
       'ROLE',
-      `${WRITE_RULES}\nYour work folder: /work/space`,
+      `${WRITE_RULES}\nYour work folder: /work/space\n${BROWSER_LAUNCH_RULES}`,
       `${CHECKOUT_RULES}\n- /code/a: /work/space/a (branch space/a)\n- /code/b: /work/space/b (branch space/b)`,
       `${FOLDER_RULES}\n- /docs: Edit in place. Write in it directly.\n- /ref: Read only.\n` +
         "- /garage/x: Read only, since it holds Kothar's own data.",

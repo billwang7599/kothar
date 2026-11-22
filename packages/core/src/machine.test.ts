@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createLocalMachine, RUN_TIMEOUT_MS, STDERR_TAIL_CHARS, STRIPPED_ENV_KEYS } from './machine.ts'
+import {
+  createLocalMachine,
+  NO_DIALOG_RULES,
+  NO_DIALOG_SERVICES,
+  RUN_TIMEOUT_MS,
+  sandboxed,
+  STDERR_TAIL_CHARS,
+  STRIPPED_ENV_KEYS,
+} from './machine.ts'
 import { cantPs, cantSandbox, needs } from './test-env.ts'
 import { until } from './test-wait.ts'
 
@@ -221,6 +229,35 @@ describe('localMachine', () => {
   })
 })
 
+describe('the sandbox profile', () => {
+  const profileOf = (sandbox: Parameters<typeof sandboxed>[2]) => {
+    const { command, args } = sandboxed('/bin/echo', ['hi'], sandbox, 'darwin')
+    expect(command).toBe('/usr/bin/sandbox-exec')
+    expect(args[0]).toBe('-p')
+    return args[1] ?? ''
+  }
+
+  it("keeps every sandboxed process from reaching authd and SecurityAgent, so it can't put up a keychain dialog", () => {
+    for (const name of ['com.apple.authd', 'com.apple.SecurityAgent']) expect(NO_DIALOG_SERVICES).toContain(name)
+    for (const service of NO_DIALOG_SERVICES) expect(NO_DIALOG_RULES).toContain(`(global-name "${service}")`)
+    expect(NO_DIALOG_RULES).toMatch(/^\(deny mach-lookup /)
+  })
+
+  it('denies them last, so no allow rule (writable folders, the keychain an engine may write) lets them back in', () => {
+    const keychain = join(cwd, 'Library', 'Keychains', 'login.keychain-db*')
+    for (const sandbox of [{ writable: [] }, { writable: [cwd, keychain], readOnly: [join(cwd, 'ref')] }]) {
+      const profile = profileOf(sandbox)
+      expect(profile.endsWith(NO_DIALOG_RULES)).toBe(true)
+      expect(profile.match(/mach-lookup/g)).toHaveLength(1)
+    }
+  })
+
+  it("leaves the keychain's own service alone, so an engine's keychain login keeps working", () => {
+    const profile = profileOf({ writable: [] })
+    expect(profile).not.toMatch(/com\.apple\.SecurityServer|com\.apple\.securityd/)
+  })
+})
+
 describe.skipIf(process.platform !== 'darwin')('a sandboxed process', () => {
   beforeEach((context) => needs(context, cantSandbox))
   const root = mkdtempSync(join(tmpdir(), 'kothar-sandbox-'))
@@ -302,6 +339,17 @@ describe.skipIf(process.platform !== 'darwin')('a sandboxed process', () => {
     const odd = join(newDir(), 'we"ird\\ (dir)\n")(allow file-write*)')
     mkdirSync(odd)
     expect(await writes([odd], [join(odd, 'a'), join(root, 'escaped')])).toEqual(['ok', 'EPERM'])
+  })
+
+  // `security` without a prompt: authorizationdb read asks authd, list-keychains asks securityd. Neither shows UI.
+  it('cannot reach authd, where keychain and admin dialogs come from, but still reaches the keychain', async () => {
+    const security = (...args: string[]) => fast.run('/usr/bin/security', args, { cwd, sandbox: { writable: [] }, timeoutMs: 5000 })
+    const authd = await security('authorizationdb', 'read', 'system.login.console')
+    expect(authd.code).not.toBe(0)
+    const unsandboxed = spawnSync('/usr/bin/security', ['authorizationdb', 'read', 'system.login.console'])
+    expect(unsandboxed.status).toBe(0)
+    const keychains = await security('list-keychains')
+    expect(keychains.code).toBe(0)
   })
 
   it('can still use /dev/null, its own output and a terminal', async () => {

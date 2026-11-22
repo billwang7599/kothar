@@ -19,7 +19,7 @@ import type { LimitReached, Extension, ExtensionChat, ExtensionHost, ExtensionSe
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeAdapter, FAKE_DEFAULTS, FAKE_MODELS, FAKE_THINKING, type FakeStep } from './adapters/fake.ts'
 import { sandboxingMachine } from './adapters/test-machine.ts'
-import { CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
+import { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
 import { LOCK_FILE } from './garage-lock.ts'
 import { openModels, snapLevel, SUMMARY_MODELS } from './models.ts'
 import { localMachine } from './machine.ts'
@@ -193,7 +193,8 @@ const settled = (core: Core, id: string) => (statusOf(core, id) ?? 'idle') === '
 const entriesOf = (core: Core, id: string) => core.chats().find((p) => p.id === id)?.entries ?? []
 const types = (entries: ChatEntry[]) => entries.map((e) => e.type)
 const chatFile = (t: { garage: string }, id: string) => join(t.garage, 'chats', id, 'chat.json')
-const rulesOf = (t: { garage: string }, folder: string) => `${WRITE_RULES}\nYour work folder: ${join(t.garage, 'work', folder)}`
+const rulesOf = (t: { garage: string }, folder: string) =>
+  `${WRITE_RULES}\nYour work folder: ${join(t.garage, 'work', folder)}\n${BROWSER_LAUNCH_RULES}`
 const byId = (chats: ChatState[]) => chats.toSorted((a, b) => a.id.localeCompare(b.id))
 
 beforeEach(() => {

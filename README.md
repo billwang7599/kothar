@@ -73,7 +73,8 @@ What works today:
   run to a worker. Workers get the same tools as their lead. The intro is editable in Settings → Prompts.
 - **Memory:** every chat has its own.
 - **Sandboxing (macOS):** agents work in a sandboxed work folder, with git folders checked out as worktrees. A repo with no commits yet is used as a plain folder, with its mode, until
-  its first commit.
+  its first commit. Nothing an agent runs can put up a macOS authorization or keychain dialog (such as "Keychain Not
+  Found ... Reset To Defaults"): the sandbox blocks the services that draw them, while keychain logins keep working.
 - **Folder modes:** each attached folder that isn't a git repo has a mode, picked in the Context panel. **Edit in
   place** (the default) lets the sandbox write in the folder itself, though logins, keys and `.env` files in it still
   ask. **Work on a copy** copies it into the work folder once, and **Copy changes back** shows what the agents changed

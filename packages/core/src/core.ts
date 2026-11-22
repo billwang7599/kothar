@@ -61,7 +61,7 @@ import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
 
 // Kept here too, for code that imports them from the core.
-export { CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
+export { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
 
 export const STOP_GRACE_MS = 60_000
 // A chat's own files, which extensions' chat storage can't touch.
