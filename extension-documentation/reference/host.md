@@ -310,7 +310,7 @@ listed as not tied to a chat.
 ## Activity
 
 `activity({ kind, title, chatId?, detail?, sections?, result?, error? })` lists something your extension did on its own
-in the chat's **Activity** (the Inspector), labelled with your extension's name: it launched a browser, handed one to the
+in the chat's **Activity** (the Inspector), labelled with your extension's name: it opened a tab, handed one to the
 user, checked a source. `kind` is one of the [`ActivityKind`s](events.md#onactivity), usually `browser` or `other`.
 Kothar already lists your model calls, the messages you send (`send`, `continue`, `retry`), the chats you start, account
 switches and `callTool` calls, so don't repeat those. Any extension may call it.
@@ -318,11 +318,11 @@ switches and `callTool` calls, so don't repeat those. Any extension may call it.
 ```ts
 import type { ExtensionHost } from '@kothar/extension-api'
 
-function launched(host: ExtensionHost, chatId: string) {
-  host.activity({ kind: 'browser', chatId, title: 'Launched the browser', detail: 'On Google Chrome' })
+function handedOver(host: ExtensionHost, chatId: string) {
+  host.activity({ kind: 'browser', chatId, title: 'Asked you to take over in Chrome', detail: 'Why: Sign in to GitHub' })
 }
 
-export { launched }
+export { handedOver }
 ```
 
 ## Settings per space
@@ -513,7 +513,7 @@ if (!allow) return { content: [{ type: 'text', text: message ?? 'The user said n
 ## Processes rows
 
 The Processes tab lists the commands agents start. An extension can add rows of its own for something it runs in a
-space, such as the Browser extension's browser, with `processes(spaceId, context)` on the extension (see [The extension
+space, such as a server it runs, with `processes(spaceId, context)` on the extension (see [The extension
 object](extension.md#optional-fields)):
 
 ```ts

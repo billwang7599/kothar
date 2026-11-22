@@ -106,7 +106,9 @@ What works today:
 - **Setups, themes, the marketplace,** and the built-in extensions in `extensions/`: Artifacts, Browser, Git, Home,
   Inspector, MCP servers, Memory, Notes, Pins, Plan, Processes, Reconnect, Skills, Deep Research and Account rotation. MCP servers connects
   GitHub, Linear, Notion and other MCP servers to every engine through Kothar, which is their only client, so keys stay in Kothar
-  and each call is asked for and recorded. Pins puts a Pin button
+  and each call is asked for and recorded. Browser lets agents browse in your own Chrome, with your logins, through
+  the Kothar Chrome extension: a tab group per space in your current window, and when a site asks you to sign in, you
+  do it there yourself. Pins puts a Pin button
   on each message; the Pinned tab lists the chat's pins and jumps back to one, loading older history if needed. Deep
   Research turns a question into a cited report: a plan you approve, workers that search and read the web, and only
   claims backed by a quote found on their page (a Deep research chip in the composer, New research ⌘⇧D, or the agent's

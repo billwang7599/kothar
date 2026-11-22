@@ -10,11 +10,10 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { connect, type Cdp } from '../../extensions/browser/cdp.ts'
-import { findBrowser } from '../../extensions/browser/profiles.ts'
+import { CdpClient } from '../../extensions/browser/client.ts'
 import { format, readFrames, Refs, render } from '../../extensions/browser/snapshot.ts'
 import { createBrowserTools } from '../../extensions/browser/tools.ts'
 
@@ -28,8 +27,19 @@ export const PAGES = [
   { file: 'iframe.html', what: 'page with a sign-in iframe' },
 ]
 
-const chrome = findBrowser()
-if (!chrome) {
+// An installed Chromium-family browser, or the one CHROME names.
+const CANDIDATES = [
+  process.env.CHROME ?? '',
+  ...['Google Chrome', 'Google Chrome Beta', 'Microsoft Edge', 'Brave Browser', 'Chromium'].flatMap((name) =>
+    ['/Applications', join(homedir(), 'Applications')].map((root) => join(root, `${name}.app`, 'Contents', 'MacOS', name)),
+  ),
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+]
+const executable = CANDIDATES.find((path) => path && existsSync(path))
+if (!executable) {
   console.log('No Chromium-family browser installed: skipped.')
   process.exit(0)
 }
@@ -44,7 +54,7 @@ await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
 const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 
 const profile = mkdtempSync(join(tmpdir(), 'kothar-measure-'))
-const browser = spawn(chrome.executable, [
+const browser = spawn(executable, [
   '--headless', '--no-sandbox', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run',
   '--use-mock-keychain', '--password-store=basic', 'about:blank',
 ], { stdio: 'ignore' })
@@ -61,12 +71,12 @@ const { tools } = createBrowserTools({ host: () => undefined, spaceIdOf: () => '
 const listChars = JSON.stringify(tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }))).length
 
 // Kothar's snapshot of a tab: the page's tree and each frame's.
-async function ourSnapshot(cdp: Cdp, session: string, refs: Refs) {
+async function ourSnapshot(cdp: CdpClient, session: string, refs: Refs) {
   return format(render(await readFrames((method, params, id) => cdp.send(method, params, id), session), { refs }))
 }
 
 const rows: string[] = []
-const cdp = await connect(endpoint, 30_000)
+const cdp = await CdpClient.connect(endpoint)
 for (const page of PAGES) {
   const url = `${origin}/${page.file}`
   // Ours, on a tab of its own.
@@ -83,7 +93,7 @@ for (const page of PAGES) {
   if (process.env.SHOW) console.log(`\n=== ${page.file}\n${ours}`)
 }
 
-console.log(chrome.name)
+console.log(executable)
 console.log(`Kothar's browser tools: ${tools.length} tools, ${listChars.toLocaleString()} characters (~${TOKENS(listChars).toLocaleString()} tokens)`)
 console.log('')
 console.log('| Page | HTML bytes | Kothar snapshot (tokens) |')

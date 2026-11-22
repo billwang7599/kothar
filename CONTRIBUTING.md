@@ -152,6 +152,17 @@ Why some things are the way they are. Add one when you make a choice the next co
   5. **Depend on capabilities, not ids.** Name a shared API for what it does (`search`, `research`), so a community
      extension can provide it instead of a built-in one.
 
+- **The browser is the user's own Chrome, and only that.** Agents browse through the Kothar Chrome extension, in a
+  blue tab group per space in the window the user last used, opened in the background so nothing takes focus. When a
+  site wants a sign-in, `ask_user_in_browser` brings the agent's tab forward and the user signs in there themselves.
+  Kothar used to run a Chrome of its own per space (its own profile, a headless browser, a plain window for signing
+  in, idle close), and before that copies of the user's profiles. Copies failed Google sign-in (Google signs out of a
+  copied profile), and a separate profile meant signing in to everything twice, in a browser that sites treat as
+  automated. The user's decision: "just use my chrome. if it needs sign in, i just sign in using my own chrome." So
+  that mode and its code (`chromium.ts`, `profiles.ts`, `space-browser.ts`, `endpoint.ts`, `cdp.ts`) are gone, and its
+  profile folders are deleted when the extension starts. Don't bring back a second browser mode. If the extension
+  isn't connected, the tools fail at once and say how to set it up.
+
 - **Every engine tool can be switched from Kothar.** Kothar wants to see and control as much of what an agent does as
   it can, so each engine's built-in tools are listed in Settings → Engines → Tools (`engine-tools.ts`), each with a
   switch, core ones included, under two master switches (**Engine tools** for every engine, and one per engine). A
