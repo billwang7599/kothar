@@ -1,8 +1,7 @@
 // The browser tools agents call, as Kothar extension tools on the Kothar MCP server: a few small ones for the usual
 // jobs (open a page, read it, click, type, tabs, a screenshot) and browser_cdp, the raw DevTools protocol on the chat's
-// own tab, for the rest. All of them drive the space's browser over Kothar's own CDP client (client.ts): Kothar's own
-// Chrome through the extension's endpoint (which launches it on the first call), or the user's Chrome through the
-// Kothar extension's relay.
+// own tab, for the rest. All of them drive the space's tabs in the user's Chrome over Kothar's own CDP client
+// (client.ts), through the Kothar Chrome extension's relay (relay.ts).
 import type { ExtensionHost, ExtensionTool, ExtensionValues, McpToolResult } from '@kothar/extension-api'
 import { CdpClient, CdpError, nextLoad, type Page, Pages, settle } from './client.ts'
 import { checkCdp } from './safety.ts'
@@ -12,11 +11,11 @@ import { changes, format, paginate, readFrames, Refs, render, SNAPSHOT_CHARS } f
 export type ToolsOptions = {
   host: () => ExtensionHost | undefined
   spaceIdOf: (chatId: string) => string | undefined
-  // The space's DevTools endpoint: Kothar's own (launching the browser) or the relay's. Throws when there's none.
+  // The space's DevTools endpoint on the relay. Throws, saying why, when the extension isn't connected.
   endpointOf: (spaceId: string) => Promise<string>
   // Listed in the chat's Activity.
   activity: (chatId: string, title: string, detail?: string) => void
-  // Whether the browser can be offered at all now (started, or the extension connected).
+  // Whether the browser can be offered at all now (the extension started).
   ready: () => boolean
   // Tests: shorter waits.
   settleMs?: number
