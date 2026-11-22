@@ -88,6 +88,16 @@ export function createAgent({ chrome, WebSocket, setTimer = setTimeout }) {
     emit('tabAdded', { space, tabId })
   }
 
+  // The user's window for a new group: the normal one they last used, else any normal one; never an incognito one
+  // (whose tabs aren't the user's logins) nor a popup or app window. Undefined when none is open.
+  async function usersWindow() {
+    const fits = (w) => w && w.type === 'normal' && !w.incognito
+    const last = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => undefined)
+    if (fits(last)) return last.id
+    const all = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => [])
+    return all.find(fits)?.id
+  }
+
   const commands = {
     async tabs({ space }) {
       const group = await groupOf(space)
@@ -120,17 +130,23 @@ export function createAgent({ chrome, WebSocket, setTimer = setTimeout }) {
       return await chrome.debugger.sendCommand(sessionId ? { tabId, sessionId } : { tabId }, method, params ?? {})
     },
 
-    // A new tab in the space's group. The first one opens in a window of its own, behind the user's, so agents never
-    // take over a window the user is in; later ones open wherever the group is now.
+    // A new tab in the space's group. The group starts in the window the user last used, as a background tab: no
+    // window opens, nothing takes focus and the user's own tab stays in front. With no window open, one opens unfocused.
+    // Later tabs open wherever the group is now, in the background too, unless the window holds only Kothar's tabs.
     async create({ space, name, url }) {
       const title = `${GROUP_PREFIX}${name || 'space'}`
       const target = url || 'about:blank'
       let group = await groupOf(space)
       let tab
       if (!group) {
-        const window = await chrome.windows.create({ url: target, focused: false })
-        tab = window.tabs[0]
-        const groupId = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: window.id } })
+        const windowId = await usersWindow()
+        if (windowId === undefined) {
+          const window = await chrome.windows.create({ url: target, focused: false })
+          tab = window.tabs[0]
+        } else {
+          tab = await chrome.tabs.create({ windowId, url: target, active: false })
+        }
+        const groupId = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: tab.windowId } })
         await chrome.tabGroups.update(groupId, { title, color: 'blue' })
         groups[space] = groupId
         await saveGroups()

@@ -559,6 +559,8 @@ export function createBrowserTools(options: ToolsOptions) {
     tools,
     // Forgets a chat's tab (the chat went), or closes every connection (the extension stopped).
     forget: (chatId: string) => void current.delete(chatId),
+    // The chat's own tab (its target id), if it has one, so a hand-off shows the user that one.
+    tabOf: (chatId: string) => current.get(chatId),
     async stop() {
       for (const connection of connections.values()) (await connection.catch(() => undefined))?.client.close()
       connections.clear()

@@ -30,6 +30,9 @@ function fakeChrome() {
   const attached = new Set<number>()
   const sent: { tabId: number; sessionId?: string; method: string }[] = []
   const focused: number[] = []
+  // The user's windows, the last one used first. Window 1 is a normal one, as when Chrome is open.
+  const windows: { id: number; type: string; incognito: boolean }[] = [{ id: 1, type: 'normal', incognito: false }]
+  const created: { focused?: boolean }[] = []
   const store: Record<string, Record<string, unknown>> = { session: {}, local: {} }
   let next = 100
   let window = 1
@@ -75,10 +78,17 @@ function fakeChrome() {
       update: async (id: number, p: object) => Object.assign(groups.get(id)!, p),
     },
     windows: {
-      create: async (p: { url: string }) => {
+      create: async (p: { url: string; focused?: boolean }) => {
         const id = ++window
+        created.push({ focused: p.focused })
+        windows.push({ id, type: 'normal', incognito: false })
         return { id, tabs: [addTab({ windowId: id, url: p.url, active: true })] }
       },
+      getLastFocused: async () => {
+        if (!windows[0]) throw new Error('No last-focused window')
+        return { ...windows[0] }
+      },
+      getAll: async () => windows.map((w) => ({ ...w })),
       update: async (id: number) => void focused.push(id),
     },
     debugger: {
@@ -93,7 +103,7 @@ function fakeChrome() {
       },
     },
   }
-  return { chrome, tabs, groups, attached, sent, focused, addTab }
+  return { chrome, tabs, groups, attached, sent, focused, addTab, windows, created }
 }
 
 // The extension's own WebSocket, which Chrome opens with the extension's Origin.
@@ -207,7 +217,7 @@ it('the pairing token and port are kept for the next start', async () => {
   expect(again.code.split(':')[2]).toBe(saved.token)
 })
 
-it("a space's group is made on its first tab: blue, named for the space, in a window of its own", async () => {
+it("a space's group is made on its first tab: blue, named for the space, in the user's window, in the background", async () => {
   const { relay, fake } = await paired()
   const userTab = fake.addTab({ url: 'https://mail.example', active: true })
   const cdp = await cdpClient(relay, 'sales')
@@ -217,18 +227,49 @@ it("a space's group is made on its first tab: blue, named for the space, in a wi
   const groups = [...fake.groups.values()]
   expect(groups).toHaveLength(1)
   expect(groups[0]).toMatchObject({ title: 'Kothar · Sales', color: 'blue' })
-  expect(groups[0]!.windowId).not.toBe(userTab.windowId)
+  // In the window the user is in, not one of its own, and nothing took focus or switched the user's tab.
+  expect(groups[0]!.windowId).toBe(userTab.windowId)
+  expect(fake.created).toEqual([])
+  expect(fake.focused).toEqual([])
+  expect(fake.tabs.get(userTab.id)!.active).toBe(true)
+  const tab = [...fake.tabs.values()].find((t) => t.groupId === groups[0]!.id)!
+  expect(tab.active).toBe(false)
   const attached = cdp.events.find((e) => e.method === 'Target.attachedToTarget')!
   expect(attached.params.targetInfo).toMatchObject({ targetId, type: 'page', attached: true })
   const { result } = await cdp.send('Runtime.evaluate', { expression: 'location.href' }, attached.params.sessionId)
   expect(result.value).toBe('https://example.com')
 
-  // A second tab joins the same group, and the user's own tab was never touched.
+  // A second tab joins the same group, also in the background, and the user's own tab was never touched.
   await cdp.send('Target.createTarget', { url: 'https://example.org' })
   expect(fake.groups.size).toBe(1)
-  expect([...fake.tabs.values()].filter((t) => t.groupId === groups[0]!.id)).toHaveLength(2)
+  const ours = [...fake.tabs.values()].filter((t) => t.groupId === groups[0]!.id)
+  expect(ours).toHaveLength(2)
+  expect(ours.every((t) => !t.active)).toBe(true)
+  expect(fake.tabs.get(userTab.id)!.active).toBe(true)
   expect(fake.attached.has(userTab.id)).toBe(false)
   expect(fake.sent.some((s) => s.tabId === userTab.id)).toBe(false)
+})
+
+it("a new group skips incognito and popup windows, and with no window open it opens one unfocused", async () => {
+  const { relay, fake } = await paired()
+  // The last window used is incognito, then a popup; the user's normal window is further back.
+  fake.windows.unshift({ id: 7, type: 'popup', incognito: false }, { id: 8, type: 'normal', incognito: true })
+  fake.windows.unshift(fake.windows.splice(1, 1)[0]!)
+  const sales = await cdpClient(relay, 'sales')
+  await sales.send('Target.setAutoAttach', { autoAttach: true, flatten: true })
+  await sales.send('Target.createTarget', { url: 'https://example.com' })
+  expect([...fake.groups.values()][0]!.windowId).toBe(1)
+  expect(fake.created).toEqual([])
+
+  // No normal window at all: one opens, unfocused, with the space's tab grouped in it.
+  fake.windows.splice(0)
+  const web = await cdpClient(relay, 'web')
+  await web.send('Target.setAutoAttach', { autoAttach: true, flatten: true })
+  await web.send('Target.createTarget', { url: 'https://example.org' })
+  expect(fake.created).toEqual([{ focused: false }])
+  const group = [...fake.groups.values()].find((g) => g.title === 'Kothar · Website')!
+  expect(group.windowId).not.toBe(1)
+  expect(fake.focused).toEqual([])
 })
 
 it("agents can't reach tabs outside their space's group, nor another space's", async () => {
@@ -337,6 +378,7 @@ it("refuses browser-wide calls that would read or change the user's own browser"
 
 it('focus brings the space’s group to the front, and says so when there is none', async () => {
   const { relay, fake } = await paired()
+  fake.addTab({ url: 'https://mail.example', active: true })
   expect(await relay.focus('sales')).toBe(false)
   const cdp = await cdpClient(relay, 'sales')
   await cdp.send('Target.setAutoAttach', { autoAttach: true, flatten: true })
@@ -346,6 +388,13 @@ it('focus brings the space’s group to the front, and says so when there is non
   expect(fake.focused).toEqual([group.windowId])
   expect(group.collapsed).toBe(false)
   expect(await relay.tabs('sales')).toEqual([{ url: 'https://example.com', title: '', active: true }])
+
+  // Given a tab, that one comes to the front, not just the group's first.
+  const { targetId } = await cdp.send('Target.createTarget', { url: 'https://example.org' })
+  const second = [...fake.tabs.values()].find((t) => t.url === 'https://example.org')!
+  expect(second.active).toBe(false)
+  expect(await relay.focus('sales', targetId)).toBe(true)
+  expect(second.active).toBe(true)
 })
 
 it('when the extension disconnects, agents’ connections close and their next call says why', async () => {

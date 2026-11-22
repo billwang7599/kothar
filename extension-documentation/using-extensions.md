@@ -293,12 +293,15 @@ every day, with your logins, Google included, and nothing copied. No browser of 
    (`extensions/browser/chrome-extension/` in Kothar).
 3. Click the Kothar extension's icon and paste the pairing code from the same settings page. It turns **Connected**.
 
-Each space gets a blue **Kothar · *space*** tab group, which opens in a window of its own behind yours. Agents open,
+Each space gets a blue **Kothar · *space*** tab group in the Chrome window you last used (never an incognito one). Its
+tabs open in the background: no window opens, nothing takes focus, and the tab you're on stays in front. With no
+Chrome window open, one opens without taking focus. Agents open,
 read, click, type and close tabs only in their space's group. The extension refuses any other tab, and Kothar refuses
 calls that read every cookie, change permissions or close Chrome. Drag a tab out of the group to take it back: agents
 lose it at once. Popups from an agent's tab join its group. While agents work, Chrome shows its own "Kothar started
 debugging this browser" bar. Clicking its Cancel detaches them until they next browse. `show_browser` and
-`ask_user_in_browser` bring the space's group to the front, and **Done** carries on, as above. **Show browser** in a
+`ask_user_in_browser` bring the space's group to the front with the asking chat's own tab showing, and **Done**
+carries on, as above. **Show browser** in a
 chat's General tab does the same.
 
 The extension talks only to Kothar on `127.0.0.1`. It has to present the pairing code, and its connection must come

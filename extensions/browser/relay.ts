@@ -69,8 +69,9 @@ export type Relay = {
   // A new token: the paired extension is dropped until it's given the new code.
   repair(): void
   cdpUrl(spaceId: string): string
-  // Brings the space's group in front; false when there's no group yet.
-  focus(spaceId: string): Promise<boolean>
+  // Brings the space's group in front, with this tab (a target id) showing if it's given and still the space's;
+  // false when there's no group yet.
+  focus(spaceId: string, targetId?: string): Promise<boolean>
   tabs(spaceId: string): Promise<RelayTab[]>
   close(): Promise<void>
 }
@@ -430,8 +431,9 @@ export async function startRelay(options: RelayOptions): Promise<Relay> {
       options.onChange?.()
     },
     cdpUrl: (spaceId) => `http://127.0.0.1:${port}/${cdpToken}/${encodeURIComponent(spaceId)}`,
-    async focus(spaceId) {
-      const { focused } = await call<{ focused: boolean }>('focus', { space: spaceId })
+    async focus(spaceId, targetId) {
+      const tab = targetId === undefined ? undefined : [...(spaces.get(spaceId)?.tabs.values() ?? [])].find((t) => t.targetInfo.targetId === targetId)
+      const { focused } = await call<{ focused: boolean }>('focus', { space: spaceId, ...(tab && { tabId: tab.tabId }) })
       return focused
     },
     async tabs(spaceId) {

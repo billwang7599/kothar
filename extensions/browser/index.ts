@@ -422,7 +422,7 @@ export function createBrowserExtension(options: BrowserExtensionOptions = {}) {
   const inYourChrome = async (spaceId: string, chatId: string, reason: string, tool: string) => {
     if (!relay?.connected) throw new Error(NOT_CONNECTED)
     if (chromeWaits.has(chatId)) throw new Error('This chat is already waiting on the user in Chrome')
-    if (!(await relay.focus(spaceId))) {
+    if (!(await relay.focus(spaceId, browserTools.tabOf(chatId)))) {
       throw new Error("This space has no tabs in the user's Chrome yet; open the page first, then call this again")
     }
     const ended = new Promise<HandOffResult['how']>((resolve) => chromeWaits.set(chatId, resolve))
@@ -538,7 +538,8 @@ export function createBrowserExtension(options: BrowserExtensionOptions = {}) {
       {
         type: 'text',
         text:
-          'Agents work in a blue “Kothar · space” tab group per space, in a window of its own, with your logins. ' +
+          'Agents work in a blue “Kothar · space” tab group per space, in the Chrome window you last used, with your ' +
+          'logins. Their tabs open in the background, so your own tab stays in front. ' +
           'They can’t see or touch your other tabs; drag a tab out of the group to take it back. While they work, ' +
           'Chrome shows “Kothar started debugging this browser”.',
         small: true,
@@ -732,7 +733,7 @@ export function createBrowserExtension(options: BrowserExtensionOptions = {}) {
       const waiting = chromeWaits.get(chat.id)
       if (waiting) {
         if ('message' in answer) return waiting('message')
-        if (answer.button === 'open') return void relay?.focus(spaceIdOf(chat.id) ?? '').catch(() => {})
+        if (answer.button === 'open') return void relay?.focus(spaceIdOf(chat.id) ?? '', browserTools.tabOf(chat.id)).catch(() => {})
         if (answer.button === 'done') return waiting('done')
         return
       }
