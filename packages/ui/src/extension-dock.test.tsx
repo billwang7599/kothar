@@ -121,6 +121,45 @@ test('filling the pane, it sits under the chat header on a solid surface', () =>
   expect(titles[0]!.classList.contains('truncate')).toBe(true)
 })
 
+test('opened in a wide window, then shown again after the window narrowed (another chat in between), it fills under the header on a solid surface', () => {
+  // jsdom has no layout: the pane's width comes from clientWidth, read when the dock mounts and on each resize.
+  let paneWidth = 900
+  const observers: (() => void)[] = []
+  const restore = { RO: globalThis.ResizeObserver, width: Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')! }
+  globalThis.ResizeObserver = class {
+    constructor(private fire: () => void) {}
+    observe() {
+      observers.push(this.fire)
+    }
+    disconnect() {}
+    unobserve() {}
+  } as unknown as typeof ResizeObserver
+  Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => paneWidth })
+  try {
+    // Chat A, wide: the dock sits beside the transcript.
+    act(() => openDock('extension:artifacts/artifacts', 'space'))
+    render()
+    expect(dock()!.dataset.wide).toBeUndefined()
+    expect(dock()!.classList.contains('relative')).toBe(true)
+    // Chat B shows (A's dock unmounts), the window narrows, then A shows again: its dock mounts into a narrow pane.
+    act(() => root.render(<></>))
+    paneWidth = 420
+    render()
+    expect(dock()!.dataset.wide).toBe('true')
+    expect(dock()!.classList.contains('surface-over')).toBe(true)
+    expect(dock()!.classList.contains('top-44')).toBe(true)
+    expect(dock()!.querySelectorAll('h2')).toHaveLength(1)
+    // And back: widening puts it beside the chat again, with no solid fill or header offset left over.
+    paneWidth = 1200
+    act(() => observers.forEach((fire) => fire()))
+    expect(dock()!.dataset.wide).toBeUndefined()
+    expect(dock()!.classList.contains('surface-over')).toBe(false)
+  } finally {
+    globalThis.ResizeObserver = restore.RO
+    Object.defineProperty(Element.prototype, 'clientWidth', restore.width)
+  }
+})
+
 test('closing or opening another narrows it again; only a dock panel of the chat shows', () => {
   render(undefined, [changes])
   act(() => openDock('extension:artifacts/artifacts'))
