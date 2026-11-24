@@ -172,6 +172,24 @@ Why some things are the way they are. Add one when you make a choice the next co
   Unpin puts them back in it. Deleting a group never deletes a space: they go below the ungrouped ones. Which groups are
   collapsed is a window preference (localStorage `kothar.collapsedGroups`), like folded workers; opening a space in a
   collapsed group (search, a link) expands it, and ⌘↑/↓ and ⌘1–9 skip spaces hidden in collapsed groups.
+
+- **Deleting a message really deletes it, and leaves a marker where it was.** Users delete messages to take back
+  something they pasted by mistake, such as a secret, so hiding it isn't enough: `message-edits.ts` replaces each
+  removed entry with `{ type: 'entry.removed', at }` and writes `log.jsonl` again whole (a temp file renamed over it),
+  and deletes the attachments and tool pictures no other message uses. The log otherwise stays append-only.
+  - **Why a marker, not a shorter log:** an entry's index is the key extensions keep (`ExtensionMessage.entry`, a
+    pin), and the UI pages the log by index. With markers no index moves and none is ever used twice, so a pin can't
+    jump to another message. Edit and Undo cut the log back the same way, with markers from the message on.
+  - **Memory ids close up:** memory numbers only real messages (`messagesOf` skips markers), because the summary tree
+    needs ids with no gaps (blocks of 2^k from 0). So ids after a deleted message move down. The core tells extensions
+    with `onMessagesRemoved` (`firstMessage`, the first id that moved), and Memory drops every summary that reaches it,
+    in both modes' files, and writes them again. Summaries name their last message's time, so ones left from a delete
+    made while Memory was off are dropped when it next opens the chat. The Inspector forgets the prompts sent since
+    the deleted message, as they quoted it.
+  - **What stays:** files the agent changed (said in the UI), a worker's view of its lead frozen at its launch
+    (`parent-view.md`), and the turn's start and end markers of a deleted reply, so the chat doesn't read as quit
+    mid-turn. Only a stopped chat can be edited or undone; a delete can't touch the turn that runs.
+
 - **Every engine tool can be switched from Kothar.** Kothar wants to see and control as much of what an agent does as
   it can, so each engine's built-in tools are listed in Settings → Engines → Tools (`engine-tools.ts`), each with a
   switch, core ones included, under two master switches (**Engine tools** for every engine, and one per engine). A

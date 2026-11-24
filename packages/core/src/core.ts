@@ -60,6 +60,7 @@ import { appendEntry, openSettings, saveChatFile } from './chat-store.ts'
 import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
+import { openMessageEdits } from './message-edits.ts'
 
 // Kept here too, for code that imports them from the core.
 export { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
@@ -1009,6 +1010,18 @@ function assembleCore(options: {
     for (const extension of watchers) callExtension(extension, () => extension.onTurnSent!(sent, contextOf(extension)))
   }
 
+  const { deleteMessage, editMessage, undoMessage } = openMessageEdits({
+    broadcast,
+    shownLog: (chat) => pageOf(chat.entries),
+    attachmentsDirOf,
+    removed: (chat, removed) => {
+      const detail = detailOf(chat)
+      callExtensions('onMessagesRemoved', (extension, context) => extension.onMessagesRemoved!({ chat: detail, ...removed }, context))
+    },
+    enqueue,
+    checkActive,
+  })
+
   const handle = openProtocol({
     broadcast,
     now,
@@ -1027,6 +1040,9 @@ function assembleCore(options: {
     checkActive,
     setModel,
     sendMessage,
+    deleteMessage,
+    editMessage,
+    undoMessage,
     setQueue,
     interrupt,
     respond,

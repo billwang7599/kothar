@@ -50,6 +50,7 @@ See [Depending on other extensions](dependencies.md#ondependencychanged).
 |---|---|
 | `onChatCreated(chat, context)` | A chat is made: a space, a worker or an extension's chat. |
 | `onChatArchived(chat, archived, context)` | A chat is archived (`archived` is `true`) or brought back (`false`). |
+| `onMessagesRemoved(removed, context)` | The user deleted messages from a chat, or cut it back to edit or undo a message. `removed` is `{ chat, entries, firstMessage, since }`: the log entries that are now `entry.removed`, the first memory message id that's gone or renumbered (memory numbers only what's left), and when the oldest was logged. Drop whatever you kept that quotes them, such as summaries from `firstMessage` on or prompts sent from `since` on: users delete secrets they pasted by mistake. |
 | `onChatRemoved(chat, context)` | A chat is deleted. By now it's gone from Kothar, with its log and folder. |
 | `onSpaceRemoved(space, context)` | A space is deleted, after `onChatRemoved` for it and each of its workers. `space` is its `SpaceDetail` as it was, with its work folder and checkouts. Kothar removes the work folder and the checkouts itself, since it made them; use this to forget what your extension kept about them. |
 | `onStatusChanged(chat, status, context)` | A chat's status changes: `idle`, `running`, `waiting` (on the user, such as a permission request) or `stopping`. |

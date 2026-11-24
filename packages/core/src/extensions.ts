@@ -76,6 +76,7 @@ const FIELD_USES: [keyof Extension, ExtensionUse][] = [
   ['onChatCreated', 'events'],
   ['onChatRemoved', 'events'],
   ['onChatArchived', 'events'],
+  ['onMessagesRemoved', 'events'],
   ['onSpaceRemoved', 'events'],
   ['onLimitReached', 'events'],
   ['panels', 'panels'],

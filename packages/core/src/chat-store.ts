@@ -1,7 +1,7 @@
 // The garage's plain files for settings and chats (design rule 9): settings.json, and each chat's chat.json and
 // log.jsonl, with the renames older installs need. Only reads and writes; the core keeps chats in memory and decides
 // when to save.
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ModelSettings } from './models.ts'
 import type { ChatEntry, ChatInfo, ContextSection, PermissionSwitches } from './shared.ts'
@@ -53,6 +53,18 @@ export const saveChatFile = (dir: string, info: ChatInfo, context: Record<string
 /** Adds one entry to a chat's log.jsonl. */
 export const appendEntry = (dir: string, entry: ChatEntry) =>
   appendFileSync(join(dir, 'log.jsonl'), JSON.stringify(entry) + '\n')
+
+/**
+ * Writes a chat's whole log.jsonl again, as after the user deletes messages: to a file beside it first, then renamed
+ * over it, so a crash leaves the old log or the new one, never half of one. Appends are synchronous too, so none lands
+ * in between.
+ */
+export const rewriteLog = (dir: string, entries: ChatEntry[]) => {
+  const file = join(dir, 'log.jsonl')
+  const temp = `${file}.${process.pid}.tmp`
+  writeFileSync(temp, entries.map((entry) => JSON.stringify(entry) + '\n').join(''))
+  renameSync(temp, file)
+}
 
 /** The ids of the chats stored under chatsDir: each folder with a chat.json. */
 export const storedChatIds = (chatsDir: string) =>

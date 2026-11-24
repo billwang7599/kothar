@@ -645,6 +645,14 @@ export type ClientMessage =
   // steer: hand it to the running turn if its engine can steer; otherwise, or without it, it waits for the turn to end.
   | { type: 'chat.send'; chatId: string; text: string; attachments?: Upload[]; steer?: boolean }
   | { type: 'chat.unqueue'; chatId: string; id: string }
+  // Deletes the message at entry in the chat's log: the user's, a worker's report, or the agent's reply with the tool
+  // calls and thinking around it. Not while its turn runs.
+  | { type: 'chat.deleteMessage'; chatId: string; entry: number }
+  // The user's message at entry, edited: it and everything after it are removed, and text runs as a new turn with the
+  // message's attachments. Only on a stopped chat.
+  | { type: 'chat.editMessage'; chatId: string; entry: number; text: string }
+  // Removes the user's message at entry and everything after it; replies with chat.undone, for the composer.
+  | { type: 'chat.undoMessage'; chatId: string; entry: number }
   | { type: 'chat.interrupt'; chatId: string; force?: boolean }
   | { type: 'permission.respond'; chatId: string; requestId: string; allow: boolean }
   | { type: 'question.respond'; chatId: string; requestId: string; answers?: Answers }
@@ -791,6 +799,10 @@ export type CoreMessage =
   | { type: 'chat.entry'; chatId: string; entry: ChatEntry }
   // The answer to chat.history: the log's entries from `from` up to `before`.
   | { type: 'chat.history'; chatId: string; before: number; from: number; entries: ChatEntry[] }
+  // The chat's log changed in place (messages deleted): the latest page, to show instead of what the UI had.
+  | { type: 'chat.log'; chatId: string; from: number; entries: ChatEntry[] }
+  // The answer to chat.undoMessage, to its sender: what the message said and carried, to put back in the composer.
+  | { type: 'chat.undone'; chatId: string; text: string; attachments: Upload[] }
   | { type: 'chat.delta'; chatId: string; text: string }
   | { type: 'chat.thinking'; chatId: string; text: string }
   | { type: 'chat.status'; chatId: string; status: ChatStatus }

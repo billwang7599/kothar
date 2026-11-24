@@ -325,7 +325,8 @@ const pinMessages: Extension = {
 | `run(message, chat, context)` | Runs on a click, with the message as an `ExtensionMessage`. Then the chat's marks and open panels draw again. |
 
 An `ExtensionMessage` is `{ entry, kind, at, text }`. `entry` is where the message is in the chat's log (its index in
-[`host.read`](host.md#reading-chats)), which never changes, since the log only grows, so it's the key to keep. Read a
+[`host.read`](host.md#reading-chats)), which never changes, since the log only grows (a message the user deletes
+stays as an `entry.removed` entry, so no index is used twice), so it's the key to keep. Read a
 message again with [`host.message`](host.md#reading-chats), and quote one in a panel with a `message` view, which
 scrolls the chat to it when clicked.
 

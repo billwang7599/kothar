@@ -61,6 +61,9 @@ export type ProtocolDeps = {
 
   // Turns
   sendMessage: (chat: Chat, text: unknown, uploads: unknown, steering?: boolean) => void
+  deleteMessage: (chat: Chat, entry: unknown) => void
+  editMessage: (chat: Chat, entry: unknown, text: unknown) => void
+  undoMessage: (chat: Chat, entry: unknown) => CoreMessage
   setQueue: (chat: Chat, queue: QueuedMessage[]) => void
   interrupt: (chat: Chat, force: boolean) => void
   respond: (chat: Chat, requestId: string, allow: boolean) => void
@@ -199,6 +202,9 @@ export function openProtocol(deps: ProtocolDeps) {
       for (const { path } of removed.attachments ?? []) rmSync(path, { force: true })
       return deps.setQueue(chat, chat.queue.filter((q) => q !== removed))
     },
+    'chat.deleteMessage': (message) => deps.deleteMessage(chatFor(message.chatId), message.entry),
+    'chat.editMessage': (message) => deps.editMessage(chatFor(message.chatId), message.entry, message.text),
+    'chat.undoMessage': (message, reply) => reply(deps.undoMessage(chatFor(message.chatId), message.entry)),
     'chat.interrupt': (message) => deps.interrupt(chatFor(message.chatId), message.force === true),
     'permission.respond': (message) => deps.respond(chatFor(message.chatId), message.requestId, message.allow === true),
     'question.respond': (message) => deps.answer(chatFor(message.chatId), message.requestId, message.answers),

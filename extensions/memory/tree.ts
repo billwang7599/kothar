@@ -78,14 +78,16 @@ const SUMMARIES_SCHEMA = {
 export type Summary = { id: number; n: number; text: string; at: string }
 export type Summaries = ReturnType<typeof openSummaries>
 // Where a chat's summaries live: summaries.jsonl in its folder, through the host's chat storage.
-export type SummaryFile = { read(): string | undefined; append(text: string): void }
+// write: replaces the whole file, to drop summaries (Summaries.drop); without it they're only forgotten.
+export type SummaryFile = { read(): string | undefined; append(text: string): void; write?(text: string): void }
 type Block = { id: number; n: number }
 type LineOf = (id: number, n: number) => string | undefined
 
 export const SUMMARIES_FILE = 'summaries.jsonl'
-export const summaryFileOf = (storage: Pick<ExtensionStorage, 'read' | 'append'>): SummaryFile => ({
+export const summaryFileOf = (storage: Pick<ExtensionStorage, 'read' | 'append' | 'write'>): SummaryFile => ({
   read: () => storage.read(SUMMARIES_FILE),
   append: (text) => storage.append(SUMMARIES_FILE, text),
+  write: (text) => storage.write(SUMMARIES_FILE, text),
 })
 
 const keyOf = (id: number, n: number) => `${id}+${n}`
@@ -105,8 +107,22 @@ export function openSummaries(file: SummaryFile) {
       file.append(summaries.map((summary) => JSON.stringify(summary) + '\n').join(''))
       for (const summary of summaries) records.set(keyOf(summary.id, summary.n), summary)
     },
+    // Forgets the summaries `stale` picks and writes the file again without them, so their text leaves the disk too.
+    // Returns how many went.
+    drop(stale: (summary: Summary) => boolean) {
+      const gone = [...records].filter(([, summary]) => stale(summary))
+      if (!gone.length) return 0
+      for (const [key] of gone) records.delete(key)
+      file.write?.([...records.values()].map((summary) => JSON.stringify(summary) + '\n').join(''))
+      return gone.length
+    },
   }
 }
+
+// A summary that no longer matches the chat's messages: it reaches past them, or the message it ends on isn't the
+// one it was written for (messages were deleted, so the ids after them moved).
+export const isStale = (messages: readonly MemoryMessage[], { id, n, at }: Summary) =>
+  id + n > messages.length || messages[id + n - 1]!.at !== at
 
 export const lineMaxChars = (n: number) => LINE_MAX_CHARS + LINE_CHARS_PER_LEVEL * Math.log2(n)
 

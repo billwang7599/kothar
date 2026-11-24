@@ -333,6 +333,8 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
     // The turn's error or an extension's note says it.
     case 'limit.reached':
     case 'turn.started':
+    // A deleted message leaves nothing to show.
+    case 'entry.removed':
       return items
   }
 }
@@ -543,6 +545,18 @@ function reduceAll(state: State, action: Action): State {
       }))
     case 'chat.history':
       return updateChat(state, action.chatId, (c) => withOlder(c, action))
+    // Messages were deleted: the latest page again, built anew, in place of every page loaded so far.
+    case 'chat.log':
+      return updateChat(state, action.chatId, (c) => ({
+        ...c,
+        entries: action.entries,
+        items: itemsOf(action.entries, action.from),
+        from: action.from,
+        shift: 0,
+      }))
+    // The composer takes it (chat.tsx), not the state.
+    case 'chat.undone':
+      return state
     case 'chat.delta':
       return updateChat(state, action.chatId, (c) => ({ ...c, draft: c.draft + action.text }))
     case 'chat.thinking':

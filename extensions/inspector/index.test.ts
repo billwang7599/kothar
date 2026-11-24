@@ -136,6 +136,23 @@ describe('the Inspector', () => {
     expect(existsSync(join(t.garage, 'chats', id))).toBe(false)
   })
 
+  it('forgets the turns that were sent a message after the user deletes it, and their texts', async () => {
+    const t = await core()
+    const id = t.create()
+    await t.send(id, 'first')
+    await t.send(id, 'my key is sk-SECRET-123')
+    await t.send(id, 'third')
+    expect(t.turns(id)).toHaveLength(3)
+    const all = () => t.texts(id).map((hash) => t.text(id, hash.replace(/\.txt$/, ''))).join('\n')
+    expect(all()).toContain('SECRET')
+    const entry = t.chat(id)!.entries.findIndex((e) => e.type === 'user.message' && e.text.includes('SECRET'))
+
+    t.handle({ type: 'chat.deleteMessage', chatId: id, entry })
+
+    expect(t.turns(id)).toHaveLength(1)
+    expect(all()).not.toContain('SECRET')
+  })
+
   it('records nothing while it is off, and nothing is built for it', async () => {
     const t = await core()
     const id = t.create()

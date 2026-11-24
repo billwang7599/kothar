@@ -157,6 +157,9 @@ export type ChatEntry = { at: string } & (
       // A live card the extension draws (ExtensionNoteView); extension is set with it.
       view?: ExtensionNoteViewRef
     }
+  // What's left of an entry the user deleted (a message, or a reply with its tool calls and thinking): only when it was
+  // logged, so every later entry keeps its index and no index is used twice. Memory and the transcript skip it.
+  | { type: 'entry.removed' }
   | Exclude<EngineEvent, { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' }>
 )
 
@@ -167,9 +170,15 @@ export type ChatEntry = { at: string } & (
 export type MessageKind = 'user' | 'work' | 'talk' | 'tool' | 'echo' | 'note'
 export type MemoryMessage = { id: number; kind: MessageKind; at: string; text: string }
 
+// Messages the user deleted from a chat's log, now entry.removed. entries: their indexes in the log, oldest first.
+// firstMessage: the first MemoryMessage id that's gone or renumbered: memory numbers only what's left, so every message
+// from there on may have a new id, and anything kept by id from there on is out of date. since: when the oldest of them
+// was logged; anything kept since then (such as the prompts later turns were sent) may quote them.
+export type MessagesRemoved = { chat: ChatDetail; entries: number[]; firstMessage: number; since: string }
+
 // A message the transcript draws on its own: the user's (user), a worker's report (work) or the agent's reply (talk).
-// entry: where it is in the chat's log (host.read's index), which never changes, since the log only grows. text as
-// logged: a report without the line Kothar adds for the agent.
+// entry: where it is in the chat's log (host.read's index), which never changes: the log only grows, and an entry the
+// user deletes stays as an entry.removed (onMessagesRemoved). text as logged: a report without the line Kothar adds for the agent.
 export type ExtensionMessage = { entry: number; kind: 'user' | 'work' | 'talk'; at: string; text: string }
 
 // A small button on each message in the transcript, beside Copy: shown on hover or keyboard focus. A message marked()
@@ -1055,6 +1064,10 @@ export type Extension = {
   // The chat is gone from the core by now; its log and folder too.
   onChatRemoved?(chat: ChatDetail, context: ExtensionContext): void | Promise<void>
   onChatArchived?(chat: ChatDetail, archived: boolean, context: ExtensionContext): void | Promise<void>
+  // The user deleted messages from the chat, or cut it back to edit or undo one (MessagesRemoved). Whatever the
+  // extension kept that quotes them (summaries, copies of prompts) should go, since users delete what they pasted by
+  // mistake, such as a secret.
+  onMessagesRemoved?(removed: MessagesRemoved, context: ExtensionContext): void | Promise<void>
   // A space was deleted (after onChatRemoved for each of its chats): its work folder and checkouts as they were. Kothar
   // removes the work folder and the checkouts itself, since it made them; this is for an extension's own records of
   // them, such as cached pull requests of a checkout.
@@ -1131,7 +1144,7 @@ export type ExtensionUse =
   // transformMessage, transformOutput
   | 'transforms'
   // onEvent, onTurnStarted, onTurnCompleted, onStatusChanged, onSessionEnded, onChatCreated, onChatRemoved,
-  // onChatArchived, onSpaceRemoved, onLimitReached, onStart, onStop, onDependencyChanged
+  // onChatArchived, onMessagesRemoved, onSpaceRemoved, onLimitReached, onStart, onStop, onDependencyChanged
   | 'events'
   // panels, noteViews, processes, onProcessAction, onProcessesChanged, onWaitAction, and host.wait, endWait, processes,
   // processAction, processesChanged
