@@ -21,9 +21,16 @@ const DOTS: Record<ChatStatus, string> = {
 /** A folded row shows the busiest status among the workers it hides. */
 const BUSIEST: ChatStatus[] = ['waiting', 'stopping', 'running', 'idle']
 const INDENTS = ['pl-8', 'pl-22', 'pl-36', 'pl-50']
-const ROW_ACTION = 'hidden group-hover/row:block group-focus-within/row:block'
-// The Spaces label's New group button: shown on hover or focus, its place kept so nothing moves.
-const LABEL_ACTION = 'opacity-0 group-hover/label:opacity-100 focus-visible:opacity-100'
+// A row's ⋯: shown on hover, on keyboard focus and while its menu is open. Its place is always kept (never display:
+// none), so nothing in the row moves when the pointer comes in: the workers chevron beside it stays put under the click.
+const ROW_ACTION =
+  'pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 ' +
+  'group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 ' +
+  'has-data-[state=open]:pointer-events-auto has-data-[state=open]:opacity-100'
+// The Spaces label's New group button: the same, shown on hover or focus with its place kept.
+const LABEL_ACTION =
+  'pointer-events-none opacity-0 group-hover/label:pointer-events-auto group-hover/label:opacity-100 ' +
+  'focus-visible:pointer-events-auto focus-visible:opacity-100'
 // After a keyboard move, the row is focused again for this long, while the core's updates reorder the list.
 const REFOCUS_MS = 1000
 
@@ -65,7 +72,7 @@ function MenuItems({ items }: { items: MenuItem[] }) {
 function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
   return (
     <DropdownMenu.Root modal={false}>
-      <div className={`mr-2 has-data-[state=open]:block ${ROW_ACTION}`}>
+      <div className={`mr-2 shrink-0 ${ROW_ACTION}`} data-row-action>
         <DropdownMenu.Trigger asChild>
           <Button variant="ghost" size="icon" aria-label={`More for ${label}`}>
             ⋯
@@ -126,9 +133,6 @@ function ChatRow(props: RowProps) {
     : unread
     ? 'text-text hover:bg-raised has-data-[state=open]:bg-raised'
     : 'text-muted hover:bg-raised hover:text-text has-data-[state=open]:bg-raised has-data-[state=open]:text-text'
-  const engineHidden = menu
-    ? 'group-hover/row:hidden group-focus-within/row:hidden group-has-data-[state=open]/row:hidden'
-    : ''
   return (
     <m.div
       className={`group/row relative flex shrink-0 items-center rounded transition-colors ${highlight} ${reorder?.dragging ? 'opacity-50' : ''}`}
@@ -153,7 +157,8 @@ function ChatRow(props: RowProps) {
           {chat.name}
         </span>
         {chat.worker && <span className="rounded border px-5 text-xs text-muted">worker</span>}
-        {showEngine && <span className={`text-xs text-faint ${engineHidden}`}>{chat.engine}</span>}
+        {/* Always shown: the ⋯ has its own place, so nothing needs to make room for it on hover. */}
+        {showEngine && <span className="shrink-0 text-xs text-faint">{chat.engine}</span>}
       </button>
       {fold && (
         <Hint text={fold.folded ? 'Show workers' : 'Hide workers'}>
