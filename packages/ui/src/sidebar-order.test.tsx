@@ -149,7 +149,7 @@ test('Alt+Arrow keys move a focused space within its group', () => {
 test('the row menu pins, unpins and moves a space, offering only the moves it can make', () => {
   render([{ ...A, pinned: true }, B, C])
   const beta = menuItems('Beta')
-  expect(beta.map((i) => i.textContent)).toEqual(['Rename…', 'Pin', 'Move down', 'Archive', 'Delete…'])
+  expect(beta.map((i) => i.textContent)).toEqual(['Rename…', 'Pin', 'Move to group', 'Move down', 'Archive', 'Delete…'])
   act(() => beta.find((i) => i.textContent === 'Pin')!.click())
   expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'b', pinned: true, index: 1 })
 

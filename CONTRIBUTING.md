@@ -163,6 +163,15 @@ Why some things are the way they are. Add one when you make a choice the next co
   profile folders are deleted when the extension starts. Don't bring back a second browser mode. If the extension
   isn't connected, the tools fail at once and say how to set it up.
 
+- **Space groups are core sidebar code, not an extension.** Groups are visual folders of spaces in the left sidebar.
+  They live where spaces are ordered: a space's `group` sits in its chat.json beside `pinned` and `order`, `chat.move`
+  places it, and the groups themselves (names and order) are `<garage>/groups.json`. The public extension API can add
+  launchers, panels and message actions but can't add rows to the spaces list or reorder it, and spaces' order is
+  already core (`moveChat`), so an extension would need a private hook. A group changes nothing about its spaces'
+  context, folders, memory or work folder. Pinned spaces show in Pinned, not in their group, but keep their group, so
+  Unpin puts them back in it. Deleting a group never deletes a space: they go below the ungrouped ones. Which groups are
+  collapsed is a window preference (localStorage `kothar.collapsedGroups`), like folded workers; opening a space in a
+  collapsed group (search, a link) expands it, and ⌘↑/↓ and ⌘1–9 skip spaces hidden in collapsed groups.
 - **Every engine tool can be switched from Kothar.** Kothar wants to see and control as much of what an agent does as
   it can, so each engine's built-in tools are listed in Settings → Engines → Tools (`engine-tools.ts`), each with a
   switch, core ones included, under two master switches (**Engine tools** for every engine, and one per engine). A
