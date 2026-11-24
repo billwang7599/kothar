@@ -14,6 +14,7 @@ import { openReportCard, reportCardKey, ReportsOpen, useReportCardChoice } from 
 import type { ChatView, Item, PanelView } from '../state.ts'
 import { SentAttachment } from './attachments.tsx'
 import { MessageActions } from './message-actions.tsx'
+import { deleteItem, MessageMenu } from './message-menu.tsx'
 import { detailsFor, MessageDetails } from './message-details.tsx'
 import { ASSISTANT, BODY, Dots, Row } from './parts.tsx'
 import { PermissionPrompt, PILL, Verdict, VERDICT_COLORS, VERDICTS } from './permission.tsx'
@@ -173,6 +174,11 @@ export function ItemView(props: ItemProps) {
         className={className}
       />
     ) : null
+  // The ⋯ with what the user can do to the message itself.
+  const menu = (kind: 'user' | 'work' | 'talk', entry: number | undefined, label: string, className?: string) =>
+    entry === undefined ? null : (
+      <MessageMenu label={label} items={[deleteItem(chat, entry, kind, send)]} connected={connected} className={className} />
+    )
   // The folded rows under a message, full width so an unfolded one has room.
   const details = (kind: 'user' | 'work' | 'talk', entry?: number) => {
     const offered = detailsFor(props.messageDetails, kind, entry)
@@ -191,7 +197,12 @@ export function ItemView(props: ItemProps) {
             chatId={chat.id}
             at={props.at}
             open={openChat?.(item.chatId)}
-            actions={actions('work', item.entry)}
+            actions={
+              <>
+                {actions('work', item.entry)}
+                {menu('work', item.entry, 'More for this report')}
+              </>
+            }
           />
           {details('work', item.entry)}
         </>
@@ -201,7 +212,8 @@ export function ItemView(props: ItemProps) {
         <>
           <div className="flex max-w-[85%] flex-col items-end gap-6 self-end">
             {item.attachments && (
-              <div className="flex flex-wrap justify-end gap-6">
+              <div className="flex flex-wrap items-center justify-end gap-6">
+                {!item.text && menu('user', item.entry, 'More for this message')}
                 {item.attachments.map((a) => (
                   <SentAttachment
                     key={a.path}
@@ -218,6 +230,7 @@ export function ItemView(props: ItemProps) {
             {item.text && (
               <div className="flex items-start gap-6">
                 {actions('user', item.entry, 'mt-6')}
+                {menu('user', item.entry, 'More for this message', 'mt-6')}
                 <CopyButton label="Copy message" text={item.text} className="mt-6" />
                 <div className="min-w-0 rounded-[12px_12px_4px_12px] bg-raised px-12 py-8 text-body shadow-raised leading-[1.5] whitespace-pre-wrap [word-break:break-word]">
                   <UserText text={item.text} />
@@ -238,6 +251,7 @@ export function ItemView(props: ItemProps) {
             </Revealed>
           </div>
           <CopyButton label="Copy reply" text={item.text} />
+          {menu('talk', item.entry, 'More for this reply')}
           {actions('talk', item.entry)}
           {details('talk', item.entry)}
         </div>

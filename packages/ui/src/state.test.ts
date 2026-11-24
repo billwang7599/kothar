@@ -86,6 +86,48 @@ const entry = (chatId: string, e: NewEntry): CoreMessage =>
 const run = (...actions: Action[]): State => actions.reduce(reduce, initialState)
 const items = (state: State, id = 'a') => state.chats.find((c) => c.id === id)!.items
 
+describe('deleted messages', () => {
+  it('shows nothing for a removed entry, and keeps later entries at their place in the log', () => {
+    const state = run(
+      snapshot([
+        chat('a', [
+          { at, type: 'user.message', text: 'secret' },
+          { at, type: 'text.completed', text: 'noted' },
+          { at, type: 'user.message', text: 'next' },
+        ]),
+      ]),
+      {
+        type: 'chat.log',
+        chatId: 'a',
+        from: 0,
+        entries: [
+          { at, type: 'entry.removed' },
+          { at, type: 'text.completed', text: 'noted' },
+          { at, type: 'user.message', text: 'next' },
+        ],
+      },
+    )
+    expect(items(state)).toEqual([
+      { kind: 'text', text: 'noted', entry: 1 },
+      { kind: 'user', text: 'next', entry: 2 },
+    ])
+    expect(JSON.stringify(state)).not.toContain('secret')
+  })
+
+  it('takes the latest page in place of every page loaded before', () => {
+    const page = (_from: number, texts: string[]) => texts.map((text): ChatEntry => ({ at, type: 'user.message', text }))
+    const state = run(snapshot([chat('a', page(40, ['forty', 'forty-one']), { from: 40 })]), {
+      type: 'chat.log',
+      chatId: 'a',
+      from: 41,
+      entries: page(41, ['forty-one']),
+    })
+    const shown = state.chats.find((c) => c.id === 'a')!
+    expect(shown.from).toBe(41)
+    expect(shown.items).toEqual([{ kind: 'user', text: 'forty-one', entry: 41 }])
+  })
+})
+
 describe('reduce', () => {
   it('loads a snapshot, folding saved entries into items and selecting Main', () => {
     const state = run(
