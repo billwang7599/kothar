@@ -127,7 +127,10 @@ test('opened in a wide window, then shown again after the window narrowed (anoth
   const observers: (() => void)[] = []
   const restore = { RO: globalThis.ResizeObserver, width: Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')! }
   globalThis.ResizeObserver = class {
-    constructor(private fire: () => void) {}
+    fire: () => void
+    constructor(fire: () => void) {
+      this.fire = fire
+    }
     observe() {
       observers.push(this.fire)
     }
