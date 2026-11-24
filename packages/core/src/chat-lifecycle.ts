@@ -68,6 +68,8 @@ export type ChatLifecycleDeps = {
   stopSession: (chat: Chat) => void
   forgetChat: (chatId: string) => void
   removeWorkDir: (chat: Chat) => Promise<void>
+  // Whether a sidebar group with this id exists (groups.ts).
+  hasGroup: (id: string | undefined) => boolean
 }
 
 export const checkName = (name: unknown) => {
@@ -211,19 +213,38 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
     }
   }
 
-  // Moves a space to index among the pinned spaces or the others, renumbering that group's order.
-  const moveChat = (chat: Chat, pinned: boolean, index: unknown) => {
+  // Moves a space to index among the pinned spaces or the others, renumbering that place's order. Unpinned spaces are
+  // placed among the spaces in their own group (or the ungrouped ones); `group` moves the space into a group first
+  // (null: out of any group). A pinned space keeps its group for when it's unpinned.
+  const moveChat = (chat: Chat, pinned: boolean, index: unknown, group?: unknown) => {
     if (chat.info.extension || chat.info.parentId) throw new Error('Only spaces can be moved or pinned')
     if (chat.info.archived) throw new Error('This chat is archived. Unarchive it first.')
     if (typeof index !== 'number' || !Number.isInteger(index)) throw new Error('The place to move to must be a number')
-    const group = [...chats.values()]
+    if (group !== undefined && group !== null && (typeof group !== 'string' || !deps.hasGroup(group))) {
+      throw new Error('No such group')
+    }
+    const groupOf = (info: ChatInfo) => (deps.hasGroup(info.group) ? info.group : undefined)
+    const own = group === undefined ? groupOf(chat.info) : (group ?? undefined)
+    const place = [...chats.values()]
       .map((c) => c.info)
-      .filter((c) => !c.extension && !c.parentId && !c.archived && !!c.pinned === pinned && c.id !== chat.info.id)
+      .filter(
+        (c) =>
+          !c.extension &&
+          !c.parentId &&
+          !c.archived &&
+          !!c.pinned === pinned &&
+          (pinned || groupOf(c) === own) &&
+          c.id !== chat.info.id,
+      )
       .sort(bySpaceOrder)
-    group.splice(Math.max(0, Math.min(index, group.length)), 0, chat.info)
-    group.forEach((info, order) => {
+    place.splice(Math.max(0, Math.min(index, place.length)), 0, chat.info)
+    place.forEach((info, order) => {
       const c = chats.get(info.id)!
-      if (c.info.order !== order || !!c.info.pinned !== pinned) deps.updateChat(c, { order, pinned: pinned || undefined })
+      const change: Partial<ChatInfo> = {}
+      if (c.info.order !== order) change.order = order
+      if (!!c.info.pinned !== pinned) change.pinned = pinned || undefined
+      if (c === chat && group !== undefined && c.info.group !== own) change.group = own
+      if (Object.keys(change).length) deps.updateChat(c, change)
     })
   }
 

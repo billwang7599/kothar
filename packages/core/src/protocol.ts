@@ -28,6 +28,7 @@ import {
 import { checkSwitch } from './settings.ts'
 import { messageOf } from './util.ts'
 import type { Workers } from './workers.ts'
+import type { GroupActions, Groups } from './groups.ts'
 import type { EngineTools } from './engine-tools.ts'
 import type { CorePrompts } from './core-prompts.ts'
 
@@ -50,7 +51,9 @@ export type ProtocolDeps = {
   createChat: (spec: NewChat) => ChatInfo
   renameChat: (chat: Chat, name: unknown) => void
   archiveChat: (chat: Chat, archived: boolean) => void
-  moveChat: (chat: Chat, pinned: boolean, index: unknown) => void
+  moveChat: (chat: Chat, pinned: boolean, index: unknown, group?: unknown) => void
+  groups: Pick<Groups, 'rename' | 'move'>
+  groupActions: Pick<GroupActions, 'create' | 'remove'>
   deleteChat: (chat: Chat) => void
   updateChat: (chat: Chat, change: Partial<ChatInfo>) => void
   checkActive: (chat: Chat) => void
@@ -146,7 +149,12 @@ export function openProtocol(deps: ProtocolDeps) {
       }),
     'chat.rename': (message) => deps.renameChat(chatFor(message.chatId), message.name),
     'chat.archive': (message) => deps.archiveChat(chatFor(message.chatId), message.archived === true),
-    'chat.move': (message) => deps.moveChat(chatFor(message.chatId), message.pinned === true, message.index),
+    'chat.move': (message) =>
+      deps.moveChat(chatFor(message.chatId), message.pinned === true, message.index, message.group),
+    'group.create': (message) => void deps.groupActions.create(message.name, message.chatId),
+    'group.rename': (message) => deps.groups.rename(message.groupId, message.name),
+    'group.move': (message) => deps.groups.move(message.groupId, message.index),
+    'group.delete': (message) => deps.groupActions.remove(message.groupId),
     'chat.delete': (message) => deps.deleteChat(chatFor(message.chatId)),
     'chat.read': (message) => {
       const chat = chatFor(message.chatId)

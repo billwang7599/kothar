@@ -5,6 +5,7 @@ import type { ChatDetail, Extension, ExtensionContext, SentTurn, SpaceDetail } f
 import { randomUUID } from 'node:crypto'
 import { openAccounts } from './accounts.ts'
 import { openChatSetups, openSetups } from './setups.ts'
+import { openGroupActions, openGroups } from './groups.ts'
 import { openChatLifecycle } from './chat-lifecycle.ts'
 import { openActivity } from './activity.ts'
 import { openKotharMcp, summaryOf } from './kothar-mcp.ts'
@@ -218,6 +219,8 @@ function assembleCore(options: {
   const checkEnabled = (engine: string) => {
     if (!isEnabled(engine)) throw new Error(`Engine "${engine}" is off. Turn it on in Settings.`)
   }
+  // Sidebar groups of spaces (groups.json).
+  const spaceGroups = openGroups({ garage, broadcast })
   // Saved setups, read from their files each time so a hand edit applies on the next message too.
   const jobSetups = openSetups({
     garage,
@@ -778,8 +781,16 @@ function assembleCore(options: {
     stopSession,
     forgetChat,
     removeWorkDir: (chat) => removeWorkDir(chat),
+    hasGroup: spaceGroups.has,
   })
   loadAll()
+  const groupActions = openGroupActions({
+    groups: spaceGroups,
+    chats,
+    chatFor,
+    updateChat: (chat, change) => updateChat(chat, change),
+    moveChat,
+  })
 
   migrateExtensionSettings({ extensions, settings, saveSettings, chats: () => chats.values(), saveChat, settingsErrors, extensionError })
 
@@ -1009,6 +1020,8 @@ function assembleCore(options: {
     renameChat,
     archiveChat,
     moveChat,
+    groups: spaceGroups,
+    groupActions,
     deleteChat,
     updateChat,
     checkActive,
@@ -1114,6 +1127,7 @@ function assembleCore(options: {
     ],
     modelLists: models.lists,
     setups: jobSetups.list,
+    groups: spaceGroups.list,
     memory: () => settings.memory ?? {},
     workers: workers.info,
     engineTools: engineTools.info,

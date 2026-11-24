@@ -470,6 +470,75 @@ describe('chats', () => {
     expect(places(reopened.core)).toEqual(['A*', 'D', 'B', 'C'])
   })
 
+  it('groups spaces in the sidebar, keeping groups and places across a restart', () => {
+    const t = setup(textScript)
+    const [a, b, c, d] = ['A', 'B', 'C', 'D'].map((name) => createChat(t, { name })) as ChatState[] as [
+      ChatState,
+      ChatState,
+      ChatState,
+      ChatState,
+    ]
+    const info = (core: Core, id: string) => core.chats().find((x) => x.id === id)!
+    const groupIds = (core: Core) => core.groups().map((g) => g.name)
+    // Spaces in each group (or '' for none), by their place.
+    const places = (core: Core) => {
+      const out: Record<string, string[]> = {}
+      for (const x of core.chats().filter((x) => !x.extension && !x.parentId && !x.archived).sort(bySpaceOrder)) {
+        const group = x.pinned ? '*' : (core.groups().find((g) => g.id === x.group)?.name ?? '')
+        ;(out[group] ??= []).push(x.name)
+      }
+      return out
+    }
+    for (const [i, x] of [a, b, c, d].entries()) t.handle({ type: 'chat.move', chatId: x.id, pinned: false, index: i })
+
+    t.handle({ type: 'group.create', name: ' Work ', chatId: b.id })
+    expect(groupIds(t.core)).toEqual(['Work'])
+    const work = t.core.groups()[0]!
+    expect(t.messages).toContainEqual({ type: 'groups.updated', groups: [work] })
+    expect(JSON.parse(readFileSync(join(t.garage, 'groups.json'), 'utf8'))).toEqual({ groups: [work] })
+    expect(info(t.core, b.id).group).toBe(work.id)
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: false, index: 0, group: work.id })
+    expect(places(t.core)).toEqual({ Work: ['D', 'B'], '': ['A', 'C'] })
+    // Moves within a group keep to it.
+    t.handle({ type: 'chat.move', chatId: b.id, pinned: false, index: 0 })
+    expect(places(t.core)).toEqual({ Work: ['B', 'D'], '': ['A', 'C'] })
+
+    t.handle({ type: 'group.create', name: 'Play' })
+    const play = t.core.groups()[1]!
+    t.handle({ type: 'group.move', groupId: play.id, index: 0 })
+    expect(groupIds(t.core)).toEqual(['Play', 'Work'])
+    t.handle({ type: 'group.rename', groupId: play.id, name: 'Fun' })
+    expect(groupIds(t.core)).toEqual(['Fun', 'Work'])
+    expect(() => t.handle({ type: 'group.rename', groupId: play.id, name: '  ' })).toThrow(/name/)
+    expect(() => t.handle({ type: 'group.rename', groupId: 'nope', name: 'X' })).toThrow(/group/)
+    expect(() => t.handle({ type: 'chat.move', chatId: a.id, pinned: false, index: 0, group: 'nope' })).toThrow(/group/)
+    expect(() => t.handle({ type: 'group.create', name: 'X', chatId: 'main' })).toThrow(/spaces/)
+    expect(groupIds(t.core)).toEqual(['Fun', 'Work'])
+
+    // Pinned spaces sit in Pinned and keep their group, going back into it when unpinned.
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: true, index: 0 })
+    expect(places(t.core)).toEqual({ '*': ['D'], Work: ['B'], '': ['A', 'C'] })
+    expect(info(t.core, d.id).group).toBe(work.id)
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: false, index: 0 })
+    expect(places(t.core)).toEqual({ Work: ['D', 'B'], '': ['A', 'C'] })
+    // Out of a group.
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: false, index: 1, group: null })
+    expect(places(t.core)).toEqual({ Work: ['B'], '': ['A', 'D', 'C'] })
+    expect(JSON.parse(readFileSync(chatFile(t, d.id), 'utf8'))).not.toHaveProperty('group')
+    t.handle({ type: 'chat.move', chatId: c.id, pinned: false, index: 5, group: work.id })
+    t.core.close()
+
+    const reopened = setup(textScript, t.garage)
+    expect(groupIds(reopened.core)).toEqual(['Fun', 'Work'])
+    expect(places(reopened.core)).toEqual({ Work: ['B', 'C'], '': ['A', 'D'] })
+    // Deleting a group keeps its spaces, below the ungrouped ones in their order.
+    reopened.handle({ type: 'group.delete', groupId: work.id })
+    expect(groupIds(reopened.core)).toEqual(['Fun'])
+    expect(places(reopened.core)).toEqual({ '': ['A', 'D', 'B', 'C'] })
+    expect(reopened.core.chats().filter((x) => x.group)).toEqual([])
+    expect(reopened.core.chats().filter((x) => !x.extension)).toHaveLength(4)
+  })
+
   it('archives a chat, keeping its log, and refuses to run it until unarchived', async () => {
     const t = setup(textScript)
     const chat = createChat(t)

@@ -287,6 +287,9 @@ export type ChatInfo = PermissionSwitches & {
   // user moves or pins one. A space without it (a new one) sits above the ordered ones, newest first.
   pinned?: boolean
   order?: number
+  // Spaces only: the id of the sidebar group (groups.json) the space sits in. Purely visual. A pinned space keeps it and
+  // goes back into the group when unpinned; an id with no group behind it counts as no group.
+  group?: string
   createdAt: string
   role?: ModelRole
   model?: string
@@ -328,6 +331,10 @@ export type Setup = {
 }
 
 export const MAX_SETUP_INSTRUCTIONS = 20_000
+
+/** A named folder of spaces in the sidebar (`<garage>/groups.json`, in order). Purely visual. */
+export type SpaceGroup = { id: string; name: string }
+export const MAX_GROUP_NAME = 80
 
 /** Finished since the user last saw it; chats from before read state existed have no doneAt until their next turn. */
 export const isUnread = (chat: Pick<ChatInfo, 'doneAt' | 'readAt'>) =>
@@ -617,8 +624,15 @@ export type ClientMessage =
   | ({ type: 'chat.create' } & NewChat)
   | { type: 'chat.rename'; chatId: string; name: string }
   | { type: 'chat.archive'; chatId: string; archived: boolean }
-  // Moves a space to `index` among the active spaces that are (un)pinned like `pinned`, pinning or unpinning it.
-  | { type: 'chat.move'; chatId: string; pinned: boolean; index: number }
+  // Moves a space to `index` among the active spaces that are (un)pinned like `pinned`, pinning or unpinning it. With
+  // `group`, it also goes into that group (null: out of any group); an unpinned space is placed among its group's spaces.
+  | { type: 'chat.move'; chatId: string; pinned: boolean; index: number; group?: string | null }
+  // Sidebar groups of spaces. A new group goes at the bottom of the groups; with chatId, that space moves into it.
+  | { type: 'group.create'; name: string; chatId?: string }
+  | { type: 'group.rename'; groupId: string; name: string }
+  | { type: 'group.move'; groupId: string; index: number }
+  // Removes a group; its spaces go back to the ungrouped spaces.
+  | { type: 'group.delete'; groupId: string }
   | { type: 'chat.delete'; chatId: string }
   // The user has seen the chat's latest turn.
   | { type: 'chat.read'; chatId: string }
@@ -756,6 +770,8 @@ export type CoreMessage =
       extensions: ExtensionInfo[]
       modelLists: ModelLists
       setups: Setup[]
+      // Absent from an older core.
+      groups?: SpaceGroup[]
       memory: MemorySettings
       workers: WorkersSettings
       // Absent from an older core.
@@ -807,6 +823,7 @@ export type CoreMessage =
   | { type: 'restart.updated'; restart: RestartState }
   | { type: 'models.updated'; lists: ModelLists }
   | { type: 'setups.updated'; setups: Setup[] }
+  | { type: 'groups.updated'; groups: SpaceGroup[] }
   // The answer to setup.save, to its sender only: the setup as saved, or why it was refused.
   | { type: 'setup.saved'; setup: Setup }
   | { type: 'setup.refused'; error: string }

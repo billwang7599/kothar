@@ -24,6 +24,7 @@ import type {
   ModelLists,
   Run,
   Setup,
+  SpaceGroup,
   WorkersSettings,
   EngineToolsSettings,
   PromptInfo,
@@ -118,6 +119,8 @@ export type State = {
   extensions: ExtensionInfo[]
   modelLists: ModelLists
   setups: Setup[]
+  // The sidebar's groups of spaces, top to bottom.
+  groups: SpaceGroup[]
   // Settings → Workers; absent until the core's snapshot arrives.
   workers?: WorkersSettings
   // Settings → Engines → Tools; absent until the core's snapshot arrives.
@@ -191,6 +194,7 @@ export const initialState: State = {
   extensions: [],
   modelLists: NO_LISTS,
   setups: [],
+  groups: [],
   workFolder: { defaultPath: '', canSandbox: true },
   marketFailures: {},
   communityExtensions: false,
@@ -481,6 +485,7 @@ function reduceAll(state: State, action: Action): State {
         extensions: action.extensions,
         modelLists: action.modelLists,
         setups: action.setups ?? [],
+        groups: action.groups ?? [],
         workers: action.workers,
         ...(action.engineTools && { engineTools: action.engineTools }),
         corePrompts: action.corePrompts,
@@ -611,6 +616,8 @@ function reduceAll(state: State, action: Action): State {
       return { ...state, modelLists: action.lists }
     case 'setups.updated':
       return { ...state, setups: action.setups }
+    case 'groups.updated':
+      return { ...state, groups: action.groups }
     case 'setup.saved':
     case 'setup.refused': {
       const answer = action.type === 'setup.saved' ? { id: action.setup.id } : { error: action.error }
@@ -685,7 +692,24 @@ const newestFirst = (a: ChatView, b: ChatView) => b.createdAt.localeCompare(a.cr
 
 export type TreeRow = { chat: ChatView; depth: number }
 
-export function chatTree(chats: ChatView[]) {
+/** The sidebar group a space sits in: its own group if that still exists. Pinned spaces show in Pinned instead. */
+export const groupOf = (chat: Pick<ChatView, 'group'>, groups: readonly SpaceGroup[]): SpaceGroup | undefined =>
+  chat.group === undefined ? undefined : groups.find((g) => g.id === chat.group)
+
+/**
+ * How active spaces sort, top to bottom as the sidebar lists them: pinned first, then each group's spaces in the
+ * groups' order, then the ungrouped ones; by their place within each.
+ */
+export function bySidebarPlace(groups: readonly SpaceGroup[]) {
+  const rank = (c: ChatView) => {
+    if (c.pinned) return -1
+    const group = groupOf(c, groups)
+    return group ? groups.indexOf(group) : groups.length
+  }
+  return (a: ChatView, b: ChatView) => rank(a) - rank(b) || bySpaceOrder(a, b)
+}
+
+export function chatTree(chats: ChatView[], groups: readonly SpaceGroup[] = []) {
   const below = (chat: ChatView, archived: boolean) =>
     chats
       .filter((c) => c.parentId === chat.id && c.archived === archived)
@@ -698,7 +722,7 @@ export function chatTree(chats: ChatView[]) {
   const archivedRoots = chats.filter((c) => c.archived && !chats.find((p) => p.id === c.parentId)?.archived)
   return {
     active: activeRoots
-      .sort((a, b) => Number(!!b.extension) - Number(!!a.extension) || bySpaceOrder(a, b))
+      .sort((a, b) => Number(!!b.extension) - Number(!!a.extension) || bySidebarPlace(groups)(a, b))
       .flatMap((c) => walk(c, 0, false)),
     archived: archivedRoots.sort(newestFirst).flatMap((c) => walk(c, 0, true)),
   }
