@@ -508,12 +508,18 @@ function reduceAll(state: State, action: Action): State {
         selectedId: action.chat.parentId ? state.selectedId : action.chat.id,
       }
     case 'chat.updated':
-      return updateChat(state, action.chat.id, (c) => ({
-        ...c,
-        model: undefined,
-        thinking: undefined,
-        run: undefined,
+      // The core sends the chat's whole info, and JSON drops a cleared field (pinned, model, thinking, run…), so the
+      // update replaces the info outright; only what the UI keeps of its own carries over.
+      return updateChat(state, action.chat.id, ({ status, items, entries, from, shift, draft, queue, waits }) => ({
         ...action.chat,
+        status,
+        items,
+        entries,
+        from,
+        shift,
+        draft,
+        queue,
+        waits,
       }))
     case 'chat.removed': {
       const chats = state.chats.filter((c) => c.id !== action.chatId)

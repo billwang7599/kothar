@@ -225,6 +225,22 @@ describe('reduce', () => {
     expect(cleared.chats[1]?.thinking).toBe('high')
   })
 
+  it('clears any field the core cleared, since JSON drops it: an unpinned space is no longer pinned', () => {
+    const { status, entries, draft, queue, ...info } = chat('c')
+    const state = run(snapshot([chat(MAIN_CHAT_ID), chat('c', [], { pinned: true, order: 3, setup: 's', workDir: '/w' })]))
+    const wire = JSON.parse(JSON.stringify({ ...info, pinned: undefined, order: 0 }))
+    const unpinned = reduce({ ...state, chats: state.chats.map((c) => (c.id === 'c' ? { ...c, draft: 'typing' } : c)) }, {
+      type: 'chat.updated',
+      chat: wire,
+    })
+    const c = unpinned.chats[1]!
+    expect(c).not.toHaveProperty('pinned')
+    expect(c).not.toHaveProperty('setup')
+    expect(c).not.toHaveProperty('workDir')
+    expect(c).toMatchObject({ order: 0, draft: 'typing', status: 'idle' })
+    expect(reduce(unpinned, { type: 'chat.updated', chat: { ...wire, pinned: true } }).chats[1]?.pinned).toBe(true)
+  })
+
   it('removes a chat and selects the pinned chat if the selection went with it', () => {
     const state = run(snapshot([chat(MAIN_CHAT_ID), chat('s'), chat('c')]), { type: 'select', chatId: 's' })
     expect(reduce(state, { type: 'chat.removed', chatId: 'c' }).selectedId).toBe('s')
