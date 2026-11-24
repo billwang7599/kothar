@@ -1,6 +1,6 @@
 // Files waiting to go with the next message: picked, pasted or dropped, checked against the size limits, read in.
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_TOTAL_BYTES } from '@kothar/core/shared'
+import { IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_TOTAL_BYTES, type Upload } from '@kothar/core/shared'
 import { formatBytes } from '../format.ts'
 import type { Pending } from './attachments.tsx'
 
@@ -48,7 +48,18 @@ export function useAttachments(notify: (message: string) => void) {
       }
     }
   }
-  return { pending, attach, unattach }
+  // Files given back by the core (an undone message's), already read in.
+  const restore = (uploads: Upload[]) => {
+    const added = uploads.map((upload): Pending => {
+      const bytes = Uint8Array.from(atob(upload.base64), (c) => c.charCodeAt(0))
+      const preview = IMAGE_TYPES.includes(upload.mimeType) && typeof URL.createObjectURL === 'function'
+        ? URL.createObjectURL(new Blob([bytes], { type: upload.mimeType }))
+        : undefined
+      return { ...upload, id: crypto.randomUUID(), size: bytes.length, preview }
+    })
+    if (added.length) setPending((list) => [...list, ...added])
+  }
+  return { pending, attach, unattach, restore }
 }
 
 /**

@@ -1588,3 +1588,22 @@ describe('one right-hand column at a time', () => {
     }
   })
 })
+
+test('an undone message comes back to the composer once, before what was typed, with its files', () => {
+  localStorage.clear()
+  localStorage.setItem('kothar.drafts', JSON.stringify({ c1: 'typed meanwhile' }))
+  const restored = {
+    text: 'oops, wrong chat',
+    attachments: [{ name: 'a.txt', mimeType: 'text/plain', base64: btoa('contents') }],
+    nonce: 1,
+  }
+  render({ restored })
+  const area = () => container.querySelector('textarea')!
+  expect(area().value).toBe('oops, wrong chat\n\ntyped meanwhile')
+  expect(container.querySelector('[aria-label="Attachments"]')!.textContent).toContain('a.txt')
+  // The same undo isn't taken again when the chat draws again.
+  render({ restored, draft: '' })
+  expect(area().value).toBe('oops, wrong chat\n\ntyped meanwhile')
+  expect(container.querySelectorAll('[aria-label="Attachments"] li')).toHaveLength(1)
+  localStorage.clear()
+})

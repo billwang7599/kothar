@@ -1,9 +1,10 @@
 // The ⋯ beside a message's Copy: what the user can do to the message itself, such as Delete. Shown on hover or keyboard
 // focus like Copy, and kept in view while its menu is open.
+import { useState } from 'react'
 import { DropdownMenu } from 'radix-ui'
 import { m } from 'motion/react'
 import type { ClientMessage } from '@kothar/core/shared'
-import { confirm, COPY_REVEAL, Hint, MOTION } from '../controls.tsx'
+import { Button, confirm, COPY_REVEAL, Hint, MOTION } from '../controls.tsx'
 import type { ChatView, Item } from '../state.ts'
 
 export type MessageMenuItem = { label: string; run: () => void; danger?: boolean; disabledReason?: string }
@@ -43,6 +44,74 @@ export function deleteItem(chat: ChatView, entry: number, kind: Kind, send: (m: 
       if (ok) send({ type: 'chat.deleteMessage', chatId: chat.id, entry })
     },
   }
+}
+
+const STOP_FIRST = 'Stop the chat first, or wait for its turn to end.'
+
+/** Edit: the message turns into a box in place; saving sends it again from there (EditBox). */
+export function editItem(chat: ChatView, start: () => void): MessageMenuItem {
+  return { label: 'Edit', run: start, ...(chat.status !== 'idle' && { disabledReason: STOP_FIRST }) }
+}
+
+/** Undo, on the user's last message: it and everything after it go, and it comes back to the composer. */
+export function undoItem(chat: ChatView, entry: number, send: (m: ClientMessage) => void): MessageMenuItem {
+  return {
+    label: 'Undo',
+    ...(chat.status !== 'idle' && { disabledReason: STOP_FIRST }),
+    run: async () => {
+      const ok = await confirm({
+        text: 'Undo this message?',
+        body: `It and the reply to it go from the chat and from what the agent remembers, and its text comes back to the message box. ${FILES_STAY}`,
+        ok: 'Undo',
+      })
+      if (ok) send({ type: 'chat.undoMessage', chatId: chat.id, entry })
+    },
+  }
+}
+
+/** Whether item is the user's last message in the chat, the one Undo is offered on. */
+export const isLastMessage = (chat: Pick<ChatView, 'items'>, entry: number) =>
+  chat.items.findLast((item): item is Extract<Item, { kind: 'user' }> => item.kind === 'user' && item.entry !== undefined)?.entry ===
+  entry
+
+type EditProps = { text: string; save: (text: string) => void; cancel: () => void; canSave: (text: string) => boolean }
+
+/** The user's message, editable in place: Enter sends it again, Shift+Enter makes a new line, Esc cancels. */
+export function EditBox({ text: initial, save, cancel, canSave }: EditProps) {
+  const [text, setText] = useState(initial)
+  const ok = canSave(text)
+  return (
+    <div className="flex w-full min-w-[min(28rem,100%)] flex-col gap-6" data-edit-box>
+      <textarea
+        className="block max-h-[calc(12lh+16px)] min-h-[calc(2lh+16px)] w-full resize-none rounded-[12px_12px_4px_12px] border border-accent bg-panel px-12 py-8 text-body leading-[1.5] shadow-floating field-sizing-content"
+        aria-label="Edit message"
+        value={text}
+        autoFocus
+        onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return
+          if (e.key === 'Escape') {
+            e.preventDefault()
+            cancel()
+          }
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            if (ok) save(text)
+          }
+        }}
+      />
+      <div className="flex items-center justify-end gap-8">
+        <span className="mr-auto text-xs text-muted">Sends again from here; later messages go. {FILES_STAY}</span>
+        <Button variant="ghost" size="small" onClick={cancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" size="small" disabled={!ok} onClick={() => save(text)}>
+          Send
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 type Props = { label: string; items: MessageMenuItem[]; connected: boolean; className?: string }

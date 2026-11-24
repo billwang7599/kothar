@@ -2,6 +2,7 @@
 // the Context panel beside it. The transcript items, cards and message box live in chat/.
 import type { ExtensionAction } from '@kothar/extension-api'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { draftOf, saveDraft } from './drafts.ts'
 import { AnimatePresence, m, useReducedMotion } from 'motion/react'
 import {
   levelsOf,
@@ -119,11 +120,26 @@ function useHeight(ref: RefObject<HTMLElement | null>, watching: boolean) {
   return height
 }
 const NO_ACTIONS: MessageActionInfo[] = []
+// The undo each chat's composer has taken in, by its nonce, so switching back to the chat doesn't take it again.
+const takenRestores = new Map<string, number>()
 const entryOf = (item: Item) => ('entry' in item && item.entry !== undefined ? [item.entry] : [])
 
 export function Chat(props: ChatProps) {
   const { chat, folder, engines, accounts, connected, send, openSettings, workFolder } = props
-  const { pending, attach, unattach } = useAttachments(props.notify)
+  const { pending, attach, unattach, restore } = useAttachments(props.notify)
+  // An undone message comes back to the composer: its text before anything already typed, its files with the others.
+  // The composer reads its text from the draft as it mounts, so it mounts again.
+  const restored = chat.restored
+  const [composerKey, setComposerKey] = useState(0)
+  useEffect(() => {
+    if (!restored || takenRestores.get(chat.id) === restored.nonce) return
+    takenRestores.set(chat.id, restored.nonce)
+    const typed = draftOf(chat.id)
+    saveDraft(chat.id, typed.trim() ? `${restored.text}\n\n${typed}` : restored.text)
+    restore(restored.attachments)
+    setComposerKey((key) => key + 1)
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- once per undo, by its nonce
+  }, [chat.id, restored?.nonce])
   const listRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // True while the user is at the bottom: new output then scrolls into view. Scrolling up turns it off.
@@ -521,7 +537,7 @@ export function Chat(props: ChatProps) {
           )}
           {!showEngineNote && !viewOnly && (
             <Composer
-              key={chat.id}
+              key={`${chat.id}:${composerKey}`}
               chat={chat}
               connected={connected}
               pending={pending}

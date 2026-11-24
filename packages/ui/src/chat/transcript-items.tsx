@@ -14,7 +14,7 @@ import { openReportCard, reportCardKey, ReportsOpen, useReportCardChoice } from 
 import type { ChatView, Item, PanelView } from '../state.ts'
 import { SentAttachment } from './attachments.tsx'
 import { MessageActions } from './message-actions.tsx'
-import { deleteItem, MessageMenu } from './message-menu.tsx'
+import { deleteItem, EditBox, editItem, isLastMessage, MessageMenu, undoItem, type MessageMenuItem } from './message-menu.tsx'
 import { detailsFor, MessageDetails } from './message-details.tsx'
 import { ASSISTANT, BODY, Dots, Row } from './parts.tsx'
 import { PermissionPrompt, PILL, Verdict, VERDICT_COLORS, VERDICTS } from './permission.tsx'
@@ -159,6 +159,67 @@ function ReportCard({ item, chatId, at, open, actions }: ReportProps) {
   )
 }
 
+type UserItemProps = {
+  item: Extract<Item, { kind: 'user' }>
+  chat: ChatView
+  contextItems?: ContextItem[]
+  connected: boolean
+  send: (m: ClientMessage) => void
+  menu: (className: string | undefined, more: MessageMenuItem[]) => ReactNode
+  actions: ReactNode
+  details: ReactNode
+}
+
+/** The user's message: its attachments, its text, and Edit (in place), Undo (the last one) and Delete in its ⋯. */
+function UserItem({ item, chat, contextItems, connected, send, menu, actions, details }: UserItemProps) {
+  const [editing, setEditing] = useState(false)
+  const { entry } = item
+  const more =
+    entry === undefined
+      ? []
+      : [editItem(chat, () => setEditing(true)), ...(isLastMessage(chat, entry) ? [undoItem(chat, entry, send)] : [])]
+  const editable = editing && entry !== undefined && chat.status === 'idle'
+  const save = (text: string) => {
+    send({ type: 'chat.editMessage', chatId: chat.id, entry: entry!, text })
+    setEditing(false)
+  }
+  return (
+    <>
+      <div className={`flex flex-col items-end gap-6 self-end ${editable ? 'w-full max-w-[85%]' : 'max-w-[85%]'}`}>
+        {item.attachments && (
+          <div className="flex flex-wrap items-center justify-end gap-6">
+            {!item.text && !editable && menu(undefined, more)}
+            {item.attachments.map((a) => (
+              <SentAttachment key={a.path} chat={chat} attachment={a} contextItems={contextItems} connected={connected} send={send} />
+            ))}
+          </div>
+        )}
+        {item.midTurn && <span className="text-xs text-faint">Sent mid-turn</span>}
+        {editable ? (
+          <EditBox
+            text={item.text}
+            save={save}
+            cancel={() => setEditing(false)}
+            canSave={(text) => connected && (text.trim() !== '' || !!item.attachments?.length)}
+          />
+        ) : (
+          item.text && (
+            <div className="flex items-start gap-6">
+              {actions}
+              {menu('mt-6', more)}
+              <CopyButton label="Copy message" text={item.text} className="mt-6" />
+              <div className="min-w-0 rounded-[12px_12px_4px_12px] bg-raised px-12 py-8 text-body shadow-raised leading-[1.5] whitespace-pre-wrap [word-break:break-word]">
+                <UserText text={item.text} />
+              </div>
+            </div>
+          )
+        )}
+      </div>
+      {details}
+    </>
+  )
+}
+
 export function ItemView(props: ItemProps) {
   const { item, chat, contextItems, connected, send, space, select, openChat, revealOf, openPanel } = props
   const promptProps = { chat, connected, send, space, select }
@@ -175,9 +236,9 @@ export function ItemView(props: ItemProps) {
       />
     ) : null
   // The ⋯ with what the user can do to the message itself.
-  const menu = (kind: 'user' | 'work' | 'talk', entry: number | undefined, label: string, className?: string) =>
+  const menu = (kind: 'user' | 'work' | 'talk', entry: number | undefined, label: string, className?: string, more: MessageMenuItem[] = []) =>
     entry === undefined ? null : (
-      <MessageMenu label={label} items={[deleteItem(chat, entry, kind, send)]} connected={connected} className={className} />
+      <MessageMenu label={label} items={[...more, deleteItem(chat, entry, kind, send)]} connected={connected} className={className} />
     )
   // The folded rows under a message, full width so an unfolded one has room.
   const details = (kind: 'user' | 'work' | 'talk', entry?: number) => {
@@ -209,37 +270,16 @@ export function ItemView(props: ItemProps) {
       )
     case 'user':
       return (
-        <>
-          <div className="flex max-w-[85%] flex-col items-end gap-6 self-end">
-            {item.attachments && (
-              <div className="flex flex-wrap items-center justify-end gap-6">
-                {!item.text && menu('user', item.entry, 'More for this message')}
-                {item.attachments.map((a) => (
-                  <SentAttachment
-                    key={a.path}
-                    chat={chat}
-                    attachment={a}
-                    contextItems={contextItems}
-                    connected={connected}
-                    send={send}
-                  />
-                ))}
-              </div>
-            )}
-            {item.midTurn && <span className="text-xs text-faint">Sent mid-turn</span>}
-            {item.text && (
-              <div className="flex items-start gap-6">
-                {actions('user', item.entry, 'mt-6')}
-                {menu('user', item.entry, 'More for this message', 'mt-6')}
-                <CopyButton label="Copy message" text={item.text} className="mt-6" />
-                <div className="min-w-0 rounded-[12px_12px_4px_12px] bg-raised px-12 py-8 text-body shadow-raised leading-[1.5] whitespace-pre-wrap [word-break:break-word]">
-                  <UserText text={item.text} />
-                </div>
-              </div>
-            )}
-          </div>
-          {details('user', item.entry)}
-        </>
+        <UserItem
+          item={item}
+          chat={chat}
+          contextItems={contextItems}
+          connected={connected}
+          send={send}
+          menu={(className, more) => menu('user', item.entry, 'More for this message', className, more)}
+          actions={actions('user', item.entry, 'mt-6')}
+          details={details('user', item.entry)}
+        />
       )
     case 'text':
       return (

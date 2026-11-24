@@ -118,3 +118,65 @@ test('a message the view cannot place in the log gets no menu', () => {
   render({ kind: 'user', text: 'Not logged yet' }, chatOf(), () => {})
   expect(container.querySelector('[data-message-menu]')).toBeNull()
 })
+
+const typeInto = (box: HTMLTextAreaElement, text: string) =>
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, text)
+    box.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+const key = (element: Element, k: string, extra: KeyboardEventInit = {}) =>
+  act(() => void element.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...extra })))
+
+test('Edit turns the message into a box in place: Esc cancels, Enter sends it again from there', () => {
+  const sent: ClientMessage[] = []
+  const item: Item = { kind: 'user', text: 'draft one', entry: 2 }
+  render(item, chatOf({ items: [item] }), (m) => sent.push(m))
+  press(container.querySelector('[aria-label="More for this message"]')!)
+  press(menuItems().find((i) => i.textContent === 'Edit')!)
+  const box = container.querySelector<HTMLTextAreaElement>('[aria-label="Edit message"]')!
+  expect(box.value).toBe('draft one')
+  expect(container.querySelector('[data-edit-box]')!.textContent).toContain('Files the agent changed stay as they are.')
+  key(box, 'Escape')
+  expect(container.querySelector('[aria-label="Edit message"]')).toBeNull()
+  expect(container.textContent).toContain('draft one')
+
+  press(container.querySelector('[aria-label="More for this message"]')!)
+  press(menuItems().find((i) => i.textContent === 'Edit')!)
+  const again = container.querySelector<HTMLTextAreaElement>('[aria-label="Edit message"]')!
+  typeInto(again, 'draft two')
+  key(again, 'Enter', { shiftKey: true })
+  expect(sent).toEqual([])
+  key(again, 'Enter')
+  expect(sent).toEqual([{ type: 'chat.editMessage', chatId: 'c1', entry: 2, text: 'draft two' }])
+  expect(container.querySelector('[aria-label="Edit message"]')).toBeNull()
+})
+
+test('Edit and Undo wait for the chat to stop; Undo is only on the last message', () => {
+  const first: Item = { kind: 'user', text: 'first', entry: 0 }
+  const last: Item = { kind: 'user', text: 'last', entry: 2 }
+  const items = [first, { kind: 'text', text: 'ok', entry: 1 } as Item, last]
+  const labels = (item: Item, status: ChatView['status']) => {
+    act(() => root.unmount())
+    root = createRoot(container)
+    render(item, chatOf({ items, status }), () => {})
+    press(container.querySelector('[aria-label="More for this message"]')!)
+    return menuItems().map((i) => `${i.textContent}${i.dataset.disabled === '' ? ' (off)' : ''}`)
+  }
+  expect(labels(first, 'idle')).toEqual(['Edit', 'Delete'])
+  expect(labels(last, 'idle')).toEqual(['Edit', 'Undo', 'Delete'])
+  expect(labels(first, 'running')).toEqual(['Edit (off)', 'Delete'])
+  expect(labels(last, 'running')).toEqual(['Edit (off)', 'Undo (off)', 'Delete (off)'])
+})
+
+test('Undo asks first, says files stay, then asks the core for the message back', async () => {
+  const sent: ClientMessage[] = []
+  const item: Item = { kind: 'user', text: 'oops', entry: 6 }
+  render(item, chatOf({ items: [item] }), (m) => sent.push(m))
+  press(container.querySelector('[aria-label="More for this message"]')!)
+  press(menuItems().find((i) => i.textContent === 'Undo')!)
+  await act(async () => {})
+  expect(dialog()!.textContent).toContain('Undo this message?')
+  expect(dialog()!.textContent).toContain('Files the agent changed stay as they are.')
+  await answer(true)
+  expect(sent).toEqual([{ type: 'chat.undoMessage', chatId: 'c1', entry: 6 }])
+})

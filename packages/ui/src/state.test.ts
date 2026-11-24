@@ -114,6 +114,12 @@ describe('deleted messages', () => {
     expect(JSON.stringify(state)).not.toContain('secret')
   })
 
+  it('keeps an undone message for the composer, a new nonce each time', () => {
+    const undone: Action = { type: 'chat.undone', chatId: 'a', text: 'oops', attachments: [] }
+    const state = run(snapshot([chat('a', [])]), undone, undone)
+    expect(state.chats.find((c) => c.id === 'a')!.restored).toEqual({ text: 'oops', attachments: [], nonce: 2 })
+  })
+
   it('takes the latest page in place of every page loaded before', () => {
     const page = (_from: number, texts: string[]) => texts.map((text): ChatEntry => ({ at, type: 'user.message', text }))
     const state = run(snapshot([chat('a', page(40, ['forty', 'forty-one']), { from: 40 })]), {

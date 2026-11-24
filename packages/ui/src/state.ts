@@ -4,6 +4,7 @@ import type {
   RestartState,
   Answers,
   Attachment,
+  Upload,
   InstalledItem,
   MarketEntry,
   MarketKind,
@@ -105,6 +106,8 @@ export type ChatView = ChatInfo & {
   draft: string
   queue: QueuedMessage[]
   waits?: ChatWait[]
+  // A message the user undid: its text and attachments go back to the composer (chat.tsx), once per nonce.
+  restored?: { text: string; attachments: Upload[]; nonce: number }
 }
 
 export type State = {
@@ -554,9 +557,12 @@ function reduceAll(state: State, action: Action): State {
         from: action.from,
         shift: 0,
       }))
-    // The composer takes it (chat.tsx), not the state.
+    // Kept for the composer, which takes it in once (chat.tsx).
     case 'chat.undone':
-      return state
+      return updateChat(state, action.chatId, (c) => ({
+        ...c,
+        restored: { text: action.text, attachments: action.attachments, nonce: (c.restored?.nonce ?? 0) + 1 },
+      }))
     case 'chat.delta':
       return updateChat(state, action.chatId, (c) => ({ ...c, draft: c.draft + action.text }))
     case 'chat.thinking':
