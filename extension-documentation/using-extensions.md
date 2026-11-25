@@ -163,7 +163,7 @@ The Inspector shows what Kothar actually sends the engine, so nothing it adds is
   - **Permission answers**, allowed or denied, and **which rule decided**: a switch (such as Read anywhere without
     asking), a folder mode, the sandbox, a read-only turn, an extension's policy, or you.
   - **How extensions changed a turn**: made it read only (with the reason the agent is told), ran it on another model
-    list, a composer toggle that was on, or rewrote your message (before and after).
+    list, a composer mode that was on, or rewrote your message (before and after).
   - **Workers and tools**: chats an extension started (such as Deep Research's quiet workers), messages it sent them,
     and tools it called.
   - **Carrying on**: Reconnect and Account rotation carrying a turn on (with what was sent), account switches, and

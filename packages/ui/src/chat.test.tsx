@@ -17,6 +17,7 @@ import {
   PERMISSION_DEFAULTS,
   PERMISSION_SWITCHES,
   type ClientMessage,
+  type ComposerToggleInfo,
   type ContextItem,
   type EngineInfo,
   type ModelLists,
@@ -1440,45 +1441,86 @@ test("extensions' message details fold under the messages they list, closed what
   act(() => showStepsByDefault(false))
 })
 
-test("extensions' composer toggles show as chips beside Attach, pressed while on, and ask the core to flip", () => {
-  const sent: ClientMessage[] = []
-  const toggles = [
-    { extension: 'deep-research', id: 'research', label: 'Deep research', icon: 'search' as const, on: true, activeHint: 'On: researches your next message' },
-    { extension: 'other', id: 'web', label: 'Web', on: false },
-  ]
-  render({}, (m) => sent.push(m), { extensionUi: { chatId: 'c1', panels: [], commands: [], toggles } })
-  const chips = [...container.querySelectorAll<HTMLButtonElement>('[data-composer-toggle]')]
-  expect(chips.map((c) => [c.textContent, c.getAttribute('aria-pressed')])).toEqual([
-    ['Deep research', 'true'],
-    ['Web', 'false'],
-  ])
-  act(() => chips[0]!.click())
-  expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'deep-research', toggle: 'research', on: false })
-  act(() => chips[1]!.click())
-  expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'other', toggle: 'web', on: true })
-})
+describe('the mode picker', () => {
+  const research = { extension: 'deep-research', id: 'research', label: 'Deep research', icon: 'search' as const, on: false, hint: 'Research your next message in depth' }
+  const plan = { extension: 'plan', id: 'plan', label: 'Plan first', icon: 'book' as const, on: false, hint: 'The agent only reads and proposes a plan' }
+  const trigger = () => container.querySelector<HTMLButtonElement>('[data-mode-picker]')
+  const open = () =>
+    act(() => {
+      trigger()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+  const items = () => [...document.querySelectorAll<HTMLElement>('[data-mode]')]
+  const item = (key: string) => items().find((i) => i.dataset.mode === key)!
+  const show = (toggles: ComposerToggleInfo[], send: (m: ClientMessage) => void = () => {}, chatId = 'c1') =>
+    render({}, send, { extensionUi: { chatId, panels: [], commands: [], toggles } })
 
-test('in a narrow composer, icon chips show only the icon but keep their name for screen readers and the hint', () => {
-  const toggles = [
-    { extension: 'deep-research', id: 'research', label: 'Deep research', icon: 'search' as const, on: false, hint: 'Research your next messages in depth' },
-    { extension: 'plan', id: 'plan', label: 'Plan first', icon: 'book' as const, on: false, hint: 'Plan first: the agent only reads' },
-    { extension: 'other', id: 'web', label: 'Web', on: false },
-  ]
-  render({}, () => {}, { extensionUi: { chatId: 'c1', panels: [], commands: [], toggles } })
-  const chip = (id: string) => container.querySelector<HTMLButtonElement>(`[data-composer-toggle="${id}"]`)!
-  // Icon chips: the label collapses by the composer's width (a container query), and stays in the accessible name.
-  for (const id of ['research', 'plan']) {
-    const label = chip(id).querySelector('span')!
+  test('is one menu beside the thinking level, not chips beside Attach, listing every mode extensions offer', () => {
+    // A mode from any extension, stock or installed, is listed the same way.
+    const shout = { extension: 'shouty', id: 'shout', label: 'Shout', on: false }
+    show([research, plan, shout])
+    expect(container.querySelectorAll('[data-composer-toggle]')).toHaveLength(0)
+    const toolbar = container.querySelector<HTMLElement>('[data-composer-toolbar]')!
+    const [left, right] = [...toolbar.children] as HTMLElement[]
+    expect(left!.contains(trigger())).toBe(false)
+    expect(right!.contains(trigger())).toBe(true)
+    expect(trigger()!.textContent).toContain('Mode')
+    open()
+    expect(items().map((i) => i.textContent)).toEqual([
+      '✓No mode',
+      expect.stringContaining('Deep research'),
+      expect.stringContaining('Plan first'),
+      'Shout',
+    ])
+    expect(item('deep-research\nresearch').textContent).toContain('Research your next message in depth')
+  })
+
+  test('picking a mode asks the core for it; picking it again, or No mode, clears it', () => {
+    const sent: ClientMessage[] = []
+    show([research, plan], (m) => sent.push(m))
+    open()
+    act(() => item('plan\nplan').click())
+    expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'plan', toggle: 'plan', on: true })
+    // The core turns the other off and says so; the picker shows the one that's on.
+    show([research, { ...plan, on: true }], (m) => sent.push(m))
+    expect(trigger()!.textContent).toContain('Plan first')
+    expect(trigger()!.getAttribute('aria-label')).toBe('Mode: Plan first')
+    open()
+    act(() => item('plan\nplan').click())
+    expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'plan', toggle: 'plan', on: false })
+    open()
+    act(() => item('').click())
+    expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'plan', toggle: 'plan', on: false })
+  })
+
+  test('selecting one shows only that one as picked', () => {
+    show([{ ...research, on: true }, plan])
+    open()
+    const ticked = items().filter((i) => i.textContent!.startsWith('✓'))
+    expect(ticked.map((i) => i.dataset.mode)).toEqual(['deep-research\nresearch'])
+  })
+
+  test('goes back to no mode once the core says the message took it', () => {
+    show([{ ...research, on: true }, plan])
+    expect(trigger()!.textContent).toContain('Deep research')
+    show([research, plan])
+    expect(trigger()!.textContent).not.toContain('Deep research')
+    expect(trigger()!.getAttribute('aria-label')).toBe('Mode for your next message')
+  })
+
+  test('is hidden when no extension offers a mode, and for another chat', () => {
+    show([])
+    expect(trigger()).toBeNull()
+    show([research], () => {}, 'other')
+    expect(trigger()).toBeNull()
+  })
+
+  test('in a narrow composer shows only the icon, keeping its name for screen readers and the hint', () => {
+    show([{ ...research, on: true, activeHint: 'Your next message starts deep research' }])
+    const label = trigger()!.querySelector('span')!
     expect(label.className).toContain('@max-[600px]:sr-only')
-    expect(chip(id).hasAttribute('data-icon-only')).toBe(true)
-    expect(chip(id).querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
-  }
-  expect(chip('research').textContent).toBe('Deep research')
-  // The hint names the switch even when its own text doesn't.
-  expect(chip('research').getAttribute('data-hint')).toBe('')
-  // A chip with no icon keeps its label, cut short.
-  expect(chip('web').querySelector('span')!.className).not.toContain('sr-only')
-  expect(chip('web').hasAttribute('data-icon-only')).toBe(false)
+    expect(trigger()!.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(trigger()!.hasAttribute('data-hint')).toBe(true)
+  })
 })
 
 test("the composer's toolbar wraps instead of letting its two groups overlap", () => {
@@ -1493,12 +1535,6 @@ test("the composer's toolbar wraps instead of letting its two groups overlap", (
   // The pickers and Send keep a floor, below which they move to a line of their own.
   expect(right!.className).toMatch(/\bbasis-\d+\b/)
   expect(right!.className.split(' ')).toContain('grow')
-})
-
-test("another chat's composer toggles aren't shown", () => {
-  const toggles = [{ extension: 'deep-research', id: 'research', label: 'Deep research', on: true }]
-  render({}, () => {}, { extensionUi: { chatId: 'other', panels: [], commands: [], toggles } })
-  expect(container.querySelectorAll('[data-composer-toggle]')).toHaveLength(0)
 })
 
 describe('one right-hand column at a time', () => {

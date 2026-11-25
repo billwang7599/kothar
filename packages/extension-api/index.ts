@@ -219,20 +219,30 @@ export type ExtensionMessageDetail = {
   render(message: ExtensionMessage, chat: ChatDetail, context: ExtensionContext): ExtensionView | Promise<ExtensionView>
 }
 
-// A switch in a chat's composer, beside the message box, such as "Deep research": a chip the user turns on and off for
-// that chat. Each chat keeps its own state (saved with the chat, so it outlives a restart), starting at `default` (off
-// without it). Several extensions can each add theirs. The extension reads a chat's state with host.toggled and sets
-// it with host.setToggle; onChange runs when the user flips it, after the new state is saved. While the extension is
-// off, or left out of the chat by its setup, the chip isn't shown and the saved state waits for it to come back.
+// A mode in a chat's composer, such as "Deep research" or "Plan first": a choice in the composer's mode picker that
+// applies to the next message the user sends. Any extension can add modes, built in or installed, the same way; the
+// picker lists them all. Only one mode is picked at a time, across extensions: picking one turns any other off. It's
+// one-shot: the message the user sends next takes it, and the picker goes back to no mode. For the turn that message
+// starts (or is steered into), host.toggled is true, then off once the turn ends. Modes are told apart by extension
+// id and mode id together, so two extensions may use the same id. What a mode does to its message: `prefix` (text
+// put before it), and/or the extension's own hooks reading host.toggled (transformMessage, turnOptions, instructions,
+// a tool). The picked mode is saved with the chat until a message takes it (so it outlives a restart), starting at
+// `default` (none without it). onChange runs when the user picks or clears it, after the new state is saved. While
+// the extension is off, or left out of the chat by its setup, the mode isn't listed, and a picked one waits for it to
+// come back, not taken by messages sent meanwhile. (The name composerToggles predates the picker; it stays so
+// extensions keep working.)
 export type ExtensionComposerToggle = {
   id: string
-  // Short, such as "Deep research"; shown on the chip.
+  // Short, such as "Deep research"; shown in the picker.
   label: string
   icon?: 'search' | 'globe' | 'book' | 'sparkle' | 'bolt'
   // Explanations on hover, while it's off and while it's on; both default to label.
   hint?: string
   activeHint?: string
   default?: boolean
+  // Put before the message it's sent with, a blank line between, ahead of any extension's transformMessage. The
+  // log keeps what the user typed.
+  prefix?: string
   shown?(chat: ChatDetail, context: ExtensionContext): boolean
   onChange?(on: boolean, chat: ChatDetail, context: ExtensionContext): void | Promise<void>
 }

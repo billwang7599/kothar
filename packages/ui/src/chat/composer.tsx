@@ -6,7 +6,7 @@ import { draftOf, flushDrafts, saveDraft, saveDraftSoon } from '../drafts.ts'
 import { applyEdit, continueList, indentList } from '../lists.tsx'
 import { modelKey, type ChatView, type modelMenu } from '../state.ts'
 import { FILE_CHIP, FileLabel, PaperclipIcon, type Pending } from './attachments.tsx'
-import { ComposerToggles } from './composer-toggles.tsx'
+import { ModePicker } from './mode-picker.tsx'
 import { withQuote } from './quote.tsx'
 
 const SEND_HINT = 'Enter to send · Shift+Enter for a new line'
@@ -34,7 +34,7 @@ type ComposerProps = {
   submit: (text: string, steer?: boolean) => boolean
   /** Offers to stop the turn, so what's queued sends now. */
   interrupt: () => void
-  /** Extensions' switches for this chat, beside Attach. */
+  /** Extensions' modes for this chat, in the mode picker beside the thinking level. */
   toggles?: readonly ComposerToggleInfo[]
   send?: (m: ClientMessage) => void
   /** Set to a function that puts text selected in the transcript into the box as a quote (chat/quote.tsx). */
@@ -185,7 +185,7 @@ export function Composer(props: ComposerProps) {
       </div>
       {/*
         The toolbar narrows in steps, by the composer's width (its @container), never by drawing one thing over another:
-        1. Extensions' chips with an icon show only the icon (composer-toggles.tsx).
+        1. The mode picker shows only its icon (mode-picker.tsx).
         2. The model name is cut short with an ellipsis; the thinking level, Send and Attach keep their size.
         3. When the right-hand group would get narrower than its floor, it wraps onto a line of its own.
         The left group is never squeezed beside the right one, so its chips can't spill under it; alone on a line, its
@@ -215,9 +215,6 @@ export function Composer(props: ComposerProps) {
               e.target.value = ''
             }}
           />
-          {props.toggles && props.send && (
-            <ComposerToggles toggles={props.toggles} chatId={chat.id} disabled={!connected || archived} send={props.send} />
-          )}
         </span>
         <span
           className={`ml-auto flex min-w-0 grow items-center justify-end gap-6 ${busy && hasContent ? 'basis-280' : 'basis-200'}`}
@@ -246,6 +243,9 @@ export function Composer(props: ComposerProps) {
               options={menu.levels.map((l) => ({ value: l, label: THINKING_LABELS[l] }))}
               onChange={(thinking) => setModel(menu.value, thinking as ThinkingLevel)}
             />
+          )}
+          {props.toggles && props.send && (
+            <ModePicker modes={props.toggles} chatId={chat.id} disabled={!connected || archived} send={props.send} />
           )}
           {busy ? (
             <>

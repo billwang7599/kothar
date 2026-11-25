@@ -143,7 +143,7 @@ describe('the Deep research toggle', () => {
     expect(t.chat(b).toggles).toBeUndefined()
   })
 
-  it('turns each message sent while on into a deep_research request, and leaves it alone when off', async () => {
+  it('turns the message sent with it into a deep_research request, once, and leaves others alone', async () => {
     const t = await core()
     const on = t.create('On')
     const off = t.create('Off')
@@ -153,12 +153,10 @@ describe('the Deep research toggle', () => {
     const researched = t.prompts.filter((p) => p.includes('Call the deep_research tool'))
     expect(researched).toHaveLength(1)
     expect(researched[0]).toContain('Which Greek letter comes first?')
-    // It stays on for the next message, until turned off.
-    await t.send(on, 'And which comes last?')
-    expect(t.prompts.filter((p) => p.includes('Call the deep_research tool'))).toHaveLength(2)
-    await t.flip(on, false)
+    // One-shot: the message took it, so the next one is left alone and the composer is back to no mode.
+    expect(t.toggles(on)).toEqual([expect.objectContaining({ id: 'research', on: false })])
     await t.send(on, 'Thanks')
-    expect(t.prompts.filter((p) => p.includes('Call the deep_research tool'))).toHaveLength(2)
+    expect(t.prompts.filter((p) => p.includes('Call the deep_research tool'))).toHaveLength(1)
     // The log keeps what the user typed.
     expect(t.chat(on).entries.filter((e) => e.type === 'user.message').map((e) => (e as { text: string }).text)).toContain('Which Greek letter comes first?')
   })

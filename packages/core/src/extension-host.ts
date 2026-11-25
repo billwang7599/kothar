@@ -24,7 +24,7 @@ import type {
   SpaceDetail,
 } from '@kothar/extension-api'
 import type { openAccounts } from './accounts.ts'
-import { isToggled, toggleOf, withToggle } from './composer-toggles.ts'
+import { isLive, modeKey, toggleOf, withOnly } from './composer-toggles.ts'
 import { guardHost } from './extensions.ts'
 import { summaryOf, workerName } from './kothar-mcp.ts'
 import { messagesOf } from './memory.ts'
@@ -75,7 +75,7 @@ const NOTIFY_TITLE_CHARS = 120
 const NOTIFY_BODY_CHARS = 400
 
 /** What a host needs of a chat. */
-export type HostChat = { info: ChatInfo; dir: string; entries: ChatEntry[]; status: ChatStatus; ending?: boolean }
+export type HostChat = { info: ChatInfo; dir: string; entries: ChatEntry[]; status: ChatStatus; ending?: boolean; modes?: Set<string> }
 
 type Accounts = ReturnType<typeof openAccounts>
 type CreateSpec = Parameters<ExtensionHost['createChat']>[0]
@@ -511,7 +511,7 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
         if (!had) capabilityChanged(capability, extension)
       },
       use: <T,>(name: string) => providerOf(String(name))?.api as T | undefined,
-      toggled: (chatId, toggle) => isToggled(chatFor(String(chatId)).info, extension, toggleOf(extension, toggle)),
+      toggled: (chatId, toggle) => isLive(chatFor(String(chatId)), extension, toggleOf(extension, toggle)),
       prompt: (id) => deps.promptText(extension, String(id)),
       activity(input) {
         const checked = checkedActivity(input)
@@ -522,9 +522,15 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
         const chat = chatFor(String(chatId))
         const found = toggleOf(extension, toggle)
         if (typeof on !== 'boolean') throw new Error('A composer toggle is on or off')
-        if (isToggled(chat.info, extension, found) === on && chat.info.toggles?.[extension.id]?.[found.id] !== undefined) return
-        deps.updateChat(chat, { toggles: withToggle(chat.info, extension, found, on) })
-        if (deps.isOn(extension) && deps.shown(chat)) deps.refresh(extension, chat.info.id)
+        // Off also ends it for the running turn it was sent with.
+        if (!on) chat.modes?.delete(modeKey(extension.id, found.id))
+        if (chat.info.toggles?.[extension.id]?.[found.id] === on) return
+        // On turns any other mode off: only one is picked at a time.
+        const { toggles, others } = withOnly(chat.info, deps.extensions, extension, found, on)
+        deps.updateChat(chat, { toggles })
+        for (const changed of new Set([extension, ...others.map((o) => o.extension)])) {
+          if (deps.isOn(changed) && deps.shown(chat)) deps.refresh(changed, chat.info.id)
+        }
       },
       addContextFile: (chatId, path) => deps.addContextFile(chatFor(deps.spaceOf(chatFor(String(chatId))).id), String(path)),
     }

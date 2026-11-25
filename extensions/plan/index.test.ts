@@ -183,6 +183,7 @@ describe('Plan', () => {
     await t.settled(id)
     expect(t.sessions.at(-1)!.engine).toBe('alpha')
     t.handle({ type: 'models.setList', role: 'planning', models: [{ engine: 'beta', model: 'fake-large' }] })
+    t.flip(id, true)
     t.send(id)
     await t.settled(id)
     expect(t.sessions.at(-1)).toMatchObject({ engine: 'beta', options: { model: 'fake-large' } })
@@ -199,6 +200,40 @@ describe('Plan', () => {
     expect(wait!.text).toContain('Add a dark mode switch to Settings')
     expect(wait!.buttons.map((b) => [b.label, !!b.closes])).toEqual([['Approve', true], ['Edit', true], ['Cancel', true]])
     expect(t.stored(id)).toMatchObject({ status: 'proposed', steps: [{ text: 'Add a theme setting', status: 'todo' }, {}, {}] })
+  })
+
+  it('is one-shot: the message takes it, the composer goes back to no mode, and the turn stays read only', async () => {
+    const t = await start()
+    const id = t.create('Space')
+    t.flip(id, true)
+    // While the turn runs, the composer already shows no mode, and the plan can still be handed in.
+    let composer: boolean | undefined
+    t.send(id, 'Add dark mode', async (chatId, h) => {
+      composer = t.isOn(chatId)
+      await h.callTool(chatId, 'submit_plan', PLAN)
+    })
+    await t.waiting(id)
+    expect(composer).toBe(false)
+    expect(t.stored(id)?.status).toBe('proposed')
+    t.answer(id, 'cancel')
+    await t.settled(id)
+    expect(t.sessions.at(-1)!.options.readOnly).toBe(true)
+    t.send(id, 'Now something else')
+    await t.settled(id)
+    expect(t.sessions.at(-1)!.options.readOnly).toBeUndefined()
+  })
+
+  it('a message written back about a waiting plan plans again, and can hand in a revised plan', async () => {
+    const t = await start()
+    const id = t.create('Space')
+    t.flip(id, true)
+    t.send(id, 'Add dark mode', t.submit())
+    await t.waiting(id)
+    expect(t.isOn(id)).toBe(false)
+    t.send(id, 'Also cover the sidebar', t.submit({ ...PLAN, goal: 'Dark mode, sidebar too' }))
+    await t.waiting(id)
+    expect(t.sessions.at(-1)!.options.readOnly).toBe(true)
+    expect(t.stored(id)).toMatchObject({ status: 'proposed', goal: 'Dark mode, sidebar too' })
   })
 
   it('Approve turns Plan first off and carries on with usual permissions and the plan in the instructions', async () => {
@@ -222,7 +257,7 @@ describe('Plan', () => {
     expect(t.chatOf(id).waits ?? []).toEqual([])
   })
 
-  it('Cancel drops the plan and keeps Plan first on', async () => {
+  it('Cancel drops the plan, and the chat plans no more', async () => {
     const t = await start()
     const id = t.create('Space')
     t.flip(id, true)
@@ -230,9 +265,12 @@ describe('Plan', () => {
     await t.waiting(id)
     t.answer(id, 'cancel')
     await t.settled(id)
-    expect(t.isOn(id)).toBe(true)
+    expect(t.isOn(id)).toBe(false)
     expect(t.stored(id)?.status).toBe('cancelled')
     expect(t.chatOf(id).waits ?? []).toEqual([])
+    t.send(id, 'Something else')
+    await t.settled(id)
+    expect(t.sessions.at(-1)!.options.readOnly).toBeUndefined()
   })
 
   it('Edit closes the bar and opens the form in the Plan tab; its submit saves the plan and approves it', async () => {
@@ -260,7 +298,7 @@ describe('Plan', () => {
     expect(JSON.stringify(await t.panel(id))).not.toContain('"type":"form"')
   })
 
-  it('after Edit closed the bar, the Plan tab offers Approve, Edit and Cancel; Cancel keeps Plan first on', async () => {
+  it('after Edit closed the bar, the Plan tab offers Approve, Edit and Cancel', async () => {
     const t = await start()
     const id = t.create('Space')
     t.flip(id, true)
@@ -273,7 +311,7 @@ describe('Plan', () => {
     for (const label of ['"Approve"', '"Edit"', '"Cancel"']) expect(tab).toContain(label)
     await t.panelAction(id, { name: 'cancel' })
     await until(() => t.stored(id)?.status === 'cancelled')
-    expect(t.isOn(id)).toBe(true)
+    expect(t.isOn(id)).toBe(false)
   })
 
   it('turns away a plan without a tests step, unless that setting is off', async () => {
@@ -286,6 +324,7 @@ describe('Plan', () => {
     expect(error).toContain('tests step')
     expect(t.stored(id)).toBeUndefined()
     t.handle({ type: 'extension.setValue', extensionId: 'plan', key: 'requireTests', value: false })
+    t.flip(id, true)
     t.send(id, 'Go', t.submit({ ...PLAN, tests: '' }))
     await t.waiting(id)
     expect(t.stored(id)?.tests).toBe('')

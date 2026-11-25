@@ -592,8 +592,8 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
         id: TOGGLE,
         label: 'Deep research',
         icon: 'search',
-        hint: 'Research your next messages in depth, with a cited report',
-        activeHint: 'On: each message you send starts deep research. Click to turn off.',
+        hint: 'Research your next message in depth, with a cited report',
+        activeHint: 'Your next message starts deep research',
         // Every chat the user types in, Home included (Home is the Home extension's own chat); not workers.
         shown: (chat) => !chat.worker,
       },

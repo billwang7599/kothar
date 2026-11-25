@@ -503,13 +503,13 @@ const { allow, message } = await host.requestPermission(chatId, {
 if (!allow) return { content: [{ type: 'text', text: message ?? 'The user said no' }], isError: true }
 ```
 
-## Composer toggles
+## Composer modes
 
 | Call | What it does |
 |---|---|
 | `prompt(id)` | One of this extension's [prompts](settings.md#prompts) as it's sent now: the user's edit from Settings, else its default. Throws for a prompt the extension doesn't declare. Needs nothing in `uses`. |
-| `toggled(chatId, id)` | Whether one of this extension's [composer toggles](panels.md#composer-toggles) is on in the chat (its `default` if the chat never set it). Throws for a toggle the extension doesn't have. |
-| `setToggle(chatId, id, on)` | Turns it on or off in the chat, as the user flipping it does, without calling `onChange`. The chip redraws. |
+| `toggled(chatId, id)` | Whether one of this extension's [composer modes](panels.md#composer-modes) is on in the chat: picked for the next message (its `default` if the chat never set it), or sent with the turn that's running. Throws for a mode the extension doesn't have. |
+| `setToggle(chatId, id, on)` | Picks or clears it in the chat, as the user does, without calling `onChange`. Picking it turns any other mode off; clearing it also ends it for the running turn. The picker redraws. |
 
 ## Processes rows
 

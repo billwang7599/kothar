@@ -677,6 +677,9 @@ function assembleCore(options: {
     workerLimit: () => workers.limit(),
     engineToolsFor: (chat, engine) => engineTools.sessionFor(engine, providedFor(chat)),
     toolsListed: (engine, names) => engineTools.record(engine, names),
+    modesTaken: (chat) => {
+      if (shown(chat)) broadcast(extensionsOf(chat))
+    },
   })
 
   const { hostFor, contextOf, forgetHost, stopSpawned, toolsOf, dropProvided } = openExtensionHosts<Chat>({

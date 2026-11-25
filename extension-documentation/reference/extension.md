@@ -36,7 +36,7 @@ after it cover each group in detail.
 | `messageActions` | Buttons on each message in the transcript, such as Pin | [Panels and commands](panels.md#message-actions) |
 | `messageDetails` | Folded rows under messages in the transcript, drawn when opened, such as What was sent | [Panels and commands](panels.md#message-details) |
 | `noteViews` | Live cards in the transcript, drawn and updated by the extension, such as a research run's progress | [Panels and commands](panels.md#live-cards) |
-| `composerToggles` | On/off chips in a chat's composer, kept per chat, such as Deep research | [Panels and commands](panels.md#composer-toggles) |
+| `composerToggles` | Modes in the composer's mode picker, such as Deep research: one at a time, for the next message | [Panels and commands](panels.md#composer-modes) |
 | `chats` | Chats of the extension's own | [Chats](#chats), below |
 | `memory` | What each session sees of its chat's history | [Tools, MCP servers, instructions and memory](agents.md#memory) |
 | `optionalDependencies`, `requires`, `onDependencyChanged` | Working with another extension: features that turn on with it, or not running without it | [Depending on other extensions](dependencies.md) |

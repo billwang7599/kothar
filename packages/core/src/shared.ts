@@ -566,6 +566,8 @@ export type QueuedMessage = {
   attachments?: Attachment[]
   report?: WorkerReport
   steering?: true
+  // The composer mode the user sent it with (extension id and toggle id, as composer-toggles.ts's modeKey).
+  modes?: string[]
 }
 
 // An extension's tab in the right sidebar, and an extension's action in the General tab, for one chat.

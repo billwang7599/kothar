@@ -13,7 +13,7 @@ import type {
 } from '@kothar/extension-api'
 import type { Chat } from './chat.ts'
 import { panelTabOf } from './extensions.ts'
-import { isToggled, toggleInfo, toggleOf, withToggle } from './composer-toggles.ts'
+import { isToggled, toggleInfo, toggleOf, withOnly } from './composer-toggles.ts'
 import { messageActionInfo, messageAt, messageDetailInfo } from './message-actions.ts'
 import type {
   ChatInfo,
@@ -306,7 +306,8 @@ export function openPanels(deps: PanelDeps) {
     }
     if (chats.has(chat.info.id)) refreshExtension(extension, chat.info.id)
   }
-  // The user flipped one of an extension's composer toggles in the chat: saved, then onChange, then the chip redraws.
+  // The user picked (or cleared) one of an extension's composer modes in the chat: saved, with any other mode turned
+  // off, as only one is on at a time; then onChange, for each mode that changed; then the picker redraws.
   const flipToggle = async (chat: Chat, extensionId: unknown, toggleId: unknown, on: unknown) => {
     const extension = extensionFor(String(extensionId))
     if (!isOn(extension)) throw new Error(`${extension.name} is off`)
@@ -314,13 +315,20 @@ export function openPanels(deps: PanelDeps) {
     const toggle = toggleOf(extension, toggleId)
     if (!offeredBy(extension, toggle, chat)) throw new Error(`${extension.name} has no composer toggle "${toggleId}" here`)
     if (typeof on !== 'boolean') throw new Error('A composer toggle is on or off')
-    updateChat(chat, { toggles: withToggle(chat.info, extension, toggle, on) })
-    try {
-      await toggle.onChange?.(on, detailOf(chat), contextOf(extension))
-    } catch (error) {
-      extensionError(extension, error)
+    const { toggles, others } = withOnly(chat.info, extensions, extension, toggle, on)
+    updateChat(chat, { toggles })
+    for (const changed of [...others.map((o) => ({ ...o, on: false })), { extension, toggle, on }]) {
+      if (!isOn(changed.extension)) continue
+      try {
+        await changed.toggle.onChange?.(changed.on, detailOf(chat), contextOf(changed.extension))
+      } catch (error) {
+        extensionError(changed.extension, error)
+      }
     }
-    if (chats.has(chat.info.id)) refreshExtension(extension, chat.info.id)
+    if (!chats.has(chat.info.id)) return
+    for (const changed of new Set([extension, ...others.map((o) => o.extension)])) {
+      if (isOn(changed)) refreshExtension(changed, chat.info.id)
+    }
   }
 
   return {
