@@ -192,7 +192,7 @@ describe('Activity', () => {
     expect(changes.map((c) => [c.by.name, c.title])).toEqual([
       ['Planner', 'Rewrote your message before it was sent'],
       ['Planner', 'Made this turn read only'],
-      ['Planner', 'On for this turn: Careful'],
+      ['Planner', 'Mode for this turn: Careful'],
     ])
     expect(changes[0]!.sections!.map((s) => t.text(id, s.hash))).toEqual(['hello', '[careful] hello'])
     expect(changes[1]!.detail).toContain('Careful is on.')
