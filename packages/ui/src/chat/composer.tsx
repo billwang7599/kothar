@@ -1,5 +1,5 @@
 // The message box: typing (with its draft kept), attachments, model and thinking pickers, and Send, Queue or Stop.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { THINKING_LABELS, type ClientMessage, type ComposerToggleInfo, type ThinkingLevel } from '@kothar/core/shared'
 import { Button, Hint, Select } from '../controls.tsx'
 import { draftOf, flushDrafts, saveDraft, saveDraftSoon } from '../drafts.ts'
@@ -7,6 +7,7 @@ import { applyEdit, continueList, indentList } from '../lists.tsx'
 import { modelKey, type ChatView, type modelMenu } from '../state.ts'
 import { FILE_CHIP, FileLabel, PaperclipIcon, type Pending } from './attachments.tsx'
 import { ComposerToggles } from './composer-toggles.tsx'
+import { withQuote } from './quote.tsx'
 
 const SEND_HINT = 'Enter to send · Shift+Enter for a new line'
 const QUEUE_HINT = 'Enter to queue · ⌘Enter to interrupt and send'
@@ -36,6 +37,8 @@ type ComposerProps = {
   /** Extensions' switches for this chat, beside Attach. */
   toggles?: readonly ComposerToggleInfo[]
   send?: (m: ClientMessage) => void
+  /** Set to a function that puts text selected in the transcript into the box as a quote (chat/quote.tsx). */
+  quoteRef?: RefObject<((text: string) => void) | null>
 }
 
 /**
@@ -51,6 +54,37 @@ export function Composer(props: ComposerProps) {
     saveDraftSoon(chat.id, typed)
   }
   useEffect(() => flushDrafts, [])
+  const box = useRef<HTMLTextAreaElement>(null)
+  // Where the caret goes once a quote put in has rendered.
+  const caret = useRef<number | undefined>(undefined)
+  const touched = useRef(false)
+  useLayoutEffect(() => {
+    const node = box.current
+    if (caret.current === undefined || !node) return
+    node.focus()
+    node.setSelectionRange(caret.current, caret.current)
+    caret.current = undefined
+  }, [text])
+  useLayoutEffect(() => {
+    const ref = props.quoteRef
+    if (!ref) return
+    ref.current = (quote: string) => {
+      const node = box.current
+      if (!node) return
+      const value = node.value
+      // The caret stays put when the box loses focus, so a quote goes where it was left; a box never focused has its
+      // caret at the start, so the quote goes after what's typed.
+      const used = touched.current
+      const start = used ? node.selectionStart : value.length
+      const end = used ? node.selectionEnd : value.length
+      const next = withQuote(value, start, end, quote)
+      caret.current = next.caret
+      setText(next.value)
+    }
+    return () => {
+      ref.current = null
+    }
+  })
   const fileInput = useRef<HTMLInputElement>(null)
   const archived = chat.archived
   const busy = chat.status !== 'idle'
@@ -111,6 +145,10 @@ export function Composer(props: ComposerProps) {
           </span>
         )}
         <textarea
+          ref={box}
+          onFocus={() => {
+            touched.current = true
+          }}
           className="block max-h-[calc(12lh+16px)] min-h-[calc(1lh+16px)] w-full resize-none border-none bg-transparent px-12 shadow-none py-8 text-body leading-[1.5] field-sizing-content"
           value={text}
           rows={1}

@@ -46,6 +46,7 @@ import { useAttachments, useFileDrop } from './chat/use-attachments.ts'
 import { Composer } from './chat/composer.tsx'
 import { Dots, Row } from './chat/parts.tsx'
 import { ItemView, StreamingText } from './chat/transcript-items.tsx'
+import { QuoteSelection } from './chat/quote.tsx'
 import { editorLabel, FileLinks } from './file-links.tsx'
 import { ChatImages } from './chat-image.tsx'
 
@@ -141,6 +142,7 @@ export function Chat(props: ChatProps) {
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- once per undo, by its nonce
   }, [chat.id, restored?.nonce])
   const listRef = useRef<HTMLDivElement>(null)
+  const quoteRef = useRef<((text: string) => void) | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // True while the user is at the bottom: new output then scrolls into view. Scrolling up turns it off.
   const following = useRef(true)
@@ -536,7 +538,11 @@ export function Chat(props: ChatProps) {
             />
           )}
           {!showEngineNote && !viewOnly && (
+            <QuoteSelection within={listRef} enabled={canAttach} quote={(text) => quoteRef.current?.(text)} />
+          )}
+          {!showEngineNote && !viewOnly && (
             <Composer
+              quoteRef={quoteRef}
               key={`${chat.id}:${composerKey}`}
               chat={chat}
               connected={connected}
