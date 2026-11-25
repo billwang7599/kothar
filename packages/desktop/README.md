@@ -53,9 +53,14 @@ xcrun notarytool store-credentials kothar-notary \
   --apple-id you@example.com --team-id AB12CD34EF --password abcd-efgh-ijkl-mnop
 ```
 
-notarytool checks the credentials with Apple and saves them in your login keychain as the profile `kothar-notary`. The
+notarytool checks the credentials with Apple and saves them in your keychain as the profile `kothar-notary`. The
 build finds that profile by itself, so the password never goes in a file or an environment variable. To keep it out
 of your shell history too, leave out `--password` and type the password when notarytool asks for it.
+
+Current notarytool saves profiles where `security` and Keychain Access can't show them, so the build checks the profile
+with `xcrun notarytool history --keychain-profile kothar-notary`, which signs in to Apple. That needs the network:
+offline, the build can't see the profile and isn't notarized. A profile named with `KOTHAR_NOTARY_PROFILE` or
+`APPLE_KEYCHAIN_PROFILE` that doesn't work stops the build with notarytool's error.
 
 ### 4. Build
 

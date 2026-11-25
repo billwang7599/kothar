@@ -4,7 +4,8 @@ import type { Plan, Probe, Run } from './signing.ts'
 
 const probe = (identities: string[] = [], profiles: string[] = []): Probe => ({
   identities: () => identities,
-  hasNotaryProfile: (profile) => profiles.includes(profile),
+  notaryProfile: (profile) =>
+    profiles.includes(profile) ? { found: true } : { found: false, error: `Error: No Keychain password item found for profile: ${profile}` },
 })
 const ME = 'Bill Wang (AB12CD34EF)'
 const APPLE_ID = { APPLE_ID: 'me@example.com', APPLE_APP_SPECIFIC_PASSWORD: 'abcd-efgh-ijkl-mnop', APPLE_TEAM_ID: 'AB12CD34EF' }
@@ -68,13 +69,24 @@ describe('signingPlan', () => {
   })
 
   it('uses a named profile from APPLE_KEYCHAIN_PROFILE or KOTHAR_NOTARY_PROFILE', () => {
-    expect(signing.signingPlan({ APPLE_KEYCHAIN_PROFILE: 'ci', APPLE_KEYCHAIN: '/k.keychain-db' }, probe([ME])).notary).toEqual({
+    expect(signing.signingPlan({ APPLE_KEYCHAIN_PROFILE: 'ci', APPLE_KEYCHAIN: '/k.keychain-db' }, probe([ME], ['ci'])).notary).toEqual({
       kind: 'profile',
       profile: 'ci',
       keychain: '/k.keychain-db',
     })
     expect(signing.signingPlan({ KOTHAR_NOTARY_PROFILE: 'mine' }, probe([ME], ['mine'])).notary).toEqual({ kind: 'profile', profile: 'mine' })
-    expect(() => signing.signingPlan({ KOTHAR_NOTARY_PROFILE: 'missing' }, probe([ME]))).toThrow(/No notarytool profile "missing"/)
+    expect(() => signing.signingPlan({ KOTHAR_NOTARY_PROFILE: 'missing' }, probe([ME]))).toThrow(
+      'No working notarytool profile "missing" (KOTHAR_NOTARY_PROFILE): Error: No Keychain password item found for profile: missing',
+    )
+    expect(() => signing.signingPlan({ APPLE_KEYCHAIN_PROFILE: 'gone' }, probe([ME]))).toThrow(
+      /No working notarytool profile "gone" \(APPLE_KEYCHAIN_PROFILE\): .*profile: gone/,
+    )
+  })
+
+  it('passes APPLE_KEYCHAIN to the profile check', () => {
+    const notaryProfile = vi.fn(() => ({ found: true as const }))
+    signing.signingPlan({ APPLE_KEYCHAIN_PROFILE: 'ci', APPLE_KEYCHAIN: '/k.keychain-db' }, { identities: () => [ME], notaryProfile })
+    expect(notaryProfile).toHaveBeenCalledWith('ci', '/k.keychain-db')
   })
 
   it('uses an App Store Connect API key', () => {
@@ -86,6 +98,56 @@ describe('signingPlan', () => {
     expect(() => signing.signingPlan({ APPLE_ID: 'me@example.com' }, probe([ME]))).toThrow(
       'APPLE_ID is set, but not APPLE_APP_SPECIFIC_PASSWORD or APPLE_TEAM_ID',
     )
+  })
+})
+
+describe('checkNotaryProfile', () => {
+  const failure = (stderr: string) => Object.assign(new Error('Command failed'), { stderr })
+  const SQL_NOISE = '2026-11-25 17:19:09.978 notarytool[53271:9444431] Error: stepSQLStatement:toCompletionWithRetry - stepping returned unhandled result=8, DB=/Users/me/Library/Caches/com.apple.gke.notary.tool/Cache.db'
+
+  it('finds an old-style profile with security, without calling notarytool', () => {
+    const run = vi.fn<Run>(() => '')
+    expect(signing.checkNotaryProfile('kothar-notary', undefined, run)).toEqual({ found: true })
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0]![0]).toBe('security')
+    expect(run.mock.calls[0]![1]).toContain('com.apple.gke.notary.tool.saved-creds.kothar-notary')
+  })
+
+  it('asks notarytool history when security cannot see the profile (data-protection keychain)', () => {
+    const run = vi.fn<Run>((command) => {
+      if (command === 'security') throw failure('security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.')
+      return ''
+    })
+    expect(signing.checkNotaryProfile('kothar-notary', undefined, run)).toEqual({ found: true })
+    expect(run.mock.calls[1]!.slice(0, 2)).toEqual([
+      'xcrun',
+      ['notarytool', 'history', '--keychain-profile', 'kothar-notary', '--output-format', 'json'],
+    ])
+  })
+
+  it('goes straight to notarytool, with --keychain, for a profile in another keychain', () => {
+    const run = vi.fn<Run>(() => '')
+    expect(signing.checkNotaryProfile('ci', '/k.keychain-db', run)).toEqual({ found: true })
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0]![1]).toEqual(['notarytool', 'history', '--keychain-profile', 'ci', '--keychain', '/k.keychain-db', '--output-format', 'json'])
+  })
+
+  it("reports notarytool's error without its Cache.db noise when the profile is missing", () => {
+    const run: Run = (command) => {
+      if (command === 'security') throw failure('')
+      throw failure(`${SQL_NOISE}\nError: No Keychain password item found for profile: nope\n${SQL_NOISE}\n`)
+    }
+    expect(signing.checkNotaryProfile('nope', undefined, run)).toEqual({
+      found: false,
+      error: 'Error: No Keychain password item found for profile: nope',
+    })
+  })
+
+  it('falls back to the exception message when notarytool printed nothing useful', () => {
+    const run: Run = () => {
+      throw failure(SQL_NOISE)
+    }
+    expect(signing.checkNotaryProfile('nope', undefined, run)).toEqual({ found: false, error: 'Command failed' })
   })
 })
 

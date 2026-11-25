@@ -23,7 +23,9 @@ import { join } from 'node:path'
 
 export const DEFAULT_PROFILE = 'kothar-notary'
 const DEVELOPER_ID = 'Developer ID Application: '
-// Where `notarytool store-credentials` keeps a profile: a generic password with this service, one account per profile.
+// Where older notarytool versions keep a profile: a generic password with this service, one account per profile. Newer
+// ones (Xcode 16+, macOS 15+) keep it in the data-protection keychain, which `security` can't see, so that lookup is
+// only a fast first try and notarytool itself has the last word (checkNotaryProfile).
 const NOTARY_SERVICE = 'com.apple.gke.notary.tool'
 const notaryAccount = (profile: string) => `${NOTARY_SERVICE}.saved-creds.${profile}`
 
@@ -40,10 +42,48 @@ export type Plan = {
   /** One line for the start of the build. */
   message: string
 }
+/** Whether a notarytool profile works, and if not, notarytool's own words. */
+export type ProfileCheck = { found: true } | { found: false; error: string }
 /** What the Mac answers; tests pass their own. */
-export type Probe = { identities(): string[]; hasNotaryProfile(profile: string): boolean }
+export type Probe = { identities(): string[]; notaryProfile(profile: string, keychain?: string): ProfileCheck }
 /** Runs a command and returns its stdout (execFileSync's shape); tests pass a fake. */
 export type Run = (command: string, args: string[], options: object) => string | Buffer | null
+
+/** notarytool's stderr without its harmless "stepSQLStatement … Cache.db" noise. */
+export function notaryErrors(stderr: string): string {
+  return stderr
+    .split('\n')
+    .filter((line) => line.trim() && !/stepSQLStatement|Cache\.db/.test(line))
+    .join('\n')
+    .trim()
+}
+
+/** Checks a notarytool profile. First the old keychain item, which is instant and offline; then `notarytool history`,
+ * which signs in to Apple with the profile, so it finds profiles in the data-protection keychain too. It needs the
+ * network: offline, a working profile counts as missing. */
+export function checkNotaryProfile(profile: string, keychain: string | undefined, run: Run = execFileSync): ProfileCheck {
+  if (!keychain) {
+    try {
+      // Without -w it reads only the item's attributes, so it never asks for the keychain password.
+      run('security', ['find-generic-password', '-s', NOTARY_SERVICE, '-a', notaryAccount(profile)], { stdio: 'ignore' })
+      return { found: true }
+    } catch {
+      // Not there; ask notarytool.
+    }
+  }
+  const auth = ['--keychain-profile', profile, ...(keychain ? ['--keychain', keychain] : [])]
+  try {
+    run('xcrun', ['notarytool', 'history', ...auth, '--output-format', 'json'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'ignore', 'pipe'],
+      timeout: 60_000,
+    })
+    return { found: true }
+  } catch (error) {
+    const stderr = notaryErrors(String((error as { stderr?: unknown }).stderr ?? ''))
+    return { found: false, error: stderr || (error as Error).message }
+  }
+}
 
 /** The "Developer ID Application" names in `security find-identity -v -p codesigning` output, without the prefix. */
 export function developerIds(output: string): string[] {
@@ -63,17 +103,7 @@ const macProbe: Probe = {
       return []
     }
   },
-  hasNotaryProfile(profile) {
-    try {
-      // Without -w it reads only the item's attributes, so it never asks for the keychain password.
-      execFileSync('security', ['find-generic-password', '-s', NOTARY_SERVICE, '-a', notaryAccount(profile)], {
-        stdio: 'ignore',
-      })
-      return true
-    } catch {
-      return false
-    }
-  },
+  notaryProfile: (profile, keychain) => checkNotaryProfile(profile, keychain),
 }
 
 const value = (env: Env, name: string) => env[name]?.trim() || undefined
@@ -90,17 +120,23 @@ function whole(env: Env, names: string[]): boolean {
 }
 
 function pickNotary(env: Env, probe: Probe): Notary | null {
+  // A profile you name has to work: better to stop now, with notarytool's reason, than after the app is built.
+  const missing = (profile: string, variable: string, check: ProfileCheck) =>
+    new Error(`No working notarytool profile "${profile}" (${variable})${check.found ? '' : `: ${check.error}`}`)
   const named = value(env, 'APPLE_KEYCHAIN_PROFILE')
   if (named) {
     const keychain = value(env, 'APPLE_KEYCHAIN')
+    const check = probe.notaryProfile(named, keychain)
+    if (!check.found) throw missing(named, 'APPLE_KEYCHAIN_PROFILE', check)
     return { kind: 'profile', profile: named, ...(keychain && { keychain }) }
   }
   const chosen = value(env, 'KOTHAR_NOTARY_PROFILE')
   const profile = chosen ?? DEFAULT_PROFILE
   const appleId = whole(env, ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'])
   const apiKey = whole(env, ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER'])
-  if (probe.hasNotaryProfile(profile)) return { kind: 'profile', profile }
-  if (chosen) throw new Error(`No notarytool profile "${profile}" in your keychain (KOTHAR_NOTARY_PROFILE)`)
+  const check = probe.notaryProfile(profile)
+  if (check.found) return { kind: 'profile', profile }
+  if (chosen) throw missing(profile, 'KOTHAR_NOTARY_PROFILE', check)
   if (appleId) {
     return {
       kind: 'apple-id',
