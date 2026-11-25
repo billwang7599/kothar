@@ -161,7 +161,7 @@ test('the row menu pins, unpins and moves a space, offering only the moves it ca
 
   const alpha = menuItems('Alpha')
   act(() => alpha.find((i) => i.textContent === 'Unpin')!.click())
-  expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'a', pinned: false, index: 0 })
+  expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'a', pinned: false })
 })
 
 test('archived spaces and a disconnected sidebar can’t be reordered', () => {
@@ -172,13 +172,14 @@ test('archived spaces and a disconnected sidebar can’t be reordered', () => {
 })
 
 // What the core does with a chat.move (chat-lifecycle.ts moveChat): renumber the group the space joins, with pinned
-// cleared by leaving it out, and send each changed chat's whole info as JSON, which drops the cleared field.
+// cleared by leaving it out, and send each changed chat's whole info as JSON, which drops the cleared field. Unpin sends
+// no index; these spaces were pinned with no saved spot, so they go to the top, as the core does.
 const coreMove = (chats: ChatInfo[], m: Extract<ClientMessage, { type: 'chat.move' }>): ChatInfo[] => {
   const moved = chats.find((c) => c.id === m.chatId)!
   const group = chats
     .filter((c) => !c.extension && !c.parentId && !!c.pinned === m.pinned && c.id !== m.chatId)
     .sort(bySpaceOrder)
-  group.splice(Math.max(0, Math.min(m.index, group.length)), 0, moved)
+  group.splice(Math.max(0, Math.min(m.index ?? 0, group.length)), 0, moved)
   return group.flatMap((info, order) => {
     if (info.order === order && !!info.pinned === m.pinned) return []
     const { pinned, ...rest } = info

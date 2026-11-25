@@ -16,6 +16,8 @@ import type { openModels } from './models.ts'
 import { WORKER_SETUP } from './setups.ts'
 import {
   bySpaceOrder,
+  UNPIN_NEIGHBOURS,
+  type UnpinSpot,
   type ChatEntry,
   type ChatInfo,
   type ChatState,
@@ -81,6 +83,23 @@ export const checkName = (name: unknown) => {
 const checkRemovable = (chat: Chat) => {
   if (chat.info.extension) throw new Error(`${chat.info.name} cannot be archived or deleted`)
   if (chat.status !== 'idle') throw new Error('Stop the running chat first')
+}
+
+// Where an unpinned space goes back in its place (the spaces it lands among, in order): next to the nearest of its old
+// neighbours still there, closest first and the one above winning a tie; else its old index; with no spot saved (pinned
+// before spots were kept, or a hand-edited chat.json), at the top.
+export function unpinIndex(spot: UnpinSpot | undefined, place: Pick<ChatInfo, 'id'>[]): number {
+  if (!spot || typeof spot !== 'object') return 0
+  const ids = place.map((c) => c.id)
+  const near = (list: unknown) => (Array.isArray(list) ? list.filter((id) => typeof id === 'string') : [])
+  const [above, below] = [near(spot.above), near(spot.below)]
+  for (let i = 0; i < Math.max(above.length, below.length); i++) {
+    const up = ids.indexOf(above[i] ?? '')
+    if (up >= 0) return up + 1
+    const down = ids.indexOf(below[i] ?? '')
+    if (down >= 0) return down
+  }
+  return Number.isInteger(spot.index) ? spot.index : 0
 }
 
 export function openChatLifecycle(deps: ChatLifecycleDeps) {
@@ -215,35 +234,56 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
 
   // Moves a space to index among the pinned spaces or the others, renumbering that place's order. Unpinned spaces are
   // placed among the spaces in their own group (or the ungrouped ones); `group` moves the space into a group first
-  // (null: out of any group). A pinned space keeps its group for when it's unpinned.
+  // (null: out of any group). A pinned space keeps its group for when it's unpinned, and remembers its spot
+  // (ChatInfo.unpinTo): unpinning with no index puts it back there.
   const moveChat = (chat: Chat, pinned: boolean, index: unknown, group?: unknown) => {
     if (chat.info.extension || chat.info.parentId) throw new Error('Only spaces can be moved or pinned')
     if (chat.info.archived) throw new Error('This chat is archived. Unarchive it first.')
-    if (typeof index !== 'number' || !Number.isInteger(index)) throw new Error('The place to move to must be a number')
+    const restore = index === undefined && !pinned && !!chat.info.pinned
+    if (!restore && (typeof index !== 'number' || !Number.isInteger(index))) {
+      throw new Error('The place to move to must be a number')
+    }
     if (group !== undefined && group !== null && (typeof group !== 'string' || !deps.hasGroup(group))) {
       throw new Error('No such group')
     }
     const groupOf = (info: ChatInfo) => (deps.hasGroup(info.group) ? info.group : undefined)
     const own = group === undefined ? groupOf(chat.info) : (group ?? undefined)
-    const place = [...chats.values()]
-      .map((c) => c.info)
-      .filter(
-        (c) =>
-          !c.extension &&
-          !c.parentId &&
-          !c.archived &&
-          !!c.pinned === pinned &&
-          (pinned || groupOf(c) === own) &&
-          c.id !== chat.info.id,
-      )
-      .sort(bySpaceOrder)
-    place.splice(Math.max(0, Math.min(index, place.length)), 0, chat.info)
+    // The active spaces in a place (Pinned, or a group's unpinned ones), in sidebar order.
+    const spacesIn = (inPinned: boolean, inGroup: string | undefined) =>
+      [...chats.values()]
+        .map((c) => c.info)
+        .filter(
+          (c) =>
+            !c.extension &&
+            !c.parentId &&
+            !c.archived &&
+            !!c.pinned === inPinned &&
+            (inPinned || groupOf(c) === inGroup),
+        )
+        .sort(bySpaceOrder)
+    // Pinning: where it sits now, for Unpin.
+    let spot: UnpinSpot | undefined
+    if (pinned && !chat.info.pinned) {
+      const before = spacesIn(false, groupOf(chat.info)).map((c) => c.id)
+      const at = before.indexOf(chat.info.id)
+      spot = {
+        above: before.slice(Math.max(0, at - UNPIN_NEIGHBOURS), at).reverse(),
+        below: before.slice(at + 1, at + 1 + UNPIN_NEIGHBOURS),
+        index: at,
+      }
+    }
+    const place = spacesIn(pinned, own).filter((c) => c.id !== chat.info.id)
+    const at = restore ? unpinIndex(chat.info.unpinTo, place) : (index as number)
+    place.splice(Math.max(0, Math.min(at, place.length)), 0, chat.info)
     place.forEach((info, order) => {
       const c = chats.get(info.id)!
       const change: Partial<ChatInfo> = {}
       if (c.info.order !== order) change.order = order
       if (!!c.info.pinned !== pinned) change.pinned = pinned || undefined
       if (c === chat && group !== undefined && c.info.group !== own) change.group = own
+      if (c === chat && spot) change.unpinTo = spot
+      // Unpinned, by Unpin or a drop at a place of the user's, the old spot is spent.
+      if (c === chat && !pinned && c.info.unpinTo) change.unpinTo = undefined
       if (Object.keys(change).length) deps.updateChat(c, change)
     })
   }

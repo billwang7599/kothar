@@ -235,9 +235,9 @@ test('pinned spaces show in Pinned, not in their group, and offer no group moves
   const alpha = menuOf('Alpha').map((i) => i.textContent)
   expect(alpha).not.toContain('Move to group')
   expect(alpha).not.toContain('Remove from group')
-  // Unpin keeps its group: the core puts it back there.
+  // Unpin keeps its group, and sends no place: the core puts it back where it was.
   pick('Unpin')
-  expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'a', pinned: false, index: 0 })
+  expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'a', pinned: false })
 })
 
 test('opening a space in a collapsed group (from search, say) expands the group', () => {

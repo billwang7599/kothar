@@ -539,6 +539,117 @@ describe('chats', () => {
     expect(reopened.core.chats().filter((x) => !x.extension)).toHaveLength(4)
   })
 
+  describe('Unpin puts a space back where it was before it was pinned', () => {
+    // Five spaces A-E in that order, ungrouped.
+    const five = () => {
+      const t = setup(textScript)
+      const spaces = ['A', 'B', 'C', 'D', 'E'].map((name) => createChat(t, { name }))
+      spaces.forEach((x, i) => t.handle({ type: 'chat.move', chatId: x.id, pinned: false, index: i }))
+      const id = (name: string) => spaces.find((x) => x.name === name)!.id
+      return { t, id }
+    }
+    // Spaces in each place ('*' for Pinned, a group's name, or '' for none), in order.
+    const places = (core: Core) => {
+      const out: Record<string, string[]> = {}
+      for (const x of core.chats().filter((x) => !x.extension && !x.parentId && !x.archived).sort(bySpaceOrder)) {
+        const group = x.pinned ? '*' : (core.groups().find((g) => g.id === x.group)?.name ?? '')
+        ;(out[group] ??= []).push(x.name)
+      }
+      return out
+    }
+    const pin = (t: ReturnType<typeof setup>, chatId: string) => t.handle({ type: 'chat.move', chatId, pinned: true, index: 0 })
+    const unpin = (t: ReturnType<typeof setup>, chatId: string) => t.handle({ type: 'chat.move', chatId, pinned: false })
+
+    it('restores its index, even after the others are reordered', () => {
+      const { t, id } = five()
+      pin(t, id('C'))
+      expect(places(t.core)).toEqual({ '*': ['C'], '': ['A', 'B', 'D', 'E'] })
+      // Moved while C is pinned: C still goes back below B.
+      t.handle({ type: 'chat.move', chatId: id('E'), pinned: false, index: 0 })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['E', 'A', 'B', 'C', 'D'] })
+      expect(t.core.chats().find((x) => x.id === id('C'))).not.toHaveProperty('unpinTo')
+    })
+
+    it('restores it into its old group', () => {
+      const { t, id } = five()
+      t.handle({ type: 'group.create', name: 'Work', chatId: id('B') })
+      const work = t.core.groups()[0]!.id
+      t.handle({ type: 'chat.move', chatId: id('C'), pinned: false, index: 1, group: work })
+      t.handle({ type: 'chat.move', chatId: id('D'), pinned: false, index: 2, group: work })
+      expect(places(t.core)).toEqual({ Work: ['B', 'C', 'D'], '': ['A', 'E'] })
+      pin(t, id('C'))
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ Work: ['B', 'C', 'D'], '': ['A', 'E'] })
+    })
+
+    it('goes next to the nearest neighbour left when its own was deleted', () => {
+      const { t, id } = five()
+      pin(t, id('C'))
+      t.handle({ type: 'chat.delete', chatId: id('B') })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['A', 'C', 'D', 'E'] })
+      // With every neighbour gone, it takes its old index.
+      pin(t, id('C'))
+      for (const name of ['A', 'D', 'E']) t.handle({ type: 'chat.delete', chatId: id(name) })
+      const f = createChat(t, { name: 'F' })
+      t.handle({ type: 'chat.move', chatId: f.id, pinned: false, index: 0 })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['F', 'C'] })
+    })
+
+    it('goes out of any group when its group was deleted while it was pinned', () => {
+      const { t, id } = five()
+      t.handle({ type: 'group.create', name: 'Work', chatId: id('B') })
+      const work = t.core.groups()[0]!.id
+      t.handle({ type: 'chat.move', chatId: id('C'), pinned: false, index: 1, group: work })
+      pin(t, id('C'))
+      t.handle({ type: 'group.delete', groupId: work })
+      expect(places(t.core)).toEqual({ '*': ['C'], '': ['A', 'D', 'E', 'B'] })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['A', 'D', 'E', 'B', 'C'] })
+      expect(t.core.chats().find((x) => x.id === id('C'))).not.toHaveProperty('group')
+    })
+
+    it('keeps the spot across a restart, in chat.json', () => {
+      const { t, id } = five()
+      pin(t, id('D'))
+      expect(JSON.parse(readFileSync(chatFile(t, id('D')), 'utf8')).unpinTo).toEqual({
+        above: [id('C'), id('B'), id('A')],
+        below: [id('E')],
+        index: 3,
+      })
+      t.core.close()
+      const reopened = setup(textScript, t.garage)
+      unpin(reopened, id('D'))
+      expect(places(reopened.core)).toEqual({ '': ['A', 'B', 'C', 'D', 'E'] })
+      expect(JSON.parse(readFileSync(chatFile(reopened, id('D')), 'utf8'))).not.toHaveProperty('unpinTo')
+    })
+
+    it('puts a space pinned before spots were kept at the top, as before', () => {
+      const { t, id } = five()
+      pin(t, id('D'))
+      t.core.close()
+      const file = chatFile(t, id('D'))
+      const legacy = JSON.parse(readFileSync(file, 'utf8'))
+      delete legacy.unpinTo
+      writeFileSync(file, JSON.stringify(legacy))
+      const reopened = setup(textScript, t.garage)
+      unpin(reopened, id('D'))
+      expect(places(reopened.core)).toEqual({ '': ['D', 'A', 'B', 'C', 'E'] })
+    })
+
+    it('honours a drop out of Pinned at a place the user picks, and refuses a move with no place', () => {
+      const { t, id } = five()
+      pin(t, id('C'))
+      t.handle({ type: 'chat.move', chatId: id('C'), pinned: false, index: 4 })
+      expect(places(t.core)).toEqual({ '': ['A', 'B', 'D', 'E', 'C'] })
+      expect(t.core.chats().find((x) => x.id === id('C'))).not.toHaveProperty('unpinTo')
+      expect(() => t.handle({ type: 'chat.move', chatId: id('A'), pinned: false })).toThrow(/number/)
+      expect(() => t.handle({ type: 'chat.move', chatId: id('A'), pinned: true })).toThrow(/number/)
+    })
+  })
+
   it('archives a chat, keeping its log, and refuses to run it until unarchived', async () => {
     const t = setup(textScript)
     const chat = createChat(t)

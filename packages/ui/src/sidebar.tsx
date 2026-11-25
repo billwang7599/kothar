@@ -280,9 +280,16 @@ export function ChatNav({
     if (Date.now() > pending.until) refocus.current = null
     else document.querySelector<HTMLElement>(`nav [data-chat-id="${pending.id}"], nav [data-group-id="${pending.id}"]`)?.focus()
   }, [chats, groups])
-  // group: into that group, or null for none; left out, the space stays in its own.
-  const move = (chat: ChatView, pinned: boolean, index: number, group?: string | null) =>
-    send({ type: 'chat.move', chatId: chat.id, pinned, index, ...(group !== undefined && { group }) })
+  // group: into that group, or null for none; left out, the space stays in its own. With no index, an unpinned space
+  // goes back where it was before it was pinned (the core keeps the spot).
+  const move = (chat: ChatView, pinned: boolean, index?: number, group?: string | null) =>
+    send({
+      type: 'chat.move',
+      chatId: chat.id,
+      pinned,
+      ...(index !== undefined && { index }),
+      ...(group !== undefined && { group }),
+    })
   // Moves a space one place up or down where it sits, keeping it focused when done from the keyboard.
   const step = (chat: ChatView, by: -1 | 1, keyboard = false) => {
     const place = spacesIn(placeOf(chat))
@@ -390,7 +397,7 @@ export function ChatNav({
       ? []
       : [
           chat.pinned
-            ? { label: 'Unpin', disabledReason: offline, run: () => move(chat, false, 0) }
+            ? { label: 'Unpin', disabledReason: offline, run: () => move(chat, false) }
             : { label: 'Pin', disabledReason: offline, run: () => move(chat, true, spacesIn('pinned').length) },
           ...grouping,
           ...(index > 0 ? [{ label: 'Move up', disabledReason: offline, run: () => step(chat, -1) }] : []),

@@ -290,6 +290,8 @@ export type ChatInfo = PermissionSwitches & {
   // Spaces only: the id of the sidebar group (groups.json) the space sits in. Purely visual. A pinned space keeps it and
   // goes back into the group when unpinned; an id with no group behind it counts as no group.
   group?: string
+  // Spaces only, while pinned: where the space sat before it was pinned, so Unpin puts it back (UnpinSpot).
+  unpinTo?: UnpinSpot
   createdAt: string
   role?: ModelRole
   model?: string
@@ -342,6 +344,15 @@ export const isUnread = (chat: Pick<ChatInfo, 'doneAt' | 'readAt'>) =>
 
 // from: the branch the folder was on when it was checked out.
 export type Worktree = { path: string; branch: string; from?: string }
+
+/**
+ * Where a pinned space sat before it was pinned, among the spaces of its group (or the ungrouped ones): the ids of the
+ * spaces just above and just below it, nearest first (up to UNPIN_NEIGHBOURS each), and its index there. Neighbours
+ * stay right when other spaces move, so Unpin goes next to the nearest one still in that place, and to the index only
+ * when none is.
+ */
+export type UnpinSpot = { above: string[]; below: string[]; index: number }
+export const UNPIN_NEIGHBOURS = 5
 
 /** How spaces sort in the sidebar: pinned first, then unordered (newest first), then by `order`. */
 export function bySpaceOrder(a: Pick<ChatInfo, 'pinned' | 'order' | 'createdAt'>, b: typeof a): number {
@@ -626,7 +637,8 @@ export type ClientMessage =
   | { type: 'chat.archive'; chatId: string; archived: boolean }
   // Moves a space to `index` among the active spaces that are (un)pinned like `pinned`, pinning or unpinning it. With
   // `group`, it also goes into that group (null: out of any group); an unpinned space is placed among its group's spaces.
-  | { type: 'chat.move'; chatId: string; pinned: boolean; index: number; group?: string | null }
+  // Unpinning without an index puts the space back where it was before it was pinned (ChatInfo.unpinTo).
+  | { type: 'chat.move'; chatId: string; pinned: boolean; index?: number; group?: string | null }
   // Sidebar groups of spaces. A new group goes at the bottom of the groups; with chatId, that space moves into it.
   | { type: 'group.create'; name: string; chatId?: string }
   | { type: 'group.rename'; groupId: string; name: string }
