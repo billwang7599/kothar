@@ -137,6 +137,10 @@ const LIMIT_NAMES: Record<string, string> = {
   seven_day_sonnet: 'weekly Sonnet',
 }
 const OUTPUT_TAIL_CHARS = 2000
+// A Kothar tool call can run for minutes (deep_research) or wait on the user. Claude Code (2.1.319) ends an HTTP MCP
+// request after 60 s, and a call that sends nothing after 5 minutes, unless the server's `timeout` (ms) or
+// MCP_TOOL_TIMEOUT raises both; progress notifications don't extend either. The env covers versions without `timeout`.
+const MCP_CALL_TIMEOUT_MS = 24 * 60 * 60 * 1000
 // Anthropic's API refuses an image whose base64 is over 5 MB; the prompt still names it by path.
 export const MAX_IMAGE_BASE64_CHARS = 5 * 1024 * 1024
 // The login prints its manual sign-in link inside an OSC 8 hyperlink, ended by BEL or ESC.
@@ -329,13 +333,17 @@ export function createClaudeCode(user: UserEnv = processUserEnv()): Adapter {
       if (kotharMcp) {
         // Claude Code expands ${VAR} in headers, so the token stays out of `ps`.
         const headers = { Authorization: 'Bearer ${KOTHAR_MCP_TOKEN}' }
-        servers.kothar = { type: 'http', url: kotharMcp.url, headers }
+        servers.kothar = { type: 'http', url: kotharMcp.url, headers, timeout: MCP_CALL_TIMEOUT_MS }
         env.KOTHAR_MCP_TOKEN = kotharMcp.token
       }
       for (const server of mcpServers) {
-        servers[server.name] = { type: 'stdio', command: server.command, args: server.args ?? [], env: server.env ?? {} }
+        const { command, args: serverArgs = [], env: serverEnv = {} } = server
+        servers[server.name] = { type: 'stdio', command, args: serverArgs, env: serverEnv, timeout: MCP_CALL_TIMEOUT_MS }
       }
-      if (Object.keys(servers).length) args.push('--mcp-config', JSON.stringify({ mcpServers: servers }))
+      if (Object.keys(servers).length) {
+        args.push('--mcp-config', JSON.stringify({ mcpServers: servers }))
+        env.MCP_TOOL_TIMEOUT = String(MCP_CALL_TIMEOUT_MS)
+      }
       const allowed = [
         ...(kotharMcp ? ['mcp__kothar__*'] : []),
         ...mcpServers.flatMap((server) => (server.allowTools ? [`mcp__${server.name}__*`] : [])),

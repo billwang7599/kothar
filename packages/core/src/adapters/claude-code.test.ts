@@ -6,6 +6,7 @@ import { claudeCode, createClaudeCode, MAX_IMAGE_BASE64_CHARS } from './claude-c
 import { fakeMachine } from './test-machine.ts'
 
 const fixture = (name: string) => readFileSync(new URL(`fixtures/claude-code/${name}.jsonl`, import.meta.url), 'utf8')
+const DAY_MS = 24 * 60 * 60 * 1000
 
 function startSession(instructions = '', extra: Partial<SessionOptions> = {}, adapter = claudeCode) {
   const fake = fakeMachine()
@@ -95,12 +96,12 @@ describe('claudeCode adapter', () => {
     const args = fake.spawned[0]!.args
     expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({
       mcpServers: {
-        kothar: { type: 'http', url: kotharMcp.url, headers: { Authorization: 'Bearer ${KOTHAR_MCP_TOKEN}' } },
+        kothar: { type: 'http', url: kotharMcp.url, headers: { Authorization: 'Bearer ${KOTHAR_MCP_TOKEN}' }, timeout: DAY_MS },
       },
     })
     expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__kothar__*')
     expect(args.join(' ')).not.toContain(token)
-    expect(fake.spawned[0]?.env).toEqual({ KOTHAR_MCP_TOKEN: token })
+    expect(fake.spawned[0]?.env).toEqual({ KOTHAR_MCP_TOKEN: token, MCP_TOOL_TIMEOUT: String(DAY_MS) })
   })
 
   it("connects each extension's MCP server next to Kothar's, running without asking the tools of those that allow it", () => {
@@ -111,9 +112,9 @@ describe('claudeCode adapter', () => {
     ]
     const args = startSession('', { kotharMcp, mcpServers, readFiles: ['/tmp/a.png'] }).fake.spawned[0]!.args
     expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!).mcpServers).toEqual({
-      kothar: { type: 'http', url: kotharMcp.url, headers: { Authorization: 'Bearer ${KOTHAR_MCP_TOKEN}' } },
-      browser: { type: 'stdio', command: '/bin/node', args: ['cli.js', '--headless'], env: { A: '1' } },
-      asks: { type: 'stdio', command: 'asks-mcp', args: [], env: {} },
+      kothar: { type: 'http', url: kotharMcp.url, headers: { Authorization: 'Bearer ${KOTHAR_MCP_TOKEN}' }, timeout: DAY_MS },
+      browser: { type: 'stdio', command: '/bin/node', args: ['cli.js', '--headless'], env: { A: '1' }, timeout: DAY_MS },
+      asks: { type: 'stdio', command: 'asks-mcp', args: [], env: {}, timeout: DAY_MS },
     })
     expect(args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--allowedTools') + 4)).toEqual([
       'mcp__kothar__*',
@@ -123,6 +124,19 @@ describe('claudeCode adapter', () => {
     const alone = startSession('', { mcpServers: mcpServers.slice(1) }).fake.spawned[0]!.args
     expect(Object.keys(JSON.parse(alone[alone.indexOf('--mcp-config') + 1]!).mcpServers)).toEqual(['asks'])
     expect(alone).not.toContain('--allowedTools')
+  })
+
+  // Claude Code cuts an HTTP MCP request off after 60 s by default, so deep_research and tools that wait on the user
+  // came back as "The operation timed out." while the work went on.
+  it('lets MCP tool calls run for a day, not the 60 s default, and leaves sessions without MCP servers alone', () => {
+    const kotharMcp = { url: 'http://127.0.0.1:4317/mcp', token: 't' }
+    const spawned = startSession('', { kotharMcp, mcpServers: [{ name: 'asks', command: 'asks-mcp' }] }).fake.spawned[0]!
+    const { mcpServers } = JSON.parse(spawned.args[spawned.args.indexOf('--mcp-config') + 1]!)
+    for (const server of Object.values<{ timeout: number }>(mcpServers)) expect(server.timeout).toBe(DAY_MS)
+    expect(spawned.env?.MCP_TOOL_TIMEOUT).toBe(String(DAY_MS))
+    const plain = startSession('', {}).fake.spawned[0]!
+    expect(plain.args).not.toContain('--mcp-config')
+    expect(plain.env?.MCP_TOOL_TIMEOUT).toBeUndefined()
   })
 
   it('passes the model and effort only when set', async () => {
