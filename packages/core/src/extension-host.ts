@@ -12,6 +12,7 @@ import type {
   ExtensionHost,
   ExtensionNoteCard,
   ExtensionPermissionAnswer,
+  ExtensionReport,
   ExtensionTool,
   ExtensionRun,
   ExtensionStorage,
@@ -28,7 +29,7 @@ import { guardHost } from './extensions.ts'
 import { summaryOf, workerName } from './kothar-mcp.ts'
 import { messagesOf } from './memory.ts'
 import { messageAt } from './message-actions.ts'
-import type { Machine, ChatEntry, ChatInfo, ChatStatus, CompletionRequest, CoreMessage } from './shared.ts'
+import type { Machine, ChatEntry, ChatInfo, ChatStatus, CompletionRequest, CoreMessage, WorkerReport } from './shared.ts'
 import { within } from './util.ts'
 
 // A note in the transcript (host.note) and its card, cut to what a line shows; its action is kept to what a click
@@ -116,7 +117,7 @@ export type HostDeps<C extends HostChat> = {
   // name is checked by the core (a chat needs one).
   createChat: (spec: Pick<CreateSpec, 'folders' | 'files' | 'engine'> & { name: string }) => ChatInfo
   createChild: (parentId: string, spec: Omit<CreateSpec, 'parentId' | 'task' | 'name'> & { name: string }) => ChatInfo
-  enqueue: (chat: C, message: { text: string }) => void
+  enqueue: (chat: C, message: { text: string; report?: WorkerReport }) => void
   interrupt: (chat: C) => void
   retry: (chat: C) => void
   continueTurn: (chat: C, text: string) => void
@@ -271,6 +272,20 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
           by: extension,
           title: `Sent ${chat.info.name} a message`,
           sections: [{ label: 'The message', text: String(text) }],
+        }))
+      },
+      report(chatId, report) {
+        const chat = chatFor(chatId)
+        const { name, text, error } = (report ?? {}) as Partial<ExtensionReport>
+        if (typeof name !== 'string' || !name.trim()) throw new Error('A report needs a name')
+        if (typeof text !== 'string') throw new Error('A report needs its text')
+        const err = typeof error === 'string' && error ? error : undefined
+        deps.enqueue(chat, { text, report: { chatId: extension.id, name: name.trim(), from: extension.id, ...(err && { error: err }) } })
+        deps.activity.emit(chat.info.id, () => ({
+          kind: 'worker',
+          by: extension,
+          title: `Reported to the chat: ${name.trim()}`,
+          sections: [{ label: 'The report', text }],
         }))
       },
       chats: () => deps.shownChats().map(deps.detailOf),

@@ -453,8 +453,8 @@ export function openTurns(deps: TurnDeps) {
     const again = chat.entries.slice(start, end + 1).map((e): QueuedMessage => {
       const id = randomBytes(4).toString('hex')
       if (e.type === 'worker.report') {
-        const { chatId, name, error } = e
-        return { id, text: e.text, report: { chatId, name, ...(error !== undefined && { error }) } }
+        const { chatId, name, error, from } = e
+        return { id, text: e.text, report: { chatId, name, ...(error !== undefined && { error }), ...(from !== undefined && { from }) } }
       }
       const { text, attachments } = e as Extract<ChatEntry, { type: 'user.message' }>
       return { id, text, ...(attachments && { attachments }) }

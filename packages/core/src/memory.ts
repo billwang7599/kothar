@@ -12,7 +12,11 @@ export const WINDOW_MAX_CHARS = 88_000
 export type Report = { text: string; report: WorkerReport }
 
 // How a worker's report reads to its lead, in memory and in the prompt that delivers it.
-export function reportText({ text, report: { chatId, name, error } }: Report) {
+export function reportText({ text, report: { chatId, name, error, from } }: Report) {
+  if (from !== undefined) {
+    const failed = error ? `\n\n(It ended early: ${error})` : ''
+    return `Report from the ${from} extension, "${name}":\n\n${text || '(No reply)'}${failed}`
+  }
   const early = error ? `\n\n(The turn ended early: ${error})` : ''
   return `Report from worker "${name}" (${chatId}):\n\n${text || '(No reply)'}${early}`
 }
@@ -32,8 +36,8 @@ export function messagesOf(entries: ChatEntry[]): MemoryMessage[] {
       add(kind, entry.at, withAttachments(entry.text, entry.attachments))
     }
     if (entry.type === 'worker.report') {
-      const { text, chatId, name, error } = entry
-      add('work', entry.at, reportText({ text, report: { chatId, name, ...(error && { error }) } }))
+      const { text, chatId, name, error, from } = entry
+      add('work', entry.at, reportText({ text, report: { chatId, name, ...(error && { error }), ...(from !== undefined && { from }) } }))
     }
     if (entry.type === 'text.completed') add('talk', entry.at, entry.text)
     if (entry.type === 'tool.started') add('tool', entry.at, `${entry.name} ${JSON.stringify(entry.input) ?? ''}`.trim())

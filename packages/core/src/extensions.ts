@@ -134,6 +134,7 @@ export const HOST_USES: Partial<Record<keyof ExtensionHost, ExtensionUse>> = {
   home: 'files',
   complete: 'models',
   send: 'sendMessages',
+  report: 'sendMessages',
   createChat: 'sendMessages',
   retry: 'sendMessages',
   continue: 'sendMessages',

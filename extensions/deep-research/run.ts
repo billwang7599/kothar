@@ -39,7 +39,7 @@ export type Ports = {
 
 export type Limits = Run['limits']
 
-export type StartSpec = { chatId: string; spaceId: string; question: string; depth: Depth; limits: Limits; workerChat?: string }
+export type StartSpec = { chatId: string; spaceId: string; question: string; depth: Depth; limits: Limits; workerChat?: string; background?: boolean }
 
 export type Decision = { start: true; plan?: Plan } | { start: false }
 
@@ -462,8 +462,12 @@ export function openResearch(ports: Ports) {
     run.phase = 'failed'
     run.error = error instanceof Error ? error.message : String(error)
     run.endedAt = host.now().toISOString()
-    save(run)
     live.delete(run.id)
+    try {
+      save(run)
+    } catch {
+      // What failed may be saving itself: the outcome still says so.
+    }
     return { status: 'failed', question: run.question, error: run.error, run: run.id }
   }
 
@@ -484,6 +488,7 @@ export function openResearch(ports: Ports) {
         findings: [],
         sources: {},
         limits: spec.limits,
+        ...(spec.background && { background: true as const }),
       }
       live.set(run.id, { run, abort: new AbortController(), pages: new Map() })
       save(run)
@@ -534,14 +539,18 @@ export function openResearch(ports: Ports) {
     },
     isLive: (runId: string) => live.has(runId),
     liveRuns: () => [...live.values()].map((e) => e.run),
-    /** A run Kothar quit in the middle of: its report from what it had found, marked partial. */
-    async recover(run: Run) {
-      if (!ACTIVE.includes(run.phase) || live.has(run.id)) return
-      const entry: Live = { run, abort: new AbortController(), pages: new Map(), stopped: 'Kothar quit before it finished.' }
+    /**
+     * A run Kothar quit in the middle of: its report from what it had found, marked partial; or, if no worker had run
+     * yet, cancelled. Its outcome, or nothing if it wasn't one to recover.
+     */
+    async recover(run: Run): Promise<Outcome | undefined> {
+      if (!ACTIVE.includes(run.phase) || live.has(run.id)) return undefined
+      const why = 'Kothar quit before it finished.'
+      const entry: Live = { run, abort: new AbortController(), pages: new Map(), stopped: why }
       live.set(run.id, entry)
-      if (!run.workers.length) return void cancel(entry)
+      if (!run.workers.length) return { ...cancel(entry), error: why }
       for (const w of run.workers) if (w.state === 'running') w.state = 'stopped'
-      await finish(entry).catch((error) => fail(entry, error))
+      return finish(entry).catch((error) => fail(entry, error))
     },
   }
 

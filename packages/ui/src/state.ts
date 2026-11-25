@@ -54,7 +54,8 @@ export type Permission = {
 // jumps to it; absent when the view can't tell.
 export type Item =
   | { kind: 'user'; text: string; attachments?: Attachment[]; midTurn?: true; entry?: number }
-  | { kind: 'report'; chatId: string; name: string; text: string; error?: string; entry?: number }
+  // from: an extension's report of its own background work (such as a research run), not a worker's.
+  | { kind: 'report'; chatId: string; name: string; text: string; error?: string; from?: string; entry?: number }
   | { kind: 'text'; text: string; entry?: number }
   | { kind: 'thinking'; text: string }
   | {
@@ -241,8 +242,8 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
       ]
     }
     case 'worker.report': {
-      const { chatId, name, text, error } = entry
-      return [...items, { kind: 'report', chatId, name, text, ...(error && { error }), ...at }]
+      const { chatId, name, text, error, from } = entry
+      return [...items, { kind: 'report', chatId, name, text, ...(error && { error }), ...(from !== undefined && { from }), ...at }]
     }
     case 'text.completed':
       return [...items, { kind: 'text', text: entry.text, ...at }]

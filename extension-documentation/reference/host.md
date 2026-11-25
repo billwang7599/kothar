@@ -14,7 +14,7 @@ names the missing entry.
 | Calls | List in `uses` |
 |---|---|
 | `chats`, `chat`, `read`, `space`, `messages`, `reaches`, `reachable` | `readChats` |
-| `send`, `createChat`, `retry`, `continue`, `interrupt` | `sendMessages` |
+| `send`, `report`, `createChat`, `retry`, `continue`, `interrupt` | `sendMessages` |
 | `accounts`, `useAccount` | `accounts` |
 | `run`, `spawn`, `openTerminal`, `reveal` | `run` |
 | `complete` | `models` |
@@ -90,6 +90,7 @@ export { lastQuestion, workFolder }
 | Call | What it does |
 |---|---|
 | `send(chatId, text)` | Sends a message as if you typed it. If a turn is running, it waits in the queue behind it. |
+| `report(chatId, { name, text, error? })` | Hands the chat's agent the result of background work it started, as a worker's final reply reaches its lead: shown in the transcript as a folded report under `name`, queued behind a running turn (or sent at once when the chat is idle), and waking the agent to tell the user. `text` is what the agent reads; `error` says why the work failed or ended early. Deep Research uses it for runs the agent didn't wait for. Throws when the chat is gone or archived. |
 | `createChat({ name?, folders?, files?, engine?, parentId?, role?, quiet?, task? })` | Makes a new chat and returns `{ id }`. Without `parentId` it's a space and needs a `name`; `folders` and `files` are absolute paths that go into its context. With `parentId` it's a worker: see [Start a worker](#start-a-worker). |
 | `retry(chatId)` | Sends the chat's last message again, ahead of anything queued. |
 | `continue(chatId, text)` | Carries on the chat's last turn with a prompt from Kothar, as a turn of its own. The agent sees the turn so far in its memory. The prompt isn't shown or logged as a message, and queued messages run after it. The chat must be idle. |

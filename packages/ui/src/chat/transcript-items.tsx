@@ -111,7 +111,7 @@ function ReportCard({ item, chatId, at, open, actions }: ReportProps) {
   const [local, setLocal] = useState<boolean>()
   const shown = (key ? chosen : local) ?? opens
   const toggle = () => (key ? openReportCard(key, !shown) : setLocal(!shown))
-  const name = open ? (
+  const name = open && item.from === undefined ? (
     <button type="button" className="font-medium text-text hover:underline" onClick={open}>
       {item.name}
     </button>
@@ -120,7 +120,7 @@ function ReportCard({ item, chatId, at, open, actions }: ReportProps) {
   )
   const preview = item.text.split('\n').find((l) => l.trim())?.replace(/[*_`#>]/g, '').trim() || 'No reply'
   return (
-    <section aria-label={`Report from worker ${item.name}`} className="flex flex-col gap-4 border-l-2 pl-12">
+    <section aria-label={item.from === undefined ? `Report from worker ${item.name}` : `Report: ${item.name}`} className="flex flex-col gap-4 border-l-2 pl-12">
       <div className="flex min-w-0 items-center gap-6 text-sm text-muted">
         <button
           type="button"
@@ -134,8 +134,8 @@ function ReportCard({ item, chatId, at, open, actions }: ReportProps) {
         </button>
         {/* Wraps instead of holding its width: a long name or error would otherwise push the chat sideways. */}
         <span className="min-w-0 [overflow-wrap:anywhere]">
-          Worker {name} reported
-          {item.error && <span> · ended early: {item.error}</span>}
+          {item.from === undefined ? <>Worker {name} reported</> : name}
+          {item.error && <span> · {item.from === undefined ? 'ended early' : 'failed'}: {item.error}</span>}
         </span>
         {actions}
         {!shown && (

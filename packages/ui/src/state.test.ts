@@ -228,6 +228,11 @@ describe('reduce', () => {
     ])
   })
 
+  it('keeps which extension an extension’s report is from', () => {
+    const state = run(snapshot([chat('a', [])]), entry('a', { type: 'worker.report', chatId: 'deep-research', name: 'Deep research: X', text: 'Found it', from: 'deep-research' }))
+    expect(items(state)).toEqual([{ kind: 'report', chatId: 'deep-research', name: 'Deep research: X', text: 'Found it', from: 'deep-research', entry: 0 }])
+  })
+
   it('adds a worker without switching the view to it', () => {
     const sub: Action = { type: 'chat.added', chat: chat('s', [], { name: 'Search', parentId: 'c' }) }
     const state = run(snapshot([chat(MAIN_CHAT_ID), chat('c')]), { type: 'select', chatId: 'c' }, sub)

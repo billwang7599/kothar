@@ -555,8 +555,9 @@ export type { Attachment } from '@kothar/extension-api'
 
 export type Upload = { name: string; mimeType: string; base64: string }
 
-// A worker's final reply to its lead: which worker, and why its turn ended early, if it did.
-export type WorkerReport = { chatId: string; name: string; error?: string }
+// A worker's final reply to its lead: which worker, and why its turn ended early, if it did. from: an extension's
+// report of its own background work instead (ExtensionHost.report), by the extension's id, which chatId is then too.
+export type WorkerReport = { chatId: string; name: string; error?: string; from?: string }
 
 // steering: handed to the running turn, waiting for its next tool boundary; it can't be taken back.
 export type QueuedMessage = {

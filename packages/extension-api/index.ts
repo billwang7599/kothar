@@ -143,7 +143,8 @@ export type ChatEntry = { at: string } & (
   // midTurn: sent while a turn ran, and taken in by it at this point (steering).
   | { type: 'user.message'; text: string; attachments?: Attachment[]; midTurn?: true }
   // quiet: a quiet child's report, logged for the user (NewChatSpec.showReport); it didn't start a turn.
-  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true }
+  // from: an extension's report (ExtensionHost.report), by that extension's id; chatId is then the extension's id too.
+  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true; from?: string }
   | { type: 'permission.resolved'; requestId: string; allow: boolean; auto?: true }
   | { type: 'question.resolved'; requestId: string; answers?: Answers }
   // panel: clicking the note opens that panel of the extension's, then sends it action. card: drawn as a card.
@@ -316,6 +317,9 @@ export type NewChatSpec = {
   showReport?: boolean
 }
 
+// A result of an extension's background work, for ExtensionHost.report.
+export type ExtensionReport = { name: string; text: string; error?: string }
+
 // Each extension gets a host of its own, so storage and notes know which extension they belong to.
 export type ExtensionHost = {
   // A new chat; send it its first message with send. Without parentId it's a space, with its own folders and files.
@@ -330,6 +334,12 @@ export type ExtensionHost = {
   createChat(spec: NewChatSpec): { id: string }
   // Sends a message as if the user typed it, queued behind a running turn.
   send(chatId: string, text: string): void
+  // Hands the chat's agent the result of background work it started, as a worker's final reply reaches its lead: shown in
+  // the transcript as a report under name, queued for the agent (after a running turn, or at once when the chat is idle)
+  // and waking it, so it can tell the user. text is what the agent reads; error, why the work ended early, if it did.
+  // For work an agent asked for and didn't wait on, such as a research run; not for chatter. Throws when the chat is
+  // gone or archived.
+  report(chatId: string, report: ExtensionReport): void
   // Every chat the user can see, spaces and workers.
   chats(): ChatDetail[]
   // The extension's spaceSettings for chatId's space (the chat itself, or the space a worker is in), defaults filled
@@ -1159,7 +1169,7 @@ export type ExtensionUse =
   | 'memory'
   // Host calls: chats, chat, read, space, messages, message, reaches, reachable; and onTurnSent.
   | 'readChats'
-  // send, createChat, retry, continue, interrupt, addContextFile
+  // send, report, createChat, retry, continue, interrupt, addContextFile
   | 'sendMessages'
   // accounts, useAccount
   | 'accounts'

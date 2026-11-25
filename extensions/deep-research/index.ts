@@ -29,9 +29,9 @@ export * from './store.ts'
 // Put before the user's message while the chip is on (the prompt "chip").
 export const CHIP_TEXT = [
   '[Deep research is on in this chat.] Call the deep_research tool with the message below as its question, word for',
-  'word, then reply with its summary and where the report was saved. Don’t research it yourself first. If the message',
-  'clearly isn’t a question to research (thanks, a greeting, a question about a report you already gave), answer it',
-  'normally instead.',
+  'word, then tell the user in a line that it started. Its report arrives in this chat when it’s done. Don’t research',
+  'it yourself first. If the message clearly isn’t a question to research (thanks, a greeting, a question about a',
+  'report you already gave), answer it normally instead.',
 ].join('\n')
 const TOGGLE = 'research'
 const PANEL = 'research'
@@ -64,6 +64,32 @@ export function phaseText(run: Run): string {
 }
 
 const sourceCount = (run: Run) => Object.keys(run.sources).length
+
+const short = (text: string, max: number) => {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
+}
+
+/** What the agent reads when a run it didn't wait for is over: what came of it, and where its report is. */
+export function reportFor(outcome: Outcome, run: Pick<Run, 'id' | 'question'>): string {
+  const lines = [`Research ${run.id}: ${run.question}`, '']
+  if (outcome.status === 'failed') {
+    lines.push(`It failed: ${outcome.error ?? 'no reason given'}. Tell the user, and offer to try again.`)
+    return lines.join('\n')
+  }
+  if (outcome.status === 'cancelled') {
+    lines.push(`It didn’t finish: ${outcome.error ?? 'it stopped before any research ran'}. Tell the user, and offer to try again.`)
+    return lines.join('\n')
+  }
+  lines.push(outcome.status === 'partial' ? 'It finished with a partial report (it stopped early or hit its budget).' : 'It finished.')
+  if (outcome.sources !== undefined) lines.push(`Sources cited: ${outcome.sources}.`)
+  const place = outcome.report
+  if (place) lines.push(place.kind === 'file' ? `Report saved as the file ${place.ref}` : `Report saved as the ${place.kind} “${place.title}”.`)
+  if (outcome.error) lines.push(outcome.error)
+  if (outcome.summary) lines.push('', 'Summary:', outcome.summary)
+  lines.push('', 'Tell the user what it found and where the report is.')
+  return lines.join('\n')
+}
 
 // Fetches a page as a browser would ask for it, for checking quotes: text only, cut at MAX_PAGE_BYTES.
 async function fetchPage(url: string, signal: AbortSignal) {
@@ -180,8 +206,15 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
 
   const spaceOf = (h: ExtensionHost, chatId: string) => h.space(chatId)?.id ?? chatId
 
-  /** Starts a run for a chat and waits for its report. waitOn: the chat whose turn shows the plan bar. */
-  const start = async (h: ExtensionHost, context: { values: ExtensionValues }, spec: { chatId: string; question: string; depth?: Depth; waitOn?: string }): Promise<Outcome> => {
+  /**
+   * Starts a run for a chat: its id at once, and its outcome once it's over. waitOn: the chat whose turn shows the plan
+   * bar.
+   */
+  const begin = (
+    h: ExtensionHost,
+    context: { values: ExtensionValues },
+    spec: { chatId: string; question: string; depth?: Depth; waitOn?: string; background?: boolean },
+  ): { run: Run; outcome: Promise<Outcome> } => {
     values = context.values
     const engine = ensure(h)
     const settings = settingsOf(context)
@@ -189,7 +222,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
     const question = spec.question.trim().slice(0, MAX_QUESTION)
     if (!question) throw new Error('Give a question to research')
     const spaceId = spaceOf(h, spec.chatId)
-    const run = engine.create({ chatId: spec.chatId, spaceId, question, depth, limits: limitsFor(depth, settings.caps) })
+    const run = engine.create({ chatId: spec.chatId, spaceId, question, depth, limits: limitsFor(depth, settings.caps), ...(spec.background && { background: true }) })
     opened.set(spaceId, run.id)
     // The run's live card in the chat: its plan, progress and Stop, then the report's link.
     try {
@@ -200,7 +233,21 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
     // A worker's run goes ahead without the plan to approve: its lead chose to run it, and no one watches a worker's
     // own view to approve it.
     const byWorker = h.chat(spec.chatId)?.worker === true
-    return engine.execute(run.id, { askFirst: settings.askFirst && !byWorker, ...(spec.waitOn && { waitOn: spec.waitOn }) })
+    return { run, outcome: engine.execute(run.id, { askFirst: settings.askFirst && !byWorker, ...(spec.waitOn && { waitOn: spec.waitOn }) }) }
+  }
+
+  /** Starts a run for a chat and waits for its report. */
+  const start = async (h: ExtensionHost, context: { values: ExtensionValues }, spec: Parameters<typeof begin>[2]): Promise<Outcome> => begin(h, context, spec).outcome
+
+  // A run the agent didn't wait for: its outcome goes to the chat that asked as a report, which wakes its agent to tell
+  // the user. A run the user cancelled has nothing to tell.
+  const deliver = (h: ExtensionHost, outcome: Outcome, run: Run) => {
+    if (outcome.status === 'cancelled' && !outcome.error) return
+    try {
+      h.report(run.chatId, { name: `Deep research: ${short(run.question, 80)}`, text: reportFor(outcome, run), ...(outcome.status === 'failed' && { error: outcome.error ?? 'It failed' }) })
+    } catch {
+      // The chat went or was archived: the run's card and the Research tab still have it.
+    }
   }
 
   const runsOf = (chat: ChatDetail) => {
@@ -557,13 +604,17 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
         description:
           'Researches a question in depth across many web sources and writes a cited report: plans sub-questions (the user ' +
           'may be asked to approve the plan), runs research workers, checks every quote against its page, then saves the ' +
-          'report (an artifact, a note or a file). Takes minutes. Returns a short summary and where the report is. Use it ' +
-          'for questions that need many sources; not for quick lookups.',
+          'report (an artifact, a note or a file). Takes minutes, so it runs in the background: it returns at once with the ' +
+          'run’s id, your turn can end and the user can keep talking, and when it’s over its summary and where the report ' +
+          'is arrive in this chat as a report that wakes you, to tell the user. With wait: true it returns only once the ' +
+          'report is written, for when you need it before you go on. Use it for questions that need many sources; not for ' +
+          'quick lookups.',
         inputSchema: {
           type: 'object',
           properties: {
             question: { type: 'string', minLength: 1, maxLength: MAX_QUESTION, description: 'The question, as the user asked it' },
             depth: { type: 'string', enum: [...DEPTHS], description: 'quick, standard or thorough; the user’s default without it' },
+            wait: { type: 'boolean', description: 'Wait for the report instead of having it arrive later; false by default' },
           },
           required: ['question'],
         },
@@ -571,7 +622,27 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
         offered: (caller) => !workers.has(caller.id),
         async run(input, { caller, values: v, host: h }) {
           const depth = DEPTHS.includes(input.depth as Depth) ? (input.depth as Depth) : undefined
-          return start(h, { values: v }, { chatId: caller.id, question: String(input.question ?? ''), ...(depth && { depth }), waitOn: caller.id })
+          const spec = { chatId: caller.id, question: String(input.question ?? ''), ...(depth && { depth }) }
+          // A worker waits: it reports and goes once its turn ends, so a report sent to it later would find no one.
+          if (input.wait === true || caller.worker === true || h.chat(caller.id)?.worker === true) return start(h, { values: v }, { ...spec, waitOn: caller.id })
+          // In the background: the plan, if asked for, waits in the run's card, since the turn that could show it on
+          // the bar is about to end.
+          const { run, outcome } = begin(h, { values: v }, { ...spec, background: true })
+          void outcome.then(
+            (o) => deliver(h, o, run),
+            (error) => deliver(h, { status: 'failed', question: run.question, error: error instanceof Error ? error.message : String(error), run: run.id }, run),
+          )
+          const askFirst = settingsOf({ values: v }).askFirst
+          return {
+            status: 'started',
+            run: run.id,
+            question: run.question,
+            note: [
+              'Research started; the report will arrive in this chat when it’s done, as a report that wakes you. Tell the user',
+              'it started and end your turn; don’t wait for it or research it yourself.',
+              ...(askFirst ? ['Its plan waits for the user’s Start in its card in the chat: say so.'] : []),
+            ].join(' '),
+          }
         },
       },
     ],
@@ -594,7 +665,15 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
       values = context.values
       const engine = ensure(context.host)
       for (const spaceId of store!.spaces()) {
-        for (const run of store!.list(spaceId)) if (ACTIVE.includes(run.phase)) void engine.recover(run)
+        for (const run of store!.list(spaceId)) {
+          if (!ACTIVE.includes(run.phase)) continue
+          // A run Kothar quit in the middle of ends now, partial; one the agent didn't wait for reports it, since no
+          // tool call is left to return it.
+          void engine.recover(run).then(
+            (outcome) => outcome && run.background && deliver(context.host, outcome, run),
+            () => undefined,
+          )
+        }
       }
     },
     onSettingsChanged(_changed, context) {

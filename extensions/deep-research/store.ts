@@ -48,6 +48,8 @@ export type Run = {
   summary?: string
   report?: ReportPlace
   error?: string
+  // Started by an agent that didn't wait for it: its outcome goes to chatId as a report (ExtensionHost.report).
+  background?: true
 }
 
 const folderOf = (spaceId: string) => `runs/${spaceId}`
