@@ -120,19 +120,15 @@ What works today:
   Activity tab lists what Kothar and extensions do on their own: model calls, permission answers and the rule behind
   each, workers, retries and account switches.
 
-Not built yet: remote machines, sandboxing outside macOS, a signed release, and sync.
+Not built yet: remote machines, sandboxing outside macOS, a published signed release, and sync.
 
 ## Building the Mac app
 
-`npm run package` builds `packages/desktop/release/Kothar-<version>-arm64.dmg` (Apple
-Silicon). With no signing setup it's ad-hoc signed, which runs on the Mac that built it; elsewhere macOS blocks it until
-it's opened with right-click → Open. Signing and notarization switch on with environment variables:
-
-- **Signing** (Developer ID certificate): `CSC_LINK` (path or base64 of a .p12) with `CSC_KEY_PASSWORD`, or `CSC_NAME`
-  naming a certificate in the keychain.
-- **Notarization** (needs signing too), one of: `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` (App Store
-  Connect API key), `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`, or `APPLE_KEYCHAIN` +
-  `APPLE_KEYCHAIN_PROFILE`.
+`npm run package` builds `packages/desktop/release/Kothar-<version>-arm64.dmg` (Apple Silicon). With a Developer ID
+certificate in your keychain and a `kothar-notary` notarytool profile, it signs the app and the DMG, notarizes them
+and staples the tickets. Without those, it's ad-hoc signed, which runs on the Mac that built it; elsewhere macOS blocks
+it until it's opened with right-click → Open. The first line of the build says which. One-time setup, other ways to
+give credentials and how to verify: [packages/desktop/README.md](packages/desktop/README.md).
 
 To try a build beside your own Kothar, run it on a throwaway garage:
 `KOTHAR_GARAGE=/tmp/k/garage KOTHAR_WORK=/tmp/k/work KOTHAR_USER_DATA=/tmp/k/data KOTHAR_PORT=4391 packages/desktop/release/mac-arm64/Kothar.app/Contents/MacOS/Kothar`.
