@@ -23,6 +23,7 @@ import { choosePanelTab, currentDock, currentPopup, extensionTabId, openDock, op
 import { useOpenDock } from './extension-dock.tsx'
 import type { PanelTab } from '@kothar/core/shared'
 import { changesText, RestartButton } from './restart.tsx'
+import { lastChat, visit } from './recent-chats.ts'
 import { panelShortcuts, useBindings, useShortcuts, type ShortcutHandlers } from './shortcuts.ts'
 import { setInstalledThemes, startAppearance } from './themes.tsx'
 import { isLooking, useLooking, useMarkRead } from './unread.ts'
@@ -258,6 +259,11 @@ function App() {
   const [marketplace, setMarketplace] = useState(false)
   const openMarketplace = useCallback(() => setMarketplace(true), [])
   const goTo = (chatId: string | undefined) => chatId && select(chatId)
+  // The chats opened, newest first, for Last chat (Ctrl+Tab).
+  const recentRef = useRef<string[]>([])
+  useEffect(() => {
+    recentRef.current = visit(recentRef.current, state.selectedId)
+  }, [state.selectedId])
   const navGroups = () => ({ groups: state.groups, collapsed: collapsedGroups() })
   // The open chat's extension panels: popups, their keys and left-sidebar launchers.
   const panels = (selected && state.extensionUi?.chatId === selected.id && state.extensionUi.panels) || []
@@ -273,6 +279,7 @@ function App() {
   const shortcuts: ShortcutHandlers = {
     previousSpace: () => goTo(stepSpace(state.chats, state.selectedId, -1, navGroups())),
     nextSpace: () => goTo(stepSpace(state.chats, state.selectedId, 1, navGroups())),
+    lastChat: () => goTo(lastChat(recentRef.current, state.chats, state.selectedId)),
     ...Object.fromEntries(
       Array.from({ length: 9 }, (_, i) => [`jump${i + 1}`, () => goTo(nthSpace(state.chats, i + 1, navGroups()))]),
     ),

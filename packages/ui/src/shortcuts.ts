@@ -6,7 +6,8 @@ import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
  * A binding is a string such as `Mod+Shift+O`: modifiers in a fixed order, then one key. `Mod` is ⌘ on macOS and
  * Ctrl elsewhere, so the defaults travel between platforms; `Ctrl` on macOS is the Control key. Keys are named from
  * the physical key (`KeyO` → `O`, `Digit1` → `1`), so ⌥ and keyboard layouts that change the typed character don't
- * change the binding. `null` means the action has no keys.
+ * change the binding. Off macOS, Ctrl and Mod are the same key, so `Ctrl+Tab` and `Mod+Tab` are one binding there.
+ * `null` means the action has no keys.
  *
  * The user's changes are saved in localStorage (`kothar.shortcuts`) as `{ [action id]: binding | null }`, only for
  * actions whose keys differ from their default.
@@ -42,6 +43,9 @@ const actions: ShortcutAction[] = [
   { id: 'search', label: 'Search', defaultKeys: 'Mod+O', menu: true },
   { id: 'previousSpace', label: 'Previous space', defaultKeys: 'Mod+ArrowUp' },
   { id: 'nextSpace', label: 'Next space', defaultKeys: 'Mod+ArrowDown' },
+  // The real Control key on every platform: ⌘Tab is the Mac's app switcher. In the menu, so it still arrives if the
+  // system's own Window menu claims ⌃Tab first.
+  { id: 'lastChat', label: 'Last chat', defaultKeys: 'Ctrl+Tab', menu: true },
   ...JUMPS,
   { id: 'newSpace', label: 'New space', defaultKeys: 'Mod+N', menu: true },
   { id: 'newSpaceFromFolder', label: 'New space from folder', defaultKeys: 'Mod+Shift+O', desktopOnly: true, menu: true },
@@ -190,14 +194,16 @@ export function matches(e: KeyLike, binding: Binding | null, mac = isMac()) {
   if (!binding) return false
   // Off macOS the Windows/Super key isn't part of any binding.
   if (!mac && e.metaKey) return false
-  return bindingOf(e, mac) === normalize(binding)
+  return bindingOf(e, mac) === normalize(binding, mac)
 }
 
-/** A binding in its canonical modifier order. */
-export function normalize(binding: Binding): Binding {
+/** A binding in its canonical modifier order. Off macOS, Ctrl is written as Mod, the name a key press gets there. */
+export function normalize(binding: Binding, mac = isMac()): Binding {
   const parsed = parseBinding(binding)
   if (!parsed) return binding
-  return [...MODIFIERS.filter((m) => parsed.mods.has(m)), parsed.key].join('+')
+  const mods = new Set(parsed.mods)
+  if (!mac && mods.delete('Ctrl')) mods.add('Mod')
+  return [...MODIFIERS.filter((m) => mods.has(m)), parsed.key].join('+')
 }
 
 const MAC_SYMBOLS: Record<Modifier, string> = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧', Mod: '⌘' }
@@ -228,7 +234,9 @@ export function formatBinding(binding: Binding | null, mac = isMac()): string {
 
 /** An action's keys as the user reads them, or '' when it has none. */
 /** Keys the system or the editing basics own; Kothar never takes them. */
-const RESERVED = ['Mod+Q', 'Mod+W', 'Mod+C', 'Mod+V', 'Mod+X', 'Mod+Z', 'Mod+Shift+Z', 'Mod+A', 'Mod+H', 'Mod+M', 'Mod+R', 'Mod+Tab']
+const RESERVED = ['Mod+Q', 'Mod+W', 'Mod+C', 'Mod+V', 'Mod+X', 'Mod+Z', 'Mod+Shift+Z', 'Mod+A', 'Mod+H', 'Mod+M', 'Mod+R']
+/** ⌘Tab is the Mac's app switcher; elsewhere Mod+Tab is Ctrl+Tab, which Kothar may use. */
+const RESERVED_ON_MAC = ['Mod+Tab', 'Mod+Shift+Tab']
 
 /** Why a key press can't be a shortcut, or undefined if it can. */
 export function refusal(binding: Binding): string | undefined {
@@ -237,7 +245,8 @@ export function refusal(binding: Binding): string | undefined {
   const bareKeyOk = /^F\d{1,2}$/.test(parsed.key)
   if (!bareKeyOk && !['Mod', 'Ctrl', 'Alt'].some((m) => parsed.mods.has(m as Modifier)))
     return `Add ${isMac() ? '⌘, ⌃ or ⌥' : 'Ctrl or Alt'}, so typing never triggers it`
-  if (RESERVED.includes(normalize(binding))) return `${formatBinding(binding)} belongs to the system`
+  const keys = normalize(binding)
+  if (RESERVED.includes(keys) || (isMac() && RESERVED_ON_MAC.includes(keys))) return `${formatBinding(binding)} belongs to the system`
   return undefined
 }
 

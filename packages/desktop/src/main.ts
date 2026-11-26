@@ -24,6 +24,7 @@ const MENU_DEFAULTS: Record<string, string | null> = {
   settings: 'CmdOrCtrl+,',
   toggleSidebar: 'CmdOrCtrl+[',
   toggleContextPanel: 'CmdOrCtrl+]',
+  lastChat: 'Ctrl+Tab',
 }
 
 // Chromium's caches would otherwise land in the garage, which shares the app's name.
@@ -220,6 +221,8 @@ async function start() {
           submenu: [
             item('toggleSidebar', 'Sidebar'),
             item('toggleContextPanel', 'Context panel'),
+            { type: 'separator' },
+            item('lastChat', 'Last chat'),
             { type: 'separator' },
             // The rest of Electron's own View menu.
             { role: 'reload' },
