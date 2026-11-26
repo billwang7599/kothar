@@ -56,7 +56,7 @@ A **space** is a chat with no `parentId` and no `extension`.
 | `user.message` | `text`, `attachments?`, `midTurn?` | A message you sent. `midTurn` is set when it was sent while a turn ran and taken in by that turn. |
 | `worker.report` | `text`, `chatId`, `name`, `error?` | A worker's final reply, delivered to its lead. |
 | `permission.resolved` | `requestId`, `allow`, `auto?` | A permission request was answered. `auto` is set when Kothar or an extension answered it. |
-| `permission.requested` | the engine event's fields, plus `sshHost?` | As the engine sent it. `sshHost` (`{ host, key? }`) is set by Kothar when the command reaches one SSH server that its card can offer to always allow. |
+| `permission.requested` | the engine event's fields, plus `sshHost?` and `buttons?` | As the engine sent it. `sshHost` (`{ host, key? }`) is set by Kothar when the command reaches one SSH server that its card can offer to always allow. `buttons` (`{ allow, deny }`) is set on Kothar's own `forget` card, which asks in its own words: Forget and Cancel. |
 | `question.resolved` | `requestId`, `answers?` | An agent's question was answered, or declined if there are no answers. |
 | `extension.note` | `text`, `extension?`, `panel?` | A note from [`host.note`](host.md#notes). |
 | Any engine event | | Every [engine event](#engine-events) except streamed deltas and steering. Completed text is logged as `text.completed`. |
