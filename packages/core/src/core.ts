@@ -65,6 +65,7 @@ import { QUEUE_FILE } from './queue-store.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
 import { openMessageEdits } from './message-edits.ts'
+import { openAcpAgents } from './acp-agents.ts'
 
 // Kept here too, for code that imports them from the core.
 export { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
@@ -138,10 +139,12 @@ function assembleCore(options: {
   home?: string
   now?: () => Date
 }) {
-  const { adapters, defaultEngine, machine, stopGraceMs = STOP_GRACE_MS, home = homedir(), now = () => new Date() } = options
+  const { defaultEngine, machine, stopGraceMs = STOP_GRACE_MS, home = homedir(), now = () => new Date() } = options
   mkdirSync(options.garage, { recursive: true })
   // Context paths are saved resolved, so attachment paths must be too for a pin to match its file.
   const garage = realpathSync(options.garage)
+  // Kept in place: the ACP agents the user adds join and leave it (acp-agents.ts), and every module holds this list.
+  const adapters = [...options.adapters]
   const adapterFor = (engine: string) => adapters.find((adapter) => adapter.id === engine)
   const checkEngine = (engine: string) => {
     if (!adapterFor(engine)) {
@@ -222,9 +225,38 @@ function assembleCore(options: {
   const engineInfo = (id: string): EngineInfo => {
     const status = detected.get(id) ?? { installed: false, signedIn: false }
     const { name, steering } = adapterFor(id) ?? {}
-    return { id, ...(name && { name }), enabled: isEnabled(id), ...status, ...(steering && { steering }) }
+    const acp = acpAgents.agentOf(id)
+    return { id, ...(name && { name }), enabled: isEnabled(id), ...status, ...(steering && { steering }), ...(acp && { acp }) }
   }
   const engineInfos = () => adapters.map((adapter) => engineInfo(adapter.id))
+  const detectEngine = async (adapter: Adapter) => {
+    try {
+      detected.set(adapter.id, nameModels(await adapter.detect(machine)))
+    } catch (error) {
+      detected.set(adapter.id, { installed: false, signedIn: false, detail: messageOf(error) })
+    }
+    broadcast({ type: 'engine.updated', engine: engineInfo(adapter.id) })
+  }
+  // The user's ACP agents; detection and chats come in through functions, as they open further down.
+  const acpAgents = openAcpAgents({
+    settings,
+    saveSettings,
+    adapters,
+    home,
+    isBusy: (engine) => [...chats.values()].some((chat) => chat.info.engine === engine && chat.status !== 'idle'),
+    async detect(adapter) {
+      await detectEngine(adapter)
+      models.settle()
+      followModels()
+    },
+    forget(engine) {
+      detected.delete(engine)
+      models.settle()
+      followModels()
+    },
+    engineInfos,
+    broadcast: (message) => broadcast(message),
+  })
   const listeners: ((message: CoreMessage) => void)[] = []
   const broadcast = (message: CoreMessage) => listeners.forEach((listener) => listener(message))
   // Every window hears what's installed now, and the themes it can show.
@@ -1111,6 +1143,7 @@ function assembleCore(options: {
     writeInstructions,
     setContextDefault,
     setEngineEnabled,
+    acpAgents,
     setWorkFolder,
     setPermissionDefault,
     setSshHostsDefault,
@@ -1166,16 +1199,7 @@ function assembleCore(options: {
   return {
     engines: engineInfos,
     async refreshEngines() {
-      await Promise.all(
-        adapters.map(async (adapter) => {
-          try {
-            detected.set(adapter.id, nameModels(await adapter.detect(machine)))
-          } catch (error) {
-            detected.set(adapter.id, { installed: false, signedIn: false, detail: messageOf(error) })
-          }
-          broadcast({ type: 'engine.updated', engine: engineInfo(adapter.id) })
-        }),
-      )
+      await Promise.all(adapters.map(detectEngine))
       enginesDetected = true
       models.settle()
       followModels()

@@ -64,7 +64,8 @@ packages/
     src/machine.ts       runs processes, locally and sandboxed
     src/folder-modes.ts  how agents may write in attached folders: the sandbox, permission answers and instructions
     src/folder-copies.ts folders set to Work on a copy: the copy, its changes and Copy changes back
-    src/adapters/        one file per engine (claude-code, codex, opencode, pi, fake) and their helpers
+    src/adapters/        one file per engine (claude-code, codex, opencode, pi, fake) and their helpers;
+                         acp-agent.ts runs any ACP agent the user adds in Settings (acp-agents.ts keeps the list)
     src/kothar-mcp.ts    the MCP server Kothar gives every agent (zoom, date, spawn_worker, ...)
   ui/              React app (Tailwind, Radix, Motion), talking to the core over a WebSocket (@kothar/ui)
   desktop/         Electron shell that runs the core and serves the built UI (@kothar/desktop)
@@ -313,6 +314,19 @@ Why some things are the way they are. Add one when you make a choice the next co
   keeps only ids in the log: the call's `reason` is dropped as it's logged, and the card keeps its count once the
   messages are gone. It's a core tool beside `list_chats`, not Memory's, because it works with Memory off too and uses
   the core's delete; no private hook was needed.
+
+- **Any ACP agent can be added from Settings, with no adapter of its own.** Settings → Engines → Add ACP agent saves
+  a name, command, arguments (`{cwd}` is the chat's folder), environment and extra writable folders in
+  `settings.json` (`acpAgents`); each becomes an engine `acp-<name>` run by `adapters/acp-agent.ts`, which shares the
+  protocol half (`acp.ts`) with OpenCode. Since Kothar knows nothing else about such an agent, it uses only what ACP
+  gives: detection starts a throwaway session to read the models and thinking levels it offers (config options, or
+  the older `models` state), and an agent that offers none runs on `default`, its own pick; instructions go ahead of
+  the first prompt in `<instructions>`, as ACP has no system prompt every agent takes; tools are classed by ACP's
+  `kind`, and their calls ask through Kothar's permission cards; Kothar's MCP server goes over HTTP only to agents
+  that say they take it, extensions' over stdio. Two things it can't do for an unknown agent: start it clean (it
+  loads its own config and plugins, unlike design rule 8) and sign it in (an agent that wants a sign-in says so on
+  its row; sign in with its own CLI). OpenCode keeps its own adapter for what it does beyond ACP: a clean config,
+  accounts, `complete` and its tool switches.
 
 ## Pull requests
 

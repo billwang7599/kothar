@@ -5,11 +5,10 @@ import { Dialog, Tabs } from 'radix-ui'
 import { CONTEXT_SECTIONS } from '@kothar/core/shared'
 import { SECTIONS } from './context-panel.tsx'
 import { Button, CHAT_NOUN, GROUP, MOTION, NAV_LABEL, Switch, useReturnFocus } from './controls.tsx'
-import { engineProblem } from './state.ts'
 import { ShortcutsPage } from './shortcuts-page.tsx'
 import { SetupsPage } from './setups-page.tsx'
 import { EngineAccountsSection } from './settings/accounts.tsx'
-import { EngineToolsMaster, EngineToolsSections } from './settings/engine-tools.tsx'
+import { EnginesPage } from './settings/engines.tsx'
 import { AppearancePage } from './settings/appearance.tsx'
 import { CommunityExtensionsPage } from './settings/community.tsx'
 import { extensionPages, ExtensionsPage } from './settings/extensions.tsx'
@@ -26,34 +25,7 @@ const PAGES = [
     title: 'Engines',
     intro: 'Kothar only starts the engines you turn on here, and gives each the built-in tools you leave on.',
     body: ({ engines, engineTools, connected, send }: PageProps) => (
-      <>
-        <EngineToolsMaster settings={engineTools} connected={connected} send={send} />
-        <div className={GROUP}>
-          {engines.map((engine) => {
-            const problem = engineProblem(engine)
-            return (
-              <SettingRow
-                key={engine.id}
-                name={<span className="font-mono">{engine.id}</span>}
-                description={
-                  <span className={`block first-letter:uppercase ${problem ? 'text-amber' : 'text-green'}`}>
-                    {problem ?? 'Ready'}
-                    {engine.detail && ` · ${engine.detail}`}
-                  </span>
-                }
-              >
-                <Switch
-                  label={`${engine.id} on`}
-                  checked={engine.enabled}
-                  disabled={!connected}
-                  onChange={(enabled) => send({ type: 'engine.setEnabled', engine: engine.id, enabled })}
-                />
-              </SettingRow>
-            )
-          })}
-        </div>
-        <EngineToolsSections settings={engineTools} engines={engines} connected={connected} send={send} />
-      </>
+      <EnginesPage engines={engines} engineTools={engineTools} connected={connected} send={send} />
     ),
   },
   {

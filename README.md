@@ -61,7 +61,8 @@ as the desktop app; see [Running from source](CONTRIBUTING.md#running-from-sourc
 
 What works today:
 
-- **Engines:** Claude Code, Codex, OpenCode and pi, with saved accounts for each.
+- **Engines:** Claude Code, Codex, OpenCode and pi, with saved accounts for each, plus any agent that speaks the
+  Agent Client Protocol, added in Settings → Engines → Add ACP agent.
 - **Spaces:** a folder becomes a space whose lead agent streams its replies, tool calls and permission requests. Chats
   survive a restart.
 - **Quitting or crashing loses no work:** queued messages are saved with their chat and sent when Kothar starts again.

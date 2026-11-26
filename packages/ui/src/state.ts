@@ -516,6 +516,8 @@ function reduceAll(state: State, action: Action): State {
       })
     case 'engine.updated':
       return { ...state, engines: state.engines.map((e) => (e.id === action.engine.id ? action.engine : e)) }
+    case 'engines.updated':
+      return { ...state, engines: action.engines }
     case 'accounts.updated': {
       const { engine } = action.accounts
       const known = state.accounts.some((a) => a.engine === engine)

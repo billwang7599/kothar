@@ -4,7 +4,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ModelSettings } from './models.ts'
-import type { ChatEntry, ChatInfo, ContextSection, PermissionSwitches } from './shared.ts'
+import type { AcpAgent, ChatEntry, ChatInfo, ContextSection, PermissionSwitches } from './shared.ts'
 import type { SavedEngineTools } from './engine-tools.ts'
 import { moveWorkersSettings, type SavedWorkers } from './workers.ts'
 
@@ -31,6 +31,8 @@ export type Settings = PermissionSwitches &
     corePrompts?: Record<string, { text: string; base: string }>
     // Settings → Engines → Tools: the master switches and each engine's tool choices (engine-tools.ts).
     engineTools?: SavedEngineTools
+    // Settings → Engines → Add ACP agent (acp-agents.ts).
+    acpAgents?: AcpAgent[]
   }
 
 /** The garage's settings.json, read once; save writes the same object back. Older settings are moved and saved. */

@@ -84,6 +84,7 @@ export type ProtocolDeps = {
 
   // Settings
   setEngineEnabled: (engine: string, enabled: boolean) => void
+  acpAgents: { save: (agent: unknown) => Promise<unknown>; remove: (engine: string) => void }
   setWorkFolder: (path: unknown) => void
   setPermissionDefault: (name: unknown, enabled: boolean) => void
   setSshHostsDefault: (hosts: unknown) => void
@@ -294,6 +295,10 @@ export function openProtocol(deps: ProtocolDeps) {
 
     // Settings
     'engine.setEnabled': (message) => deps.setEngineEnabled(String(message.engine), message.enabled === true),
+    'acpAgent.save': async (message) => {
+      await deps.acpAgents.save(message.agent)
+    },
+    'acpAgent.remove': (message) => deps.acpAgents.remove(String(message.engine)),
     'workFolder.set': (message) => deps.setWorkFolder(message.path),
     'permission.setDefault': (message) => deps.setPermissionDefault(message.name, message.enabled === true),
     'permission.setSshHosts': (message) => deps.setSshHostsDefault(message.hosts),

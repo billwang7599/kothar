@@ -97,6 +97,12 @@ export type EngineStatus = {
   defaultThinking?: ThinkingLevel
 }
 
+// An ACP agent the user added in Settings → Engines (settings.json `acpAgents`), run by the generic ACP adapter
+// (adapters/acp-agent.ts). id: `acp-` and a slug of the name, fixed once added. args may hold {cwd}, the session's
+// folder, for agents that take it as an argument. env: added to the agent's environment. writable: folders the agent
+// may write besides its work folder while sandboxed (its own config or cache folder).
+export type AcpAgent = { id: string; name: string; command: string; args: string[]; env: Record<string, string>; writable?: string[] }
+
 export type EngineInfo = Omit<EngineStatus, 'models'> & {
   id: string
   // How the UI names the engine, e.g. "Claude Code"; the id when the adapter gives none.
@@ -104,6 +110,8 @@ export type EngineInfo = Omit<EngineStatus, 'models'> & {
   enabled: boolean
   models?: ModelOption[]
   steering?: boolean
+  // An agent the user added (Settings → Engines → Add ACP agent), with what they typed, to edit or remove it.
+  acp?: AcpAgent
 }
 
 export type SessionOptions = {
@@ -671,6 +679,9 @@ export type ChatWait = ExtensionWait & { extension: string }
 
 export type ClientMessage =
   | { type: 'engine.setEnabled'; engine: string; enabled: boolean }
+  // Adds an ACP agent (no id) or edits one (its id); the core answers with engines.updated.
+  | { type: 'acpAgent.save'; agent: Omit<AcpAgent, 'id'> & { id?: string } }
+  | { type: 'acpAgent.remove'; engine: string }
   | ({ type: 'chat.create' } & NewChat)
   | { type: 'chat.rename'; chatId: string; name: string }
   | { type: 'chat.archive'; chatId: string; archived: boolean }
@@ -848,6 +859,8 @@ export type CoreMessage =
       restart: RestartState
     }
   | { type: 'engine.updated'; engine: EngineInfo }
+  // The whole engine list, after an ACP agent was added or removed.
+  | { type: 'engines.updated'; engines: EngineInfo[] }
   | { type: 'accounts.updated'; accounts: EngineAccounts }
   | { type: 'chat.added'; chat: ChatState }
   | { type: 'chat.updated'; chat: ChatInfo & { run?: Run } }
