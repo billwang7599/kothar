@@ -411,6 +411,25 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
         if (found.placement !== 'popup' && found.placement !== 'dock') return
         deps.broadcast({ type: 'extension.panel.close', chatId: chat.info.id, extension: extension.id, panel: found.id, placement: found.placement })
       },
+      openChat(chatId, options) {
+        const chat = deps.chat(String(chatId))
+        if (!chat || !deps.shown(chat)) throw new Error(`Unknown chat "${chatId}"`)
+        const panel = options?.panel
+        if (panel !== undefined) {
+          const found = extension.panels?.find((p) => p.id === panel)
+          if (found?.placement !== 'dock') throw new Error(`${extension.name} has no dock panel "${panel}"`)
+        }
+        const entry = options?.entry
+        if (entry !== undefined && !(Number.isInteger(entry) && entry >= 0)) throw new Error(`Not a log entry: ${entry}`)
+        if (!deps.isOn(extension)) return
+        deps.broadcast({
+          type: 'extension.chat.open',
+          chatId: chat.info.id,
+          extension: extension.id,
+          ...(entry !== undefined && { entry }),
+          ...(panel !== undefined && { panel }),
+        })
+      },
       wait(chatId, wait) {
         const chat = chatFor(chatId)
         if (!['running', 'waiting'].includes(chat.status) && !chat.ending) {

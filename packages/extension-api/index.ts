@@ -441,6 +441,12 @@ export type ExtensionHost = {
   // stays. For a panel's own action that hands off elsewhere, such as a popup's Open beside chat; not to take a panel
   // away from the user unasked.
   closePanel(chatId: string, panel: string): void
+  // Opens a chat in the window, as clicking it in the sidebar does, and moves the user there. Only in answer to the
+  // user's own click in one of this extension's panels or cards, such as a row in a list of runs across chats; never
+  // unasked (use notify or note for that). entry: scrolls to that entry of the chat's log (host.read's index) and
+  // flashes it, such as the note that holds a run's card. panel: also opens one of this extension's dock panels beside
+  // it. Throws for a chat the user can't see, or a panel that isn't a dock of this extension's.
+  openChat(chatId: string, options?: { entry?: number; panel?: string }): void
   // Draws this extension's panels and commands for the chat again, and its open panels: call it when what they show
   // changed. Without a chat, for every chat.
   refresh(chatId?: string): void

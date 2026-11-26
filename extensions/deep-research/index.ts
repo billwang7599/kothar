@@ -10,7 +10,7 @@ import type {
   TurnSummary,
 } from '@kothar/extension-api'
 import { limitsFor, openResearch, planFromText, PROMPT_IDS, TEXT, type Investigation, type Outcome, type Ports } from './run.ts'
-import { ACTIVE, DEPTHS, DEPTH_LIMITS, openStore, type Depth, type Phase, type Run, type Store } from './store.ts'
+import { ACTIVE, DEPTHS, DEPTH_LIMITS, openStore, type Depth, type Phase, type Run, type RunSummary, type Store } from './store.ts'
 
 export * from './report.ts'
 export * from './run.ts'
@@ -18,13 +18,14 @@ export * from './store.ts'
 
 // Deep Research: a long, multi-source investigation that ends in a cited report. An agent starts one with the
 // deep_research tool, and so does the user, by turning on the composer's Deep research chip (their next messages go to
-// the tool) or from New research. A plan of sub-questions waits for the user's go-ahead on the chat's bar; then each
+// the tool) or with New research in the Research popup. A plan of sub-questions waits for the user's go-ahead on the chat's bar; then each
 // sub-question goes to a worker (a quiet child chat, on the Searching models) that searches and reads the web and
 // returns findings with exact quotes. Kothar fetches each page itself and keeps a finding only if its quote is there.
 // After a follow-up round or two on the gaps, the report is written from the kept findings only, with numbered
 // citations made here from them, and saved as an artifact, else a note, else a file.
 // Each run shows in the chat as a live card (a note view): the plan to approve or edit, its progress with Stop, then a
-// link to the report, which opens beside the chat. The Research tab lists a space's runs once it has one.
+// link to the report, which opens beside the chat. The Research tab lists a space's runs once it has one; the Research
+// popup (a sidebar launcher) lists every run in every space and Home, and opens the chat a run lives in.
 
 // Put before the user's message while the chip is on (the prompt "chip").
 export const CHIP_TEXT = [
@@ -36,7 +37,7 @@ export const CHIP_TEXT = [
 const TOGGLE = 'research'
 const PANEL = 'research'
 const REPORT = 'report'
-const NEW = 'new'
+const HISTORY = 'history'
 const CARD = 'run'
 const FETCH_TIMEOUT_MS = 20_000
 const MAX_PAGE_BYTES = 3_000_000
@@ -138,6 +139,12 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
   const opened = new Map<string, string>()
   // By space: the run the report dock shows, whether it shows the evidence instead, and the popup's depth.
   const docked = new Map<string, { run: string; evidence: boolean }>()
+  // By space the popup was opened from: what its search box holds, whether it lists only that space, and whether it
+  // shows the New research form instead of the list.
+  const history = new Map<string, { query: string; here: boolean; composing: boolean }>()
+  const historyOf = (spaceId: string) => history.get(spaceId) ?? { query: '', here: false, composing: false }
+  const setHistory = (spaceId: string, change: Partial<{ query: string; here: boolean; composing: boolean }>) =>
+    history.set(spaceId, { ...historyOf(spaceId), ...change })
   const popupDepth = new Map<string, Depth>()
 
   // Each sub-question to a quiet child of the run's space, on the model list the settings pick.
@@ -492,6 +499,139 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
     }
   }
 
+  // Where a run lives, as its row in the Research popup says it: its space (or Home), or the worker in its space.
+  const whereOf = (h: ExtensionHost, run: RunSummary) => {
+    const space = h.chat(run.spaceId)?.name ?? 'A deleted chat'
+    if (run.chatId === run.spaceId) return space
+    const chat = h.chat(run.chatId)
+    return chat ? `${chat.name} in ${space}` : space
+  }
+
+  // When a run started: the time today, the day this year, else the date.
+  const whenOf = (h: ExtensionHost, iso: string) => {
+    const at = new Date(iso)
+    const now = h.now()
+    if (Number.isNaN(at.getTime())) return ''
+    if (at.toDateString() === now.toDateString()) return at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    const day: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
+    if (at.getFullYear() !== now.getFullYear()) day.year = 'numeric'
+    return at.toLocaleDateString('en-US', day)
+  }
+
+  const statusOf = (run: RunSummary): { text: string; tone: ExtensionListItem['dot'] } => {
+    if (ACTIVE.includes(run.phase)) return { text: PHASE_LABELS[run.phase], tone: 'accent' }
+    if (run.phase === 'done') return run.partial ? { text: 'Partial', tone: 'warning' } : { text: 'Done', tone: 'success' }
+    if (run.phase === 'failed') return { text: 'Failed', tone: 'error' }
+    return { text: PHASE_LABELS[run.phase], tone: 'muted' }
+  }
+
+  const marksOf = (text: string, query: string): [number, number][] => {
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    const at = text.toLowerCase().indexOf(q)
+    return at < 0 ? [] : [[at, at + q.length]]
+  }
+
+  const historyRow = (h: ExtensionHost, run: RunSummary, query: string): ExtensionListItem => {
+    const status = statusOf(run)
+    const label = short(run.question, 140)
+    const marks = marksOf(label, query)
+    const ref = { space: run.spaceId, run: run.id }
+    return {
+      key: `${run.spaceId}/${run.id}`,
+      label,
+      ...(marks.length && { marks }),
+      detail: `${whereOf(h, run)} · ${run.depth} · ${whenOf(h, run.startedAt)}`,
+      badges: [{ text: status.text, tone: status.tone }],
+      dot: status.tone,
+      action: { name: 'open', value: ref },
+      hint: 'Open the chat this research is in',
+      ...(run.report && { button: { label: 'Report', action: { name: 'report', value: ref }, hint: 'Open its chat with the report beside it' } }),
+    }
+  }
+
+  // The Research popup: every run in every space and Home, newest first, from the store's index (no findings or reports
+  // read); or the New research form.
+  const historyView = (h: ExtensionHost, spaceId: string, defaultDepth: Depth): ExtensionView => {
+    const state = historyOf(spaceId)
+    if (state.composing) {
+      return {
+        type: 'stack',
+        gap: 'loose',
+        children: [
+          {
+            type: 'row',
+            justify: 'between',
+            children: [
+              { type: 'heading', text: 'New research', hint: `It runs in ${h.chat(spaceId)?.name ?? 'this chat'}, where its card shows` },
+              { type: 'button', label: 'Back', variant: 'ghost', action: { name: 'back' } },
+            ],
+          },
+          newView(spaceId, defaultDepth),
+        ],
+      }
+    }
+    const q = state.query.trim().toLowerCase()
+    const all = store!.all()
+    const runs = all
+      .filter((run) => !state.here || run.spaceId === spaceId)
+      .filter((run) => !q || run.question.toLowerCase().includes(q) || whereOf(h, run).toLowerCase().includes(q))
+    const here = h.chat(spaceId)?.name ?? 'This chat'
+    return {
+      type: 'stack',
+      children: [
+        {
+          type: 'row',
+          justify: 'between',
+          children: [
+            {
+              type: 'row',
+              children: [
+                { type: 'button', label: 'All', variant: state.here ? 'ghost' : 'primary', action: { name: 'here', value: false }, hint: 'Research in every space and Home' },
+                { type: 'button', label: short(here, 32), variant: state.here ? 'primary' : 'ghost', action: { name: 'here', value: true }, hint: 'Only research in this space' },
+              ],
+            },
+            { type: 'button', label: 'New research', action: { name: 'compose' }, hint: 'Research a question in depth, with a cited report' },
+          ],
+        },
+        { type: 'search', key: 'research-history', value: state.query, placeholder: 'Search research', label: 'Search research', action: 'search', autofocus: true },
+        {
+          type: 'list',
+          label: 'Research',
+          items: runs.map((run) => historyRow(h, run, state.query)),
+          empty: all.length ? 'No research matches.' : 'No research yet.',
+        },
+      ],
+    }
+  }
+
+  // The log entry of a run's card in a chat, to scroll to it.
+  const cardEntry = (h: ExtensionHost, chatId: string, runId: string) => {
+    const at = h.read(chatId).findLastIndex((e) => e.type === 'extension.note' && e.view?.id === CARD && e.view.key === runId)
+    return at < 0 ? undefined : at
+  }
+
+  // Opens the chat a run lives in, scrolled to its card; with the report, beside it. A worker that asked for it and is
+  // gone leaves its space.
+  const openRun = (h: ExtensionHost, from: string, ref: { space: string; run: string }, report: boolean) => {
+    const run = store!.read(ref.space, ref.run)
+    if (!run) throw new Error('This research was deleted')
+    const live = (id: string) => {
+      const chat = h.chat(id)
+      return chat !== undefined && !chat.archived
+    }
+    const target = live(run.chatId) ? run.chatId : live(run.spaceId) ? run.spaceId : undefined
+    if (!target) throw new Error('The chat this research is in is gone')
+    const entry = cardEntry(h, target, run.id)
+    h.closePanel(from, HISTORY)
+    if (report) {
+      opened.set(run.spaceId, run.id)
+      docked.set(run.spaceId, { run: run.id, evidence: false })
+    }
+    h.openChat(target, { ...(entry !== undefined && { entry }), ...(report && { panel: REPORT }) })
+    if (report) h.refresh(target)
+  }
+
   const workersText = (run: Run, sub: number) => {
     const ws = run.workers.filter((w) => w.sub === sub)
     if (!ws.length) return 'Waiting'
@@ -697,6 +837,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
       opened.delete(chat.id)
       docked.delete(chat.id)
       popupDepth.delete(chat.id)
+      history.delete(chat.id)
     },
     onSpaceRemoved(space, context) {
       ensure(context.host)
@@ -825,28 +966,47 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
         },
       },
       {
-        id: NEW,
-        title: 'New research',
+        id: HISTORY,
+        title: 'Research',
         placement: 'popup',
         launcher: true,
         shortcut: 'Mod+Shift+D',
         render(chat, context) {
           ensure(context.host)
-          return newView(spaceOf(context.host, chat.id), settingsOf(context).depth)
+          return historyView(context.host, spaceOf(context.host, chat.id), settingsOf(context).depth)
         },
         onAction(action, chat, context) {
           const h = context.host
           ensure(h)
           const spaceId = spaceOf(h, chat.id)
-          if (action.name === 'depth' && DEPTHS.includes(action.value as Depth)) return void popupDepth.set(spaceId, action.value as Depth)
-          if (action.name !== 'start-new') return
-          const question = (action.value as { question?: unknown } | null)?.question
-          if (typeof question !== 'string' || !question.trim()) throw new Error('Type a question to research')
-          const depth = popupDepth.get(spaceId) ?? settingsOf(context).depth
-          // In the background: the run's card in the space's chat shows the plan, if asked for, then its progress.
-          // The run's card shows in the space's chat.
-          void start(h, context, { chatId: spaceId, question, depth }).catch((error) => h.error(error instanceof Error ? error.message : String(error)))
-          h.closePanel(chat.id, NEW)
+          const ref = action.value as { space?: unknown; run?: unknown } | null
+          switch (action.name) {
+            case 'search':
+              return void setHistory(spaceId, { query: typeof action.value === 'string' ? action.value : '' })
+            case 'here':
+              return void setHistory(spaceId, { here: action.value === true })
+            case 'compose':
+              return void setHistory(spaceId, { composing: true })
+            case 'back':
+              return void setHistory(spaceId, { composing: false })
+            case 'open':
+            case 'report':
+              if (typeof ref?.space !== 'string' || typeof ref.run !== 'string') return
+              return openRun(h, chat.id, { space: ref.space, run: ref.run }, action.name === 'report')
+            case 'depth':
+              if (DEPTHS.includes(action.value as Depth)) popupDepth.set(spaceId, action.value as Depth)
+              return
+            case 'start-new': {
+              const question = (action.value as { question?: unknown } | null)?.question
+              if (typeof question !== 'string' || !question.trim()) throw new Error('Type a question to research')
+              const depth = popupDepth.get(spaceId) ?? settingsOf(context).depth
+              // In the background: the run's card in the space's chat shows the plan, if asked for, then its progress.
+              void start(h, context, { chatId: spaceId, question, depth }).catch((error) => h.error(error instanceof Error ? error.message : String(error)))
+              setHistory(spaceId, { composing: false })
+              h.closePanel(chat.id, HISTORY)
+              return
+            }
+          }
         },
       },
     ],

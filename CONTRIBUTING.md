@@ -197,6 +197,15 @@ Why some things are the way they are. Add one when you make a choice the next co
   space picked there leaves its group folded, since folding it was the user's choice; opening a hidden space any other
   way (search, a shortcut, a link) still unfolds its group. No popup mid-drag, with the ⋯ menu open or while renaming.
 
+- **Extensions can open a chat for the user (`host.openChat`).** Deep Research's Research popup lists runs from every
+  space and Home and opens the chat each lives in. Nothing in the public API could move the window to another chat, and
+  a private hook would break rule 2, so `openChat(chatId, { entry, panel })` is a generic host call (use `panels`): it
+  selects the chat as the sidebar does, scrolls to a log entry (the same reveal the ⌘O palette uses) and can open one
+  of the extension's own docks beside it. It moves the user, so it's only for answering their click in the
+  extension's panel or card, never unasked. The list itself reads `index.json` in Deep Research's storage, one short
+  summary per run kept up to date on every save, so it never opens run records full of findings or reports; runs saved
+  before the index are added the first time the list draws.
+
 - **Space groups are core sidebar code, not an extension.** Groups are visual folders of spaces in the left sidebar.
   They live where spaces are ordered: a space's `group` sits in its chat.json beside `pinned` and `order`, `chat.move`
   places it, and the groups themselves (names and order) are `<garage>/groups.json`. The public extension API can add

@@ -685,6 +685,8 @@ function reduceAll(state: State, action: Action): State {
     // Open or close a dock, a tab or a popup (main.tsx), not kept in state.
     case 'extension.panel.show':
     case 'extension.panel.close':
+    // Open a chat for an extension (main.tsx), which then selects it.
+    case 'extension.chat.open':
     // Kept by the file link cache, so a check's answer re-renders only the messages that asked.
     case 'files.checked':
     // Kept by Copy changes back (folder-copies.tsx), the only one that reads it.

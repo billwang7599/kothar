@@ -149,6 +149,7 @@ export const HOST_USES: Partial<Record<keyof ExtensionHost, ExtensionUse>> = {
   wait: 'panels',
   showPanel: 'panels',
   closePanel: 'panels',
+  openChat: 'panels',
   endWait: 'panels',
   processes: 'panels',
   processAction: 'panels',

@@ -112,8 +112,9 @@ What works today:
   do it there yourself. Pins puts a Pin button
   on each message; the Pinned tab lists the chat's pins and jumps back to one, loading older history if needed. Deep
   Research turns a question into a cited report: a plan you approve, workers that search and read the web, and only
-  claims backed by a quote found on their page (a Deep research chip in the composer, New research ⌘⇧D, or the agent's
-  `deep_research` tool). Plan adds a **Plan first** chip to the composer: the chat is read only (enforced by the
+  claims backed by a quote found on their page (a Deep research chip in the composer, or the agent's `deep_research`
+  tool). Its Research launcher (⌘⇧D) lists every research in every space and Home, opens the chat each one is in, and
+  has New research. Plan adds a **Plan first** chip to the composer: the chat is read only (enforced by the
   sandbox and Kothar's permission answers, on every engine) until you approve the plan the agent hands in, and the
   Plan tab ticks its steps off as the work goes. Inspector shows what Kothar actually sent the engine for each message
   (a folded What was sent row under each of your messages), each part labelled by who it's from, with Edit links to the

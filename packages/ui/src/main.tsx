@@ -16,7 +16,7 @@ import { ResizeHandle, usePanelWidths } from './panel-width.tsx'
 import { ChatNav, NameDialog, SidebarFooter, type NameRequest } from './sidebar.tsx'
 import { nthSpace, stepSpace } from './nav.ts'
 import { collapsedGroups } from './collapsed-groups.ts'
-import { SearchPalette } from './search.tsx'
+import { revealLater, SearchPalette } from './search.tsx'
 import { ExtensionPopup, launcherEntries, usePanelShortcuts } from './extension-popups.tsx'
 import { placedLaunchers, useLauncherPlace } from './launchers.ts'
 import { choosePanelTab, currentDock, currentPopup, extensionTabId, openDock, openPopup, panelOverDock, rightColumn, selectDockChat, showsFor, useDock } from './panel-tab.ts'
@@ -112,6 +112,14 @@ function App() {
           choosePanelTab(id)
           showTabRef.current()
         }
+        return
+      }
+      // An extension's panel row clicked (host.openChat): its chat opens, scrolled to the entry, with the dock beside it.
+      if (action.type === 'extension.chat.open') {
+        if (!seenRef.current.chats.some((c) => c.id === action.chatId)) return
+        if (action.panel !== undefined) openDock(extensionTabId(action.extension, action.panel), action.chatId)
+        openRef.current(action.chatId)
+        if (action.entry !== undefined) revealLater({ chatId: action.chatId, entry: action.entry })
         return
       }
       if (action.type === 'extension.panel.close') {
