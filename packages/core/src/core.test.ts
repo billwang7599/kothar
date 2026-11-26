@@ -1105,6 +1105,19 @@ describe('edits', () => {
     expect(t.calls[1]?.options.sandbox).toBeDefined()
   })
 
+  it('with Allow all on, runs a chat unsandboxed and approves edits anywhere, a key file too, without asking', async () => {
+    const garage = tempDir()
+    const outside = tempDir()
+    const t = setup(editScript(join(outside, 'a.ts'), join(outside, '.ssh', 'id_rsa')), garage)
+    t.handle({ type: 'chat.setPermission', chatId: 'main', name: 'allowAll', enabled: true })
+    expect(t.messages.at(-1)).toEqual({ type: 'chat.updated', chat: expect.objectContaining({ allowAll: true }) })
+    t.handle({ type: 'chat.send', chatId: 'main', text: 'edit' })
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    expect(t.calls[0]?.options).not.toHaveProperty('sandbox')
+    expect(resolved(t).map((e) => [e.allow, e.auto])).toEqual([[true, true], [true, true]])
+    expect(t.messages.some((m) => m.type === 'chat.status' && m.status === 'waiting')).toBe(false)
+  })
+
   it("runs a worker on its space's permission switches, live, unless it has its own; new spaces start without", async () => {
     const first = setup(textScript)
     const space = createChat(first, { name: 'Space' })

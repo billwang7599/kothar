@@ -51,6 +51,13 @@ export const SECTIONS: Record<ContextSection, { label: string; about: string; in
   },
 }
 export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: string; amberWhileOn?: true }> = {
+  allowAll: {
+    label: 'Allow all',
+    about:
+      'On: no sandbox, and every request is approved without asking, logins and keys included. Only folders set to ' +
+      'Read only stay read only. The other switches are kept for when you turn it off. From the chat’s next message.',
+    amberWhileOn: true,
+  },
   editAnywhere: {
     label: 'Allow edits outside the work folder',
     about:
@@ -91,6 +98,9 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
       'them through) and Kothar’s saved accounts.',
   },
 }
+// While Allow all is on, the other switches are folded away: kept, but not used.
+export const switchesShown = (allowAll: boolean) => (allowAll ? (['allowAll'] as PermissionSwitch[]) : PERMISSION_SWITCHES)
+export const FOLDED_SWITCHES = `${PERMISSION_SWITCHES.length - 1} more switches, not used while Allow all is on`
 const PERMISSIONS_HINT =
   'Each shows Settings → Work folder until you pick, or for a worker, its space. A pick is for this chat only.'
 const EMPTY_SECTION: Record<ContextSection, string> = {
@@ -615,7 +625,7 @@ function Permissions({ chat, above, workFolder, disabled, send }: {
     <section className="flex flex-col gap-8" aria-label="Permissions">
       <h3 className="font-semibold">Permissions</h3>
       <About intro={PERMISSIONS_HINT} notes={PERMISSION_SWITCHES.map((name) => PERMISSIONS[name])} />
-      {PERMISSION_SWITCHES.map((name) => {
+      {switchesShown(switchedOn('allowAll', chat, ...above, workFolder)).map((name) => {
         const { label, amberWhileOn } = PERMISSIONS[name]
         const on = switchedOn(name, chat, ...above, workFolder)
         const amber = amberWhileOn && on
@@ -640,6 +650,7 @@ function Permissions({ chat, above, workFolder, disabled, send }: {
           </div>
         )
       })}
+      {switchedOn('allowAll', chat, ...above, workFolder) && <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>}
     </section>
   )
 }

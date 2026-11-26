@@ -25,7 +25,7 @@ import { summaryOf } from './kothar-mcp.ts'
 import { instructionSections, type InstructionParts, type InstructionSection } from './instructions.ts'
 import { continuationParts, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
 import type { openModels } from './models.ts'
-import { decide, READ_ONLY_REASON, type RuledVerdict, type verdictOf } from './permissions.ts'
+import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
 import { runningChildren } from './workers.ts'
 import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
@@ -935,8 +935,8 @@ export function openTurns(deps: TurnDeps) {
         respondTo(ref.session, requestId, verdict)
       }
       const own = decide(event, permissionsOf())
-      // The core's denials stand; otherwise an extension's policy goes first.
-      if (own?.allow === false) return settle(own)
+      // The core's denials stand, and so does Allow all; otherwise an extension's policy goes first.
+      if (own?.allow === false || own?.rule === ALLOW_ALL_RULE) return settle(own)
       const fromExtensions = extensionVerdict(event, chat)
       if (!(fromExtensions instanceof Promise)) return settle(fromExtensions ?? own)
       // Pending, so the user can still answer it while an extension decides; whoever answers first wins.

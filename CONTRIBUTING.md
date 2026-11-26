@@ -163,6 +163,16 @@ Why some things are the way they are. Add one when you make a choice the next co
   profile folders are deleted when the extension starts. Don't bring back a second browser mode. If the extension
   isn't connected, the tools fail at once and say how to set it up.
 
+- **Allow all is a full bypass, and it folds the other switches rather than resetting them.** The user asked for
+  "approve everything": while `allowAll` is on, the chat runs with no sandbox (`editsAnywhere` counts it) and the core
+  approves every permission request (`ALLOW_ALL_RULE` in `permissions.ts`), logins, keys, `.env` files and Kothar's
+  saved accounts included, and extensions' policies can't overrule it. Two things still hold, because they aren't
+  questions the user is asked: a folder the user set to Read only, and a read-only turn. It layers like every switch
+  (chat, chats above, Settings → Work folder), so a chat can turn it off under a space that has it on. While it's on,
+  the Permissions tab and Settings show only it, with the others folded away: their picks stay saved and come back
+  unchanged when it's turned off, so turning it on is never a one-way door. The chat header shows an amber **Allow
+  all** chip, like Edits anywhere, so an unguarded chat is easy to spot.
+
 - **Space groups are core sidebar code, not an extension.** Groups are visual folders of spaces in the left sidebar.
   They live where spaces are ordered: a space's `group` sits in its chat.json beside `pinned` and `order`, `chat.move`
   places it, and the groups themselves (names and order) are `<garage>/groups.json`. The public extension API can add

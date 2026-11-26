@@ -1,5 +1,5 @@
 // The bar across the top of a chat: the panel toggles, its name and folder, a sandbox warning and the account picker.
-import { editsAnywhere, type ClientMessage, type EngineAccounts, type WorkFolder } from '@kothar/core/shared'
+import { allowsAll, editsAnywhere, type ClientMessage, type EngineAccounts, type WorkFolder } from '@kothar/core/shared'
 import { Hint, PanelToggle, Select } from '../controls.tsx'
 import { usePathsShown } from '../paths.ts'
 import type { SettingsPage } from '../settings.tsx'
@@ -14,6 +14,9 @@ const EDITS_ANYWHERE_HINT =
 const EDITS_ANYWHERE_ALL_HINT =
   'Every chat runs without the work folder’s sandbox: agents may edit files anywhere, asking you first. Turn it ' +
   'off in Settings → Work folder.'
+const ALLOW_ALL_HINT =
+  'Allow all is on: this chat runs without the sandbox, and every request is approved without asking, logins and ' +
+  'keys included. Turn it off in the Context panel, or for every chat in Settings → Work folder.'
 const NOT_SANDBOXED_HINT =
   'Kothar can’t sandbox engines on this system yet, so a chat runs only with Edits anywhere on (in its Context ' +
   'panel, or for every chat in Settings → Work folder), and its agents can write anywhere.'
@@ -61,7 +64,11 @@ export function ChatHeader(props: ChatHeaderProps) {
           </span>
         )}
       </div>
-      {(editsAnywhere(...line, workFolder) || !workFolder.canSandbox) && (
+      {allowsAll(...line, workFolder) ? (
+        <Hint text={ALLOW_ALL_HINT}>
+          <span className={WARNING_CHIP}>Allow all</span>
+        </Hint>
+      ) : (editsAnywhere(...line, workFolder) || !workFolder.canSandbox) && (
         <Hint
           text={
             !workFolder.canSandbox

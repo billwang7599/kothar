@@ -246,6 +246,9 @@ export type EngineAccounts = {
 }
 
 export const PERMISSION_DEFAULTS = {
+  // Approve everything: no sandbox, and every permission request is answered yes, logins and keys included. While
+  // it's on, the switches below are kept but not used.
+  allowAll: false,
   editAnywhere: false,
   autoRunCommands: true,
   autoNetworkCommands: false,
@@ -376,7 +379,9 @@ export type WorkFolder = PermissionSwitches & {
 }
 
 // Layers nearest first: a chat, the chats above it, then the work folder's defaults.
-export const editsAnywhere = (...layers: PermissionSwitches[]) => switchedOn('editAnywhere', ...layers)
+// Allow all drops the sandbox too.
+export const allowsAll = (...layers: PermissionSwitches[]) => switchedOn('allowAll', ...layers)
+export const editsAnywhere = (...layers: PermissionSwitches[]) => allowsAll(...layers) || switchedOn('editAnywhere', ...layers)
 
 export const MODEL_ROLES = ['chat', 'planning', 'searching', 'workers'] as const
 

@@ -390,6 +390,27 @@ test('the header warns while a chat may edit anywhere, and where nothing is sand
   render({}, () => {}, { workFolder: { canSandbox: false } })
   expect(header()).toContain('Not sandboxed')
   expect(header()).not.toContain('Edits anywhere')
+  render({ allowAll: true })
+  expect(header()).toContain('Allow all')
+  expect(header()).not.toContain('Edits anywhere')
+  render({ allowAll: false }, () => {}, { workFolder: { allowAll: true } })
+  expect(header()).not.toContain('Allow all')
+})
+
+test('while Allow all is on, the Permissions section folds the other switches away and keeps them', () => {
+  localStorage.setItem('kothar.panelTab', 'general')
+  const shown = () =>
+    PERMISSION_SWITCHES.filter((name) => container.querySelector(`aside button[aria-label="${PERMISSIONS[name].label}"]`))
+  const section = () => container.querySelector('aside section[aria-label="Permissions"]')!.textContent
+  render({}, () => {}, { contextOpen: true })
+  expect(shown()).toEqual(PERMISSION_SWITCHES)
+  expect(PERMISSION_SWITCHES[0]).toBe('allowAll')
+  render({ allowAll: true, autoNetworkCommands: true }, () => {}, { contextOpen: true })
+  expect(shown()).toEqual(['allowAll'])
+  expect(section()).toContain(`${PERMISSION_SWITCHES.length - 1} more switches, not used while Allow all is on`)
+  render({ allowAll: false, autoNetworkCommands: true }, () => {}, { contextOpen: true })
+  expect(shown()).toEqual(PERMISSION_SWITCHES)
+  expect(section()).not.toContain('not used while Allow all is on')
 })
 
 const hintOf = async (element: Element) => {

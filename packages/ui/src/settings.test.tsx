@@ -189,6 +189,15 @@ test('Settings → Work folder sets the default of each permission every chat fo
   }
 })
 
+test('Settings → Work folder folds the other permission defaults away while Allow all is on', () => {
+  const shown = () => PERMISSION_SWITCHES.filter((name) => dialog().querySelector(`[aria-label="${PERMISSIONS[name].label}"]`))
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: true })
+  expect(shown()).toEqual(['allowAll'])
+  expect(dialog().textContent).toContain('not used while Allow all is on')
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: false })
+  expect(shown()).toEqual(PERMISSION_SWITCHES)
+})
+
 test('Settings → Work folder picks the terminal Open in Terminal uses, where there is a choice', () => {
   const terminals = [
     { id: 'terminal', name: 'Terminal' },

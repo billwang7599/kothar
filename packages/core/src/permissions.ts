@@ -46,6 +46,7 @@ export const verdictOf = (request: PermissionRequest, context: PermissionContext
 
 // The switches as the Context panel names them.
 const SWITCH_NAMES: Record<PermissionSwitch, string> = {
+  allowAll: 'Allow all',
   editAnywhere: 'Edits anywhere',
   autoRead: 'Read anywhere without asking',
   autoFetch: 'Fetch web pages without asking',
@@ -53,6 +54,8 @@ const SWITCH_NAMES: Record<PermissionSwitch, string> = {
   autoNetworkCommands: 'Run network commands without asking',
   autoEnvCommands: 'Let commands use .env files without asking',
 }
+// The rule of an Allow all answer: it stands over extensions' policies too.
+export const ALLOW_ALL_RULE = 'Switch: Allow all'
 const switchRule = (...names: PermissionSwitch[]) => `Switch: ${names.map((name) => SWITCH_NAMES[name] ?? name).join(' + ')}`
 
 // verdictOf, with the rule behind each answer.
@@ -66,6 +69,12 @@ export const decide = (request: PermissionRequest, context: PermissionContext): 
     if (request.kind === 'shell' && (request.command === undefined || !isReadOnlyCommand(request.command, { cwd, home, secrets: [] }))) {
       return refused
     }
+  }
+  // Allow all approves everything, logins and keys included. Only a folder the user set to Read only stays read only.
+  if (switchedOn('allowAll', ...switches)) {
+    const target = request.kind === 'edit' && request.path !== undefined ? realPath(resolve(cwd, request.path)) : undefined
+    const place = target === undefined || within(target, workDir) ? undefined : placeOf(target, folders)
+    if (target === undefined || place?.mode !== 'readOnly') return { allow: true, rule: ALLOW_ALL_RULE }
   }
   if (request.kind === 'edit' && request.path !== undefined) {
     // Edits in the work folder need no asking; outside it the sandbox would fail them anyway.
