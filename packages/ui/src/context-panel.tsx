@@ -659,14 +659,13 @@ function Permissions({ chat, above, workFolder, disabled, send }: {
         <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>
       ) : (
         <SshHostsEditor
-          hosts={sshHostsOf(chat, ...above, workFolder)}
+          hosts={chat.sshHosts ?? []}
           disabled={disabled}
-          onChange={(hosts) => send({ type: 'chat.setSshHosts', chatId: chat.id, hosts })}
-          inherited={{
-            from: above.some((c) => c.sshHosts !== undefined) ? `its ${CHAT_NOUN.one}` : 'Settings',
-            own: chat.sshHosts !== undefined,
-            reset: () => send({ type: 'chat.setSshHosts', chatId: chat.id }),
-          }}
+          onChange={(hosts) => send({ type: 'chat.setSshHosts', chatId: chat.id, ...(hosts.length && { hosts }) })}
+          inherited={[
+            ...above.flatMap((c) => (c.sshHosts ?? []).map((entry) => ({ entry, from: `its ${CHAT_NOUN.one}` }))),
+            ...sshHostsOf(workFolder).map((entry) => ({ entry, from: 'Settings' })),
+          ]}
         />
       )}
     </section>

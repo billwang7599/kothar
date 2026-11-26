@@ -45,12 +45,18 @@ const REAL =
   'echo "== $f"; diff "$T/$f" "$f" && echo same; done'
 
 describe('allowed SSH hosts', () => {
-  it('layer like the switches: the nearest list wins, an empty one included', () => {
+  it('add up across layers: a chat, its space and Settings, each entry once, an empty list hiding nothing', () => {
+    const build = { host: 'build.example.com' }
     expect(sshHostsOf()).toEqual([])
     expect(sshHostsOf({}, { sshHosts: course })).toEqual(course)
-    expect(sshHostsOf({ sshHosts: [] }, { sshHosts: course })).toEqual([])
+    expect(sshHostsOf({ sshHosts: [] }, { sshHosts: course })).toEqual(course)
+    expect(sshHostsOf({ sshHosts: [build] }, {}, { sshHosts: [...course, build] })).toEqual([build, ...course])
+    // The same host with another key is another entry.
+    expect(sshHostsOf({ sshHosts: [{ host: HOST }] }, { sshHosts: course })).toEqual([{ host: HOST }, ...course])
     expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{}, { sshHosts: course }])).toBe(SSH_HOSTS_RULE)
-    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [] }, { sshHosts: course }])).toBeUndefined()
+    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [] }, { sshHosts: course }])).toBe(SSH_HOSTS_RULE)
+    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [build] }, { sshHosts: course }])).toBe(SSH_HOSTS_RULE)
+    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [build] }, {}])).toBeUndefined()
   })
 
   it("approve the user's command, with its K=, H= and loop variables, when that host and key are listed", () => {

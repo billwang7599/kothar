@@ -415,12 +415,13 @@ test('while Allow all is on, the Permissions section folds the other switches aw
   expect(container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]')).not.toBeNull()
 })
 
-test("the Permissions section adds and removes a chat's allowed SSH hosts, over Settings' list", () => {
+test("the Permissions section adds and removes a chat's own SSH hosts, with Settings' and its space's shown read only", () => {
   localStorage.setItem('kothar.panelTab', 'general')
   const sent: ClientMessage[] = []
   const group = () => container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]') as HTMLElement
   const input = (label: string) => group().querySelector(`input[aria-label="${label}"]`) as HTMLInputElement
   const buttonOf = (text: string) => [...group().querySelectorAll('button')].find((b) => b.textContent === text)
+  const inherited = () => [...group().querySelectorAll('li[data-inherited]')].map((li) => li.textContent)
   const typeInto = (target: HTMLInputElement, value: string) =>
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(target, value)
@@ -428,24 +429,41 @@ test("the Permissions section adds and removes a chat's allowed SSH hosts, over 
     })
   const settings = [{ host: 'build.example.com' }]
   render({}, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
-  expect(group().textContent).toContain('build.example.com')
-  expect(group().textContent).toContain('From Settings')
+  expect(inherited()).toEqual(['build.example.comFrom Settings'])
+  // Read only: no × for a host set in Settings, and no Reset (a chat's list adds; it never replaces).
+  expect(group().querySelector('button[aria-label="Remove build.example.com"]')).toBeNull()
   expect(buttonOf('Reset')).toBeUndefined()
   typeInto(input('SSH host'), ' b36wang@linux.student.cs.uwaterloo.ca ')
   typeInto(input('SSH key (optional)'), '~/.ssh/keys/uwstudent')
   act(() => buttonOf('Add')!.click())
+  // Only the chat's own list is sent: Settings' isn't copied in.
   expect(sent.at(-1)).toEqual({
     type: 'chat.setSshHosts',
     chatId: 'c1',
-    hosts: [...settings, { host: 'b36wang@linux.student.cs.uwaterloo.ca', key: '~/.ssh/keys/uwstudent' }],
+    hosts: [{ host: 'b36wang@linux.student.cs.uwaterloo.ca', key: '~/.ssh/keys/uwstudent' }],
   })
-  const own = [{ host: 'a.example.com' }, { host: 'b.example.com', key: '~/.ssh/b' }]
+  const own = [{ host: 'a.example.com' }, { host: 'build.example.com' }]
   render({ sshHosts: own }, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
-  expect(group().textContent).not.toContain('build.example.com')
+  // Set in both places, it shows once, as the chat's own.
+  expect(inherited()).toEqual([])
+  expect(group().textContent).toContain('a.example.com')
   act(() => (group().querySelector('button[aria-label="Remove a.example.com"]') as HTMLButtonElement).click())
   expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1', hosts: [own[1]] })
-  act(() => buttonOf('Reset')!.click())
+  // The last one removed drops the chat's own list.
+  render({ sshHosts: [own[0]!] }, (m) => sent.push(m), { contextOpen: true })
+  act(() => (group().querySelector('button[aria-label="Remove a.example.com"]') as HTMLButtonElement).click())
   expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1' })
+})
+
+test("a worker's Permissions section shows its space's SSH hosts as from its space", () => {
+  localStorage.setItem('kothar.panelTab', 'general')
+  const space = viewOf({ id: 's1', name: 'Space', sshHosts: [{ host: 'space.example.com' }] })
+  render({ id: 'w1', parentId: 's1' }, () => {}, { contextOpen: true, chats: [space], workFolder: { sshHosts: [{ host: 'build.example.com' }] } })
+  const group = container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]') as HTMLElement
+  expect([...group.querySelectorAll('li[data-inherited]')].map((li) => li.textContent)).toEqual([
+    'space.example.comFrom its space',
+    'build.example.comFrom Settings',
+  ])
 })
 
 const hintOf = async (element: Element) => {

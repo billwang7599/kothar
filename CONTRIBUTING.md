@@ -187,8 +187,10 @@ Why some things are the way they are. Add one when you make a choice the next co
   all** chip, like Edits anywhere, so an unguarded chat is easy to spot.
 
 - **Allowed SSH hosts trust a server and one key, not ssh in general.** A user who copies files from the same server
-  all day shouldn't need Allow all or Run network commands without asking. `sshHosts` is a list, layered like a switch
-  (the nearest chat with a list of its own wins, an empty one included). `trustsSshHosts` (`ssh-hosts.ts`) approves a
+  all day shouldn't need Allow all or Run network commands without asking. `sshHosts` is a list, and unlike a switch the
+  layers add up: a chat trusts its own list, its space's and Settings' together (`sshHostsOf`), so a host allowed for
+  all spaces runs in a space with a list of its own too, and a space can't take it away. The Permissions tab lists the
+  hosts from above read only, marked where they're set. `trustsSshHosts` (`ssh-hosts.ts`) approves a
   sandboxed command only when every ssh, scp, sftp and rsync in it reaches a listed host, any `-i` key is the one listed
   for it, and nothing else in it would ask (another network command, any other login or key). It reads the command with
   `read-only.ts`'s parser, which now expands plain `$NAME`/`${NAME}` set earlier in the same command (`K=~/.ssh/k`,
@@ -203,10 +205,9 @@ Why some things are the way they are. Add one when you make a choice the next co
   card needs no shell parsing and survives a restart. It is offered only when listing that one server (with its one
   `-i` key, written from `~/`, and no user, so any login on it) is exactly what the command needs: it re-runs
   `trustsSshHosts` with only that entry, and offers nothing where the list wouldn't count (unsandboxed, commands
-  asking, a read-only turn, Allow all). Since the nearest list wins, **This space** copies what the space took from
-  Settings into its own list before adding, and **All spaces** also adds the server to any list of its own between
-  Settings and the asking chat, so the next command in that chat runs either way. A worker's card writes to its space.
-  Other spaces with a list of their own aren't changed by All spaces.
+  asking, a read-only turn, Allow all). Since the lists add up, **This space** adds just the server to the space's
+  own list and **All spaces** just to Settings'; nothing is copied, and no other list changes. A worker's card writes
+  to its space.
 - **A folded group's spaces pop out on hover; an unfolded one shows nothing.** Unfolded, its spaces are already in
   the sidebar, so a popup would only repeat them. The whole group row, ⋯ included, is the hover target, so the pointer
   can cross the ⋯ to the popup, which opens just past the sidebar's edge (Radix HoverCard, 200 ms in, 150 ms out). A

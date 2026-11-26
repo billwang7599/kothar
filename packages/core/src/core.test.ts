@@ -1301,10 +1301,12 @@ describe('commands', () => {
     expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).sshHosts).toEqual([{ host: 'build.example.com' }])
     expect(await turn(t)).toBe('idle')
     expect(resolved(t).map((e) => e.auto)).toEqual([true])
-    // A chat's own list, even an empty one, stands over Settings'; none takes Settings' again.
+    // A chat's own list adds to Settings', never hides it: with one of its own (even empty), Settings' host still runs.
+    t.handle({ type: 'chat.setSshHosts', chatId: 'main', hosts: [{ host: 'other.example.com' }] })
+    expect(await turn(t)).toBe('idle')
     t.handle({ type: 'chat.setSshHosts', chatId: 'main', hosts: [] })
     expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8')).sshHosts).toEqual([])
-    expect(await turn(t)).toBe('waiting')
+    expect(await turn(t)).toBe('idle')
     t.handle({ type: 'chat.setSshHosts', chatId: 'main' })
     expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8'))).not.toHaveProperty('sshHosts')
     expect(() => t.handle({ type: 'permission.setSshHosts', hosts: [{ host: 'not a host' }] })).toThrow(/isn't a host/)
@@ -1377,19 +1379,41 @@ describe('commands', () => {
       expect(await turn(t, b.id)).toBe('waiting')
     })
 
-    it("This space keeps what the space took from Settings; All spaces also reaches a space with a list of its own", async () => {
+    it("This space adds only the host to the space's list; All spaces reaches a space with a list of its own", async () => {
       const t = setup(commandScript(COPY))
       t.handle({ type: 'permission.setSshHosts', hosts: [{ host: 'build.example.com' }] })
       const a = createChat(t, { name: 'A' })
       await trust(t, a.id, 'space')
-      expect(JSON.parse(readFileSync(chatFile(t, a.id), 'utf8')).sshHosts).toEqual([{ host: 'build.example.com' }, ENTRY])
+      // Settings' host isn't copied in: the lists add up.
+      expect(JSON.parse(readFileSync(chatFile(t, a.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      expect(settingsHosts(t)).toEqual([{ host: 'build.example.com' }])
 
       const b = createChat(t, { name: 'B' })
-      t.handle({ type: 'chat.setSshHosts', chatId: b.id, hosts: [] })
+      t.handle({ type: 'chat.setSshHosts', chatId: b.id, hosts: [{ host: 'other.example.com' }] })
       await trust(t, b.id, 'global')
       expect(settingsHosts(t)).toEqual([{ host: 'build.example.com' }, ENTRY])
-      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      // B's own list is left alone, and Settings' host runs there anyway.
+      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8')).sshHosts).toEqual([{ host: 'other.example.com' }])
       expect(await turn(t, b.id)).toBe('idle')
+      expect(resolved(t, b.id).at(-1)).toMatchObject({ allow: true, auto: true })
+    })
+
+    it("a worker trusts its space's hosts and Settings' together", async () => {
+      const first = setup(textScript)
+      const space = createChat(first, { name: 'Space' })
+      first.core.close()
+      mkdirSync(join(first.garage, 'chats', 'sub'), { recursive: true })
+      const saved = { id: 'sub', name: 'Sub', parentId: space.id, worker: true, engine: 'fake', createdAt: at }
+      writeFileSync(join(first.garage, 'chats', 'sub', 'chat.json'), JSON.stringify(saved))
+      // The copy reaches HOST with its key and nothing else: listed in Settings, with the space holding another host.
+      const t = setup(commandScript(COPY), first.garage)
+      t.handle({ type: 'chat.setSshHosts', chatId: space.id, hosts: [{ host: 'build.example.com' }] })
+      t.handle({ type: 'permission.setSshHosts', hosts: [ENTRY] })
+      t.handle({ type: 'chat.send', chatId: 'sub', text: 'run' })
+      await until(() => settled(t.core, 'sub'))
+      const sent = t.messages.flatMap((m) => (m.type === 'chat.entry' && m.chatId === 'sub' ? [m.entry] : []))
+      expect(sent.findLast((e) => e.type === 'permission.resolved')).toMatchObject({ allow: true, auto: true })
+      expect(sent.findLast((e) => e.type === 'tool.completed')).toMatchObject({ output: 'ran' })
     })
 
     it("a worker's This space lands on its space", async () => {

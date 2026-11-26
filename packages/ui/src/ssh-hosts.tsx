@@ -9,19 +9,32 @@ export const SSH_HOSTS_ABOUT =
   'ssh, scp, sftp and rsync run without asking when every server they reach is listed here, even while network ' +
   'commands ask, and may read the key listed with it (no other file in ~/.ssh). Write a host as host.example.com, ' +
   'user@host.example.com, or *.example.com for its subdomains. Without a key, no -i key is allowed for it. Only while ' +
-  'Run commands without asking is on and the chat is sandboxed.'
+  'Run commands without asking is on and the chat is sandboxed. A space\'s list adds to the one in Settings.'
 
 type SshHostsProps = {
+  // This place's own list: the one Add and × change.
   hosts: SshHost[]
   disabled: boolean
   onChange: (hosts: SshHost[]) => void
-  // Set where the list can come from above (a chat): the place it comes from, and how to go back to it.
-  inherited?: { from: string; own: boolean; reset: () => void }
+  // In a chat: the hosts it also trusts from above (its space, Settings), each with where it's set. They're listed
+  // read only, since a chat's list adds to them and can't take one away; they're changed where they're set.
+  inherited?: { entry: SshHost; from: string }[]
   // Shown under the label where there's no How this works to hold it (Settings).
   about?: string
 }
 
-export function SshHostsEditor({ hosts, disabled, onChange, inherited, about }: SshHostsProps) {
+const sameHost = (a: SshHost, b: SshHost) => a.host === b.host && a.key === b.key
+
+function HostText({ entry }: { entry: SshHost }) {
+  return (
+    <span className="min-w-0 flex-1 wrap-anywhere">
+      <span className="font-mono text-sm">{entry.host}</span>
+      {entry.key && <span className="block font-mono text-xs text-muted">{entry.key}</span>}
+    </span>
+  )
+}
+
+export function SshHostsEditor({ hosts, disabled, onChange, inherited = [], about }: SshHostsProps) {
   const [host, setHost] = useState('')
   const [key, setKey] = useState('')
   const add = (event: FormEvent) => {
@@ -32,32 +45,27 @@ export function SshHostsEditor({ hosts, disabled, onChange, inherited, about }: 
     setHost('')
     setKey('')
   }
+  // A host set both above and here shows once, as this place's own, so × is there for it.
+  const above = inherited.filter((item, i) => !hosts.some((own) => sameHost(own, item.entry)) && inherited.findIndex((o) => sameHost(o.entry, item.entry)) === i)
   return (
     <div className="flex flex-col gap-6" aria-label={SSH_HOSTS_LABEL} role="group">
-      <div className="flex items-center justify-between gap-8">
-        <span>{SSH_HOSTS_LABEL}</span>
-        {inherited?.own && (
-          <Button
-            size="small"
-            variant="ghost"
-            aria-label={`Use the list from ${inherited.from}`}
-            disabled={disabled}
-            onClick={inherited.reset}
-          >
-            Reset
-          </Button>
-        )}
-      </div>
+      <span>{SSH_HOSTS_LABEL}</span>
       {about && <p className="text-sm text-muted">{about}</p>}
-      {inherited && !inherited.own && hosts.length > 0 && <p className="text-sm text-muted">From {inherited.from}</p>}
-      {hosts.length ? (
+      {above.length > 0 || hosts.length > 0 ? (
         <ul className="flex flex-col gap-4">
+          {above.map(({ entry, from }) => (
+            <li
+              key={`above ${entry.host} ${entry.key ?? ''}`}
+              className="flex items-center gap-8 rounded border border-dashed px-8 py-4 text-muted"
+              data-inherited=""
+            >
+              <HostText entry={entry} />
+              <span className="shrink-0 text-xs text-faint">From {from}</span>
+            </li>
+          ))}
           {hosts.map((entry, i) => (
             <li key={`${entry.host} ${entry.key ?? ''}`} className="flex items-center gap-8 rounded border px-8 py-4">
-              <span className="min-w-0 flex-1 wrap-anywhere">
-                <span className="font-mono text-sm">{entry.host}</span>
-                {entry.key && <span className="block font-mono text-xs text-muted">{entry.key}</span>}
-              </span>
+              <HostText entry={entry} />
               <Button
                 size="icon"
                 variant="ghost"

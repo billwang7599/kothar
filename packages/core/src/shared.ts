@@ -266,10 +266,20 @@ export const PERMISSION_SWITCHES = Object.keys(PERMISSION_DEFAULTS) as Permissio
 // (any subdomain). key: an identity file (~/ or absolute); without one, no -i key is let through for the host.
 export type SshHost = { host: string; key?: string }
 
-// The switches, and the allowed SSH hosts: like a switch, the nearest layer with a list of its own wins.
+// The switches (the nearest layer that sets one wins), and the allowed SSH hosts (every layer's lists add up).
 export type PermissionSwitches = Partial<Record<PermissionSwitch, boolean>> & { sshHosts?: SshHost[] }
 
-export const sshHostsOf = (...layers: PermissionSwitches[]) => layers.find((layer) => layer.sshHosts !== undefined)?.sshHosts ?? []
+const sameSshHost = (a: SshHost, b: SshHost) => a.host === b.host && a.key === b.key
+
+/**
+ * The SSH hosts a chat trusts: every layer's list together (the chat's own, its space's, Settings'), nearest first,
+ * each entry once. A list of its own adds to the ones above it; it can't take away a host Settings allows.
+ */
+export const sshHostsOf = (...layers: PermissionSwitches[]): SshHost[] => {
+  const all: SshHost[] = []
+  for (const layer of layers) for (const entry of layer.sshHosts ?? []) if (!all.some((e) => sameSshHost(e, entry))) all.push(entry)
+  return all
+}
 
 export const switchedOn = (name: PermissionSwitch, ...layers: PermissionSwitches[]) =>
   layers.find((layer) => layer[name] !== undefined)?.[name] ?? PERMISSION_DEFAULTS[name]
