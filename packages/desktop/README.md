@@ -103,17 +103,19 @@ The build checks for credentials in this order. The first match wins.
 |---|---|
 | `APPLE_KEYCHAIN_PROFILE` (+ `APPLE_KEYCHAIN`) | another notarytool profile, optionally in another keychain |
 | `KOTHAR_NOTARY_PROFILE` | another profile name instead of `kothar-notary` in the login keychain |
+| `APPLE_API_KEY` (path to the `.p8`) + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` | an App Store Connect API key (the release workflow) |
 | `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID` | no saved profile. The password is passed to notarytool on its command line, where other processes on the Mac can see it, so prefer the profile |
-| `APPLE_API_KEY` (path to the `.p8`) + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER` | an App Store Connect API key |
+| none of these | the `kothar-notary` profile |
 
-If only some variables of a group are set, the build stops instead of shipping an app that isn't notarized. A signed
-build with no notarization credentials still works, and its first line says `NOT notarized`.
+Credentials in the environment win over the `kothar-notary` profile, so the build doesn't sign in to Apple just to look
+for a profile it won't use. If only some variables of a group are set, or `APPLE_API_KEY` names no file, the build stops
+instead of shipping an app that isn't notarized. A signed build with no notarization credentials still works, and its
+first line says `NOT notarized`; `KOTHAR_REQUIRE_NOTARIZED=1` makes that, or an unsigned build, stop the build instead.
 
-## Later: releases from GitHub Actions
+## Releases from GitHub Actions
 
-A release workflow on a `macos` runner could do the same build. It would import the `.p12` from encrypted secrets
-(`CSC_LINK` as base64, `CSC_KEY_PASSWORD`) and notarize with an App Store Connect API key. This isn't set up, and CI has
-no signing secrets.
+`.github/workflows/release.yml` does this same build on a Mac runner when a `v*` tag is pushed, and publishes a GitHub
+Release with the DMG. CONTRIBUTING.md, "Releasing", has the secrets it needs and how to cut a release.
 
 ## What's in the bundle
 

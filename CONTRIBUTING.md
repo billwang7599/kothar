@@ -126,6 +126,12 @@ Why some things are the way they are. Add one when you make a choice the next co
   moving into core: it's the one extension that proves the API can own a chat, and moving it would grow the core for
   no new behaviour. `alwaysOn` is generic (any built-in extension can set it; a community extension's is ignored), and
   an always-on extension can still be left out per setup, except of a chat it owns.
+- **A release tag must match the version; the workflow never sets it.** The release workflow stops if `v0.2.0` is
+  pushed while `packages/desktop/package.json` says `0.1.0`, instead of writing the version from the tag. That way the
+  version that ships is the one in a reviewed commit on `main`, and a local `npm run package` of that commit builds the
+  same DMG name. In `scripts/signing.ts`, notary credentials in the environment win over the `kothar-notary` profile
+  (they're set on purpose, and checking the profile signs in to Apple, which a CI runner without one would wait on), and
+  `KOTHAR_REQUIRE_NOTARIZED=1` turns "signed but NOT notarized" into a stop, so CI can't publish a DMG that warns.
 - **Workers are part of the core, not an extension.** They were the Workers extension, but it was only a switch and two
   settings over things that were already core: child chats (`chat-lifecycle.ts`) and the `spawn_worker` tool
   (`kothar-mcp.ts`). As an extension it invited other extensions to depend on it (Deep Research greyed out a setting
@@ -336,6 +342,72 @@ the old names. Don't remove these, and don't use the old names in new code:
 | `packages/ui/src/renamed-storage.ts` | UI preferences saved under `hotrod.*` keys move to `kothar.*`. |
 | `packages/ui/src/panel-tab.ts` | Panel tabs saved as `mod:<id>`. |
 | `packages/core/src/workers.ts` (`moveWorkersSettings`), `packages/core/src/setups.ts` (`extensionsOff: ['workers']`) | Settings and setups saved while workers were an extension. |
+
+## Releasing
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`. On a macOS runner it builds Kothar, signs it with the
+Developer ID certificate, notarizes and staples the app and the DMG (`packages/desktop/scripts/signing.ts`, the same code
+as `npm run package` on your Mac), checks both with `spctl` (the job fails unless both say `Notarized Developer ID`), and
+publishes a GitHub Release with `Kothar-<version>-arm64.dmg`, its `.sha256` and notes generated from the merged PRs. A
+tag with a hyphen (`v0.2.0-beta.1`) makes a pre-release.
+
+**Dry run:** Actions → Release → Run workflow builds, signs, notarizes and verifies any branch, keeps the DMG as a
+workflow artifact for a week, and publishes nothing.
+
+### Secrets (one time)
+
+Add these under Settings → Secrets and variables → Actions → New repository secret. The job checks them first and
+names any that are missing; it never prints their values.
+
+| Secret | What it is |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | the Developer ID Application certificate and its private key, as a base64 `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | the password you gave the `.p12` when exporting it |
+| `APPLE_API_KEY_P8` | an App Store Connect API key, the base64 of its `.p8` file |
+| `APPLE_API_KEY_ID` | that key's ID (10 characters) |
+| `APPLE_API_ISSUER` | the Issuer ID shown above the keys list (a UUID) |
+
+Instead of the three API key secrets you can add `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`
+(`338W2JWGTX`). If both sets are there, the API key is used.
+
+**The `.p12`:** in Keychain Access → login → My Certificates, expand "Developer ID Application: …", select the
+certificate (with its private key underneath), right-click → Export 2 items… → Personal Information Exchange (.p12), and
+set a password. Then:
+
+```sh
+base64 -i DeveloperID.p12 | pbcopy   # paste as MACOS_CERTIFICATE_P12
+```
+
+**The API key:** at App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys, generate a
+key with the **Developer** role (an Account Holder or Admin has to have requested API access once). Download the
+`AuthKey_<ID>.p8`: Apple lets you download it only once. Note the Key ID and the Issuer ID. Then:
+
+```sh
+base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy   # paste as APPLE_API_KEY_P8
+```
+
+Delete the local `.p12` and `.p8` copies once they're saved as secrets (keep the `.p12` backup you made when you
+created the certificate).
+
+### Cutting a release
+
+The tag has to match `version` in `packages/desktop/package.json`, which names the DMG and the app; the job stops if it
+doesn't, and never changes the version itself. So:
+
+1. Bump `version` in `packages/desktop/package.json` in a PR, and merge it.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+3. Watch Actions → Release. Notarization takes a few minutes per file. When it's done, the release is on the Releases
+   page.
+
+If the job fails after the tag is pushed, fix it on `main`, then move the tag (`git tag -f v0.2.0 && git push -f origin
+v0.2.0`) or bump to the next version.
 
 ## Licence of contributions
 

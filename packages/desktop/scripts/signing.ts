@@ -5,6 +5,7 @@
 //
 // Signing identity, first match wins:
 //   KOTHAR_UNSIGNED=1             force an ad-hoc build even with a certificate installed
+//   KOTHAR_REQUIRE_NOTARIZED=1    stop instead of building anything less than signed and notarized (the release workflow)
 //   CSC_LINK (+ CSC_KEY_PASSWORD) a .p12 file (path or base64); electron-builder imports it into a temporary keychain
 //   CSC_NAME                      the certificate's name in your keychain, such as "Bill Wang (AB12CD34EF)"
 //   the keychain                  the one "Developer ID Application" certificate in your login keychain
@@ -13,12 +14,14 @@
 //
 // Notarization (only when signed), first match wins:
 //   APPLE_KEYCHAIN_PROFILE (+ APPLE_KEYCHAIN)                 a notarytool profile you name
-//   the kothar-notary profile                                 saved once with `xcrun notarytool store-credentials`
-//                                                             (KOTHAR_NOTARY_PROFILE names another)
+//   KOTHAR_NOTARY_PROFILE                                     another profile name in the login keychain
+//   APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER       an App Store Connect API key (APPLE_API_KEY: the .p8's path)
 //   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID    an Apple ID with an app-specific password
-//   APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER       an App Store Connect API key
+//   the kothar-notary profile                                 saved once with `xcrun notarytool store-credentials`
+// Credentials in the environment win over the kothar-notary profile: you set them on purpose, and checking the profile
+// signs in to Apple (checkNotaryProfile), which a CI runner that has no profile shouldn't wait on.
 import { execFileSync } from 'node:child_process'
-import { rmSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const DEFAULT_PROFILE = 'kothar-notary'
@@ -45,7 +48,12 @@ export type Plan = {
 /** Whether a notarytool profile works, and if not, notarytool's own words. */
 export type ProfileCheck = { found: true } | { found: false; error: string }
 /** What the Mac answers; tests pass their own. */
-export type Probe = { identities(): string[]; notaryProfile(profile: string, keychain?: string): ProfileCheck }
+export type Probe = {
+  identities(): string[]
+  notaryProfile(profile: string, keychain?: string): ProfileCheck
+  /** Whether a file is there (APPLE_API_KEY's .p8); the real disk when left out. */
+  exists?(path: string): boolean
+}
 /** Runs a command and returns its stdout (execFileSync's shape); tests pass a fake. */
 export type Run = (command: string, args: string[], options: object) => string | Buffer | null
 
@@ -131,12 +139,22 @@ function pickNotary(env: Env, probe: Probe): Notary | null {
     return { kind: 'profile', profile: named, ...(keychain && { keychain }) }
   }
   const chosen = value(env, 'KOTHAR_NOTARY_PROFILE')
-  const profile = chosen ?? DEFAULT_PROFILE
-  const appleId = whole(env, ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'])
+  if (chosen) {
+    const check = probe.notaryProfile(chosen)
+    if (!check.found) throw missing(chosen, 'KOTHAR_NOTARY_PROFILE', check)
+    return { kind: 'profile', profile: chosen }
+  }
+  // Both groups are checked before either is used, so a half-set one stops the build even when the other is whole.
   const apiKey = whole(env, ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER'])
-  const check = probe.notaryProfile(profile)
-  if (check.found) return { kind: 'profile', profile }
-  if (chosen) throw missing(profile, 'KOTHAR_NOTARY_PROFILE', check)
+  const appleId = whole(env, ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'])
+  if (apiKey) {
+    const key = value(env, 'APPLE_API_KEY')!
+    // notarytool wants the .p8's path; a missing file would otherwise fail only after the app is built.
+    if (!(probe.exists ?? existsSync)(key)) {
+      throw new Error(`APPLE_API_KEY should be the path to the App Store Connect key (.p8), but there's no file at ${key}`)
+    }
+    return { kind: 'api-key', key, keyId: value(env, 'APPLE_API_KEY_ID')!, issuer: value(env, 'APPLE_API_ISSUER')! }
+  }
   if (appleId) {
     return {
       kind: 'apple-id',
@@ -145,26 +163,28 @@ function pickNotary(env: Env, probe: Probe): Notary | null {
       teamId: value(env, 'APPLE_TEAM_ID')!,
     }
   }
-  if (apiKey) {
-    return {
-      kind: 'api-key',
-      key: value(env, 'APPLE_API_KEY')!,
-      keyId: value(env, 'APPLE_API_KEY_ID')!,
-      issuer: value(env, 'APPLE_API_ISSUER')!,
-    }
-  }
-  return null
+  return probe.notaryProfile(DEFAULT_PROFILE).found ? { kind: 'profile', profile: DEFAULT_PROFILE } : null
 }
+
+const on = (env: Env, name: string) => env[name] === '1' || env[name] === 'true'
 
 /** Decides how this build is signed and notarized. */
 export function signingPlan(env: Env, probe: Probe = macProbe): Plan {
+  const plan = decide(env, probe)
+  if (on(env, 'KOTHAR_REQUIRE_NOTARIZED') && !(plan.signed && plan.notary)) {
+    throw new Error(`KOTHAR_REQUIRE_NOTARIZED is set, so the build stops here. ${plan.message}`)
+  }
+  return plan
+}
+
+function decide(env: Env, probe: Probe): Plan {
   const unsigned = (why: string): Plan => ({
     signed: false,
     identity: '-',
     notary: null,
     message: `Kothar will be UNSIGNED (ad-hoc signature only, runs on this Mac): ${why}. See packages/desktop/README.md to sign it.`,
   })
-  if (env.KOTHAR_UNSIGNED === '1' || env.KOTHAR_UNSIGNED === 'true') return unsigned('KOTHAR_UNSIGNED is set')
+  if (on(env, 'KOTHAR_UNSIGNED')) return unsigned('KOTHAR_UNSIGNED is set')
 
   let identity: string | undefined
   let source: string
