@@ -38,7 +38,8 @@ export const ZOOM_INSTRUCTIONS =
   `pages of ${ZOOM_PAGE_CHARS.toLocaleString('en-US')} characters past that (offset and limit pick a part). You ` +
   'can zoom out too: zoom(id, n) opens any block with n a power of 2 and id a multiple of n. date(id) gives the ' +
   'date and time of message id. Before you act, guess or ask about something, find its latest mention and zoom ' +
-  'until you have it whole.'
+  'until you have it whole. Only when the user asks you to forget or remove something, forget(ids) removes those ' +
+  'messages for good, after the user confirms.'
 
 export const COMPACTOR_INSTRUCTIONS = `You write the memory of a long chat between a user and an AI agent. Each <item> is \
 either one message to summarize, or two adjacent summaries (key|text lines, oldest first) to merge into one. Write \

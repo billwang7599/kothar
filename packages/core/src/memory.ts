@@ -28,9 +28,24 @@ export function withAttachments(text: string, attachments: Attachment[] = []) {
 }
 
 export function messagesOf(entries: ChatEntry[]): MemoryMessage[] {
+  return numbered(entries).messages
+}
+
+// Where each message is in the log: message id → entry index (forget reads ids the agent saw this way).
+export function messageEntries(entries: ChatEntry[]): number[] {
+  return numbered(entries).at
+}
+
+function numbered(entries: ChatEntry[]) {
   const messages: MemoryMessage[] = []
-  const add = (kind: MessageKind, at: string, text: string) => messages.push({ id: messages.length, kind, at, text })
-  for (const entry of entries) {
+  const at: number[] = []
+  let index = 0
+  const add = (kind: MessageKind, when: string, text: string) => {
+    messages.push({ id: messages.length, kind, at: when, text })
+    at.push(index)
+  }
+  for (; index < entries.length; index++) {
+    const entry = entries[index]!
     if (entry.type === 'user.message') {
       const kind = entry.text.startsWith('[subagent "') ? 'work' : 'user'
       add(kind, entry.at, withAttachments(entry.text, entry.attachments))
@@ -46,7 +61,7 @@ export function messagesOf(entries: ChatEntry[]): MemoryMessage[] {
       add('note', entry.at, `Turn ended early: ${entry.error}`)
     }
   }
-  return messages
+  return { messages, at }
 }
 
 const escapeTag = (text: string, tag: string) => text.replace(new RegExp(`</(${tag})`, 'gi'), '<\\/$1')

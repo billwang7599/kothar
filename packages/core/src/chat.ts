@@ -33,6 +33,9 @@ export type Chat = {
   produced?: boolean
   // The composer modes the running turn was sent with (modeKey), on for it until it ends (composer-toggles.ts).
   modes?: Set<string>
+  // Where each message id the running session was shown sits in the log (message id → entry index), as its view was
+  // made: forget reads the agent's ids through it, so they still name the same messages after an earlier forget.
+  seen?: number[]
   // What the running turn has done so far, for onTurnCompleted.
   turn?: { text: string; tools: TurnSummary['tools'] }
   // The run the UI last got for this chat (JSON), so a change in Settings or an engine resends only the chats it moves.

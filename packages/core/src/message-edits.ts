@@ -3,13 +3,14 @@
 // only when it was logged, and log.jsonl is written again whole. Indexes stay put, so an extension's marks (a pin) never
 // move to another message, and the files only the removed messages used are deleted. Files the agent changed stay as
 // they are.
+import { randomBytes } from 'node:crypto'
 import { readFileSync, rmSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import type { MessagesRemoved } from '@kothar/extension-api'
 import type { Chat } from './chat.ts'
 import { rewriteLog } from './chat-store.ts'
-import { messagesOf } from './memory.ts'
-import type { Attachment, ChatEntry, CoreMessage, QueuedMessage, Upload } from './shared.ts'
+import { messageEntries, messagesOf } from './memory.ts'
+import type { Attachment, ChatEntry, CoreMessage, EngineEvent as CoreEvent, QueuedMessage, Upload } from './shared.ts'
 import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
 
 type Entry = ChatEntry
@@ -30,6 +31,11 @@ export function entriesToDelete(entries: readonly Entry[], entry: number): numbe
   if (!found || found.type === 'entry.removed') throw new Error('That message is already gone')
   if (isInput(found)) return [entry]
   if (found.type !== 'text.completed') throw new Error('Only messages and replies can be deleted')
+  return turnAround(entries, entry)
+}
+
+// The agent's turn around entry: everything between the message before it and the one after, except the markers.
+function turnAround(entries: readonly Entry[], entry: number): number[] {
   let start = entry
   while (start > 0 && !isInput(entries[start - 1])) start--
   let end = entry + 1
@@ -54,6 +60,108 @@ export function runningFrom(chat: Pick<Chat, 'entries' | 'status' | 'held'>): nu
   return start < 0 ? 0 : start
 }
 
+// forget: an agent removing messages from its own chat, with the user's leave each time (see CONTRIBUTING.md,
+// Decisions). It takes what Delete takes per message, through the same removal.
+
+export const FORGET_TOOL = 'forget'
+// The most ids one call may name, ranges counted out, and the most lines its card lists.
+export const FORGET_MAX_IDS = 5000
+export const FORGET_CARD_LINES = 20
+const PREVIEW_CHARS = 90
+
+// The engine's name for Kothar's forget tool: mcp__kothar__forget (Claude Code, Codex, pi), or kothar_forget and the
+// like.
+export const isForgetCall = (name: string) => /kothar\W*_*forget$/i.test(name) || name === 'mcp__kothar__forget'
+
+/**
+ * A forget call as the log keeps it: the ids only. Its reason, which may say what was forgotten, never reaches the
+ * log, the UI or the engine's next view.
+ */
+export function scrubForgetCall<E extends Extract<Entry, { type: 'tool.started' }> | Extract<CoreEvent, { type: 'tool.started' }>>(event: E): E {
+  if (!isForgetCall(event.name)) return event
+  const raw = (event.input as { ids?: unknown } | null)?.ids
+  const ids = Array.isArray(raw) ? raw.filter((id) => typeof id === 'number' || typeof id === 'string').map((id) => (typeof id === 'string' ? id.slice(0, 24) : id)) : []
+  return { ...event, input: { ids }, summary: `forget ${ids.join(', ')}` }
+}
+
+/** The message ids a forget names: whole numbers, memory lines as "id+n" (n messages from id), or "a-b" (inclusive). */
+export function forgetIds(raw: unknown): number[] {
+  if (!Array.isArray(raw) || !raw.length) throw new Error('Name at least one message id to forget')
+  const ids = new Set<number>()
+  const add = (from: number, count: number, said: unknown) => {
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(count) || from < 0 || count < 1) {
+      throw new Error(`"${String(said)}" isn't a message id: use a number, a memory line such as 120+8, or a range such as 120-127`)
+    }
+    if (ids.size + count > FORGET_MAX_IDS) throw new Error(`One forget can name at most ${FORGET_MAX_IDS} messages`)
+    for (let id = from; id < from + count; id++) ids.add(id)
+  }
+  for (const item of raw) {
+    if (typeof item === 'number') add(item, 1, item)
+    else if (typeof item === 'string' && /^\s*\d+\s*$/.test(item)) add(Number(item), 1, item)
+    else if (typeof item === 'string' && /^\s*\d+\s*\+\s*\d+\s*$/.test(item)) {
+      const [from, count] = item.split('+').map(Number)
+      add(from!, count!, item)
+    } else if (typeof item === 'string' && /^\s*\d+\s*-\s*\d+\s*$/.test(item)) {
+      const [from, to] = item.split('-').map(Number)
+      add(from!, to! - from! + 1, item)
+    } else add(Number.NaN, 1, typeof item === 'string' ? item : JSON.stringify(item))
+  }
+  return [...ids].sort((a, b) => a - b)
+}
+
+const oneLine = (text: string) => {
+  const line = text.replace(/\s+/g, ' ').trim()
+  return line.length > PREVIEW_CHARS ? `${line.slice(0, PREVIEW_CHARS - 1).trimEnd()}…` : line
+}
+
+// What the card shows for one message Delete would take: who it's from and how it starts.
+function previewOf(entries: readonly Entry[], taken: number[]): string {
+  const found = taken.map((i) => entries[i]!)
+  const input = found.find(isInput)
+  if (input?.type === 'user.message') return `${input.text.startsWith('[subagent "') ? 'Message' : 'You'}: ${oneLine(input.text) || '(attachments)'}`
+  if (input?.type === 'worker.report') return `Report from ${input.name}: ${oneLine(input.text) || '(no reply)'}`
+  const said = found.find((e) => e.type === 'text.completed')
+  if (said?.type === 'text.completed') return `Reply: ${oneLine(said.text)}`
+  const tool = found.find((e) => e.type === 'tool.started')
+  if (tool?.type === 'tool.started') return `Reply: ${oneLine(`${tool.name} ${tool.summary}`)}`
+  return 'Reply'
+}
+
+export type ForgetPlan = {
+  // One per message the card lists: a user's message or report alone, or the agent's whole reply.
+  groups: { entries: number[]; preview: string }[]
+  // Every entry the forget removes, in order.
+  taken: number[]
+}
+
+/**
+ * What forgetting ids takes, or why it can't: ids are the agent's (read through seen, message id → entry index), and
+ * only finished turns (before runningAt) can go.
+ */
+export function planForget(entries: readonly Entry[], seen: readonly number[], ids: readonly number[], runningAt: number): ForgetPlan {
+  const groups = new Map<number, number[]>()
+  for (const id of ids) {
+    const entry = seen[id]
+    if (entry === undefined) {
+      throw new Error(`There's no message ${id} in your memory from before this turn. The turn that's running can't be forgotten while it runs`)
+    }
+    const found = entries[entry]
+    if (!found || found.type === 'entry.removed') throw new Error(`Message ${id} is already gone: it was forgotten or deleted`)
+    if (entry >= runningAt) throw new Error(`Message ${id} is in the turn that's running, which can't be forgotten while it runs`)
+    const taken = isInput(found) ? [entry] : turnAround(entries, entry)
+    if (taken.some((i) => i >= runningAt)) throw new Error(`Message ${id} is in the turn that's running, which can't be forgotten while it runs`)
+    if (!taken.length) throw new Error(`Message ${id} only says a turn ended early; there's nothing to forget there`)
+    groups.set(taken[0]!, taken)
+  }
+  const ordered = [...groups.entries()].sort(([a], [b]) => a - b).map(([, taken]) => taken)
+  return {
+    groups: ordered.map((taken) => ({ entries: taken, preview: previewOf(entries, taken) })),
+    taken: [...new Set(ordered.flat())].sort((a, b) => a - b),
+  }
+}
+
+export const forgottenText = (count: number) => `${count} message${count === 1 ? '' : 's'} forgotten`
+
 // The files an entry keeps in the chat's folder: a message's attachments and a tool result's pictures.
 const filesOf = (entry: Entry): string[] => {
   if (entry.type === 'user.message') return (entry.attachments ?? []).map((a) => a.path)
@@ -71,6 +179,18 @@ export type MessageEditsDeps = {
   // Queues a message as if the user had sent it (turn.ts enqueue): it runs at once on an idle chat.
   enqueue: (chat: Chat, message: Omit<QueuedMessage, 'id'>) => void
   checkActive: (chat: Chat) => void
+  // Asks the user alone, on a card in the chat's running turn (turn.ts, userOnly): no switch or rule answers it.
+  askUser: (chat: Chat, request: ForgetRequest, requestId: string) => Promise<{ allow: boolean }>
+  // Logs a line in the chat (an extension.note with no extension).
+  note: (chat: Chat, text: string) => void
+}
+
+export type ForgetRequest = {
+  name: string
+  summary: string
+  kind: 'other'
+  input: { ids: number[] }
+  buttons: { allow: string; deny: string }
 }
 
 export function openMessageEdits(deps: MessageEditsDeps) {
@@ -118,6 +238,44 @@ export function openMessageEdits(deps: MessageEditsDeps) {
   }
 
   return {
+    /**
+     * The forget tool: removes the messages the agent names by id (forgetIds) from its own chat, once the user says so
+     * on a card nothing else can answer. Resolves with what the agent is told.
+     */
+    async forget(chat: Chat, rawIds: unknown): Promise<string> {
+      const ids = forgetIds(rawIds)
+      const seen = () => chat.seen ?? messageEntries(chat.entries)
+      const plan = planForget(chat.entries, seen(), ids, runningFrom(chat))
+      const count = plan.groups.length
+      const title = `Forget ${count} message${count === 1 ? '' : 's'}`
+      const lines = plan.groups.slice(0, FORGET_CARD_LINES).map((group) => group.preview)
+      if (count > FORGET_CARD_LINES) lines.push(`…and ${count - FORGET_CARD_LINES} more`)
+      const requestId = `forget-${randomBytes(6).toString('hex')}`
+      const request: ForgetRequest = {
+        name: title,
+        summary: lines.join('\n'),
+        kind: 'other',
+        input: { ids },
+        buttons: { allow: 'Forget', deny: 'Cancel' },
+      }
+      const { allow } = await deps.askUser(chat, request, requestId)
+      if (!allow) return 'The user kept these messages.'
+      // The user may have deleted some while the card waited: what's left of them goes.
+      const runningAt = runningFrom(chat)
+      const taken = plan.taken.filter((i) => chat.entries[i] && chat.entries[i]!.type !== 'entry.removed' && i < runningAt)
+      // The card listed how each began; once they're gone it keeps only the count.
+      chat.entries.forEach((entry, i) => {
+        if (entry.type === 'permission.requested' && entry.requestId === requestId) chat.entries[i] = { ...entry, summary: title }
+      })
+      if (taken.length) remove(chat, taken)
+      else rewriteLog(chat.dir, chat.entries)
+      deps.note(chat, forgottenText(count))
+      return (
+        `Forgot ${count} message${count === 1 ? '' : 's'}. Don't repeat what they said. Your memory's ids still name ` +
+        'the same messages for the rest of this turn.'
+      )
+    },
+
     /** Deletes the message at entry: the user's, a report, or the agent's reply with its tool calls and thinking. */
     deleteMessage(chat: Chat, raw: unknown) {
       const entry = entryOf(chat, raw)

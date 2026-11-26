@@ -37,7 +37,8 @@ export const ROLLING_INSTRUCTIONS =
 
 export const ROLLING_ZOOM_INSTRUCTIONS =
   'zoom(id, 1) gives message id whole, and date(id) its date and time. Before you act on something the summary ' +
-  'mentions only briefly, find the message and zoom it.'
+  'mentions only briefly, find the message and zoom it. Only when the user asks you to forget or remove something, ' +
+  'forget(ids) removes those messages for good, after the user confirms.'
 
 export const FOLD_INSTRUCTIONS = `You keep the memory of a long chat between a user and an AI agent, as one summary. You \
 get the summary so far (empty at first) and the messages that come after it, oldest first. Write the new summary of \

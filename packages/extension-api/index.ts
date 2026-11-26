@@ -75,6 +75,8 @@ export type EngineEvent =
       path?: string
       command?: string
       input: unknown
+      // The card's own button labels in place of Approve and Deny (Kothar's forget: Forget and Cancel).
+      buttons?: { allow: string; deny: string }
     }
   | { type: 'question.asked'; requestId: string; toolId?: string; questions: Question[] }
   // The account ran into a usage or rate limit; resetsAt (ISO) is when it lifts, if the engine says.

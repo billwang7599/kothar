@@ -70,6 +70,10 @@ async function start(workers = { enabled: false, limit: 4 }) {
       const status = chats.find((c) => c.id === chatId)!.status
       return status === 'idle' ? 'sent' : status === 'running' ? 'steered' : 'queued'
     },
+    async forget(chatId, ids) {
+      calls.push(['forget', chatId, ids])
+      return 'Forgot 1 message.'
+    },
     stop(chatId) {
       calls.push(['stop', chatId])
       chats.find((c) => c.id === chatId)!.status = 'stopping'
@@ -126,16 +130,23 @@ describe('Kothar MCP server', () => {
     expect((await rpc(token, 'tools/list')).status).toBe(401)
   })
 
-  it('gives no token to a chat that neither sees every chat, spawns workers nor gets an extension tool', async () => {
-    const { mcp } = await start()
-    expect(mcp.grant('bbbb0001')).toBeUndefined()
-    expect(mcp.grant('cccc0001')).toBeUndefined()
+  it('gives every chat a token, for forget at least, and none to a chat that is gone', async () => {
+    const { mcp, names } = await start()
+    expect(await names('bbbb0001')).toEqual(['forget'])
+    expect(mcp.grant('cccc0001')).toBeDefined()
     expect(mcp.grant('nope')).toBeUndefined()
+  })
+
+  it('forgets in the caller\'s own chat only, passing the ids it was given', async () => {
+    const { grant, calls, tool } = await start()
+    const result = await tool(grant('bbbb0001'), 'forget', { ids: [3, '10+4'], reason: 'the user asked' })
+    expect(result).toEqual({ isError: false, text: 'Forgot 1 message.' })
+    expect(calls).toEqual([['forget', 'bbbb0001', [3, '10+4']]])
   })
 
   it('offers the chat tools to a chat that sees every chat', async () => {
     const { names } = await start()
-    expect(await names('main')).toEqual(['list_chats', 'read_chat', 'send_message', 'stop_chat'])
+    expect(await names('main')).toEqual(['forget', 'list_chats', 'read_chat', 'send_message', 'stop_chat'])
   })
 
   it('lists every other chat to a chat that sees every chat', async () => {
@@ -242,10 +253,10 @@ describe('Kothar MCP server', () => {
       const { extensionTools, names, mcp } = await start()
       extensionTools.push({ tool: make, values: { size: 2 } })
       expect(await names('main')).toContain('make')
-      expect(await names('aaaa0001')).toEqual(['make'])
-      expect(mcp.grant('bbbb0001')).toBeUndefined()
+      expect(await names('aaaa0001')).toEqual(['forget', 'make'])
+      expect(await names('bbbb0001')).toEqual(['forget'])
       extensionTools.splice(0)
-      expect(mcp.grant('aaaa0001')).toBeUndefined()
+      expect(mcp.grant('aaaa0001')).toBeDefined()
     })
 
     it('runs it with the caller, its values and a host that makes top-level chats and starts them', async () => {
@@ -315,15 +326,15 @@ describe('Kothar MCP server', () => {
     it('offers spawn_worker to every chat but a worker, only while the extension is on', async () => {
       const off = await start()
       expect(await off.names('main')).not.toContain('spawn_worker')
-      expect(off.mcp.grant('bbbb0001')).toBeUndefined()
+      expect(await off.names('bbbb0001')).toEqual(['forget'])
 
       const { names, mcp, chats } = await on()
       expect(await names('main')).toContain('spawn_worker')
-      const tools = ['list_chats', 'read_chat', 'send_message', 'spawn_worker', 'stop_chat']
+      const tools = ['forget', 'list_chats', 'read_chat', 'send_message', 'spawn_worker', 'stop_chat']
       expect(await names('aaaa0001')).toEqual(tools)
       expect(await names('bbbb0001')).toEqual(tools)
       chats.push(chat('eeee0001', { parentId: 'bbbb0001', worker: true }))
-      expect(mcp.grant('eeee0001')).toBeUndefined()
+      expect(await names('eeee0001')).toEqual(['forget'])
     })
 
     it('refuses to spawn once the extension is turned off mid-session', async () => {

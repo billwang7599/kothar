@@ -23,7 +23,8 @@ import type { ExtensionHook } from './extensions.ts'
 import { placeAccess, placesOf, type FolderPlace } from './folder-modes.ts'
 import { summaryOf } from './kothar-mcp.ts'
 import { instructionSections, type InstructionParts, type InstructionSection } from './instructions.ts'
-import { continuationParts, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
+import { scrubForgetCall } from './message-edits.ts'
+import { continuationParts, messageEntries, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
 import type { openModels } from './models.ts'
 import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, trustableSshHost, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
@@ -155,6 +156,8 @@ export type SentInput =
       engineTools?: { off: string[]; none?: true }
     }
   | { kind: 'steer'; turn: string; text: string; engine: string }
+
+export type AskOptions = { userOnly?: boolean; requestId?: string }
 
 type TurnInput = { text: string; attachments: Attachment[]; reports: Report[]; continuation?: string }
 
@@ -516,6 +519,8 @@ export function openTurns(deps: TurnDeps) {
   const sshHostsAsked = new Map<string, SshHost>()
   // Permission requests an extension raised (host.requestPermission), by id: answered here, not by the engine.
   const extensionAsks = new Map<string, { chat: Chat; resolve: (verdict: RuledVerdict) => void }>()
+  // Requests only the user may answer (AskOptions.userOnly), by id, until they're raised.
+  const userOnly = new Set<string>()
   // Each chat's live session events, for an extension's request to go through as an engine's does.
   const liveEvents = new WeakMap<Chat, ReturnType<typeof sessionEvents>>()
   const respondTo = (session: Session | undefined, requestId: string, verdict: RuledVerdict) => {
@@ -737,6 +742,7 @@ export function openTurns(deps: TurnDeps) {
     const message = withAttachments(rewrite, attachments)
     const zoomable = takesMcp(adapter.id)
     const view = viewOf(chat, messagesOf(chat.entries), zoomable)
+    chat.seen = messageEntries(chat.entries)
     const parts = continuation ? continuationParts(view, continuation) : seededParts(view, message, reports)
     const prompt = parts.map((part) => part.text).join('\n\n')
     const at = now().toISOString()
@@ -877,7 +883,9 @@ export function openTurns(deps: TurnDeps) {
               const saved = saveToolImages(chat.dir, sent.toolId, images ?? [])
               return saved.length ? { ...rest, images: saved } : rest
             })(sent)
-          : sent
+          : sent.type === 'tool.started'
+            ? scrubForgetCall(sent)
+            : sent
       const at = now().toISOString()
       for (const extension of watchersOf('onEvent')) callExtension(extension, () => extension.onEvent!(detailOf(chat), event, contextOf(extension)))
       if (event.type === 'tools.listed') return deps.toolsListed?.(engine, event.names)
@@ -943,6 +951,8 @@ export function openTurns(deps: TurnDeps) {
         recordPermission(chat, event, verdict.allow, verdict.rule, verdict.message)
         respondTo(ref.session, requestId, verdict)
       }
+      // Asked of the user alone (forget): no rule, switch or extension answers it.
+      if (userOnly.delete(requestId)) return settle(undefined)
       const own = decide(event, permissionsOf())
       // The core's denials stand, and so does Allow all; otherwise an extension's policy goes first.
       if (own?.allow === false || own?.rule === ALLOW_ALL_RULE) return settle(own)
@@ -959,11 +969,14 @@ export function openTurns(deps: TurnDeps) {
     // An extension's request (host.requestPermission), raised in this session as if the engine had: the core's rules,
     // extensions' policies, else the user's card, and the Activity record. changes: what it does may change something,
     // so a read-only turn refuses it.
-    const ask = (request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean) =>
+    // ask.userOnly: only the user answers it, read-only turn or not (forget); requestId: the caller's own id for it.
+    const ask = (request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean, options: AskOptions = {}) =>
       new Promise<RuledVerdict>((resolve) => {
-        const event = { type: 'permission.requested' as const, requestId: `x-${randomBytes(6).toString('hex')}`, ...request }
+        const requestId = options.requestId ?? `x-${randomBytes(6).toString('hex')}`
+        const event = { type: 'permission.requested' as const, ...request, requestId }
         const readOnly = permissionsOf().readOnly
-        if (readOnly && changes) {
+        if (options.userOnly) userOnly.add(requestId)
+        else if (readOnly && changes) {
           const message = readOnly.reason?.trim() || READ_ONLY_REASON
           recordPermission(chat, event, false, 'Read-only turn', message)
           return resolve({ allow: false, message, rule: 'Read-only turn' })
@@ -1200,12 +1213,12 @@ export function openTurns(deps: TurnDeps) {
     allStopped() ? Promise.resolve() : new Promise<void>((resolve) => allStoppedWaiters.push(resolve))
 
   // host.requestPermission: only while the chat has a session to ask in.
-  const requestPermission = (chat: Chat, request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean) => {
+  const requestPermission = (chat: Chat, request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean, options?: AskOptions) => {
     const events = liveEvents.get(chat)
     if (!chat.session || !events || events.ref.session !== chat.session) {
       return Promise.reject(new Error(`${chat.info.name} has no turn running to ask in`))
     }
-    return events.ask(request, changes)
+    return events.ask(request, changes, options)
   }
 
   return {

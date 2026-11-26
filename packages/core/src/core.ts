@@ -983,6 +983,7 @@ function assembleCore(options: {
       return idle ? 'sent' : steers ? 'steered' : 'queued'
     },
     stop: (chatId) => interrupt(chatFor(chatId), false),
+    forget: (chatId, ids) => forget(chatFor(chatId), ids),
     workers: (chatId: string) => {
       const chat = chats.get(chatId)
       return { enabled: !!chat && agentStartsWorkers(chat, workers, setupOf(chat)), limit: workers.limit() }
@@ -1045,7 +1046,7 @@ function assembleCore(options: {
     for (const extension of watchers) callExtension(extension, () => extension.onTurnSent!(sent, contextOf(extension)))
   }
 
-  const { deleteMessage, editMessage, undoMessage } = openMessageEdits({
+  const { deleteMessage, editMessage, undoMessage, forget } = openMessageEdits({
     broadcast,
     shownLog: (chat) => pageOf(chat.entries),
     attachmentsDirOf,
@@ -1055,6 +1056,8 @@ function assembleCore(options: {
     },
     enqueue,
     checkActive,
+    askUser: (chat, request, requestId) => requestPermission(chat, request, true, { userOnly: true, requestId }),
+    note: (chat, text) => append(chat, { at: now().toISOString(), type: 'extension.note', text }),
   })
 
   const handle = openProtocol({

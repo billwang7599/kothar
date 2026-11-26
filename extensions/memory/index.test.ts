@@ -285,7 +285,8 @@ describe('Memory extension off', () => {
       `Your parent chat's memory when it started you:\n\n<message id="0" kind="user">\nPlan the release\n</message>`,
     )
     expect(first.options.instructions).not.toContain('zoom')
-    expect(first.options.kotharMcp).toBeUndefined()
+    // Kothar's own forget is all it's offered: no zoom into the parent.
+    expect(await t.names(first.options.kotharMcp!.token)).toEqual(['forget'])
     first.end('Checked')
   })
 })

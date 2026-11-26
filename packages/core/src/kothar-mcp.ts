@@ -20,6 +20,8 @@ type Hub = {
   deliver(chatId: string, text: string): 'sent' | 'steered' | 'queued'
   // What the chat's Stop button does.
   stop(chatId: string): void
+  // The forget tool: asks the user, then removes the messages from the chat (message-edits.ts forget).
+  forget(chatId: string, ids: unknown): Promise<string>
   // Whether that chat's agent may start workers (Settings → Workers, and its setup), and how many of its children may
   // run at once (-1: no limit).
   workers(chatId: string): { enabled: boolean; limit: number }
@@ -56,13 +58,30 @@ function messages(chat: ChatState) {
 type Context = { hub: Hub; caller: ChatState; reachable: (chatId: string) => ChatState }
 
 type Tool = {
-  for: 'reach' | 'workers'
+  // all: every chat, its own chat being what it acts on.
+  for: 'reach' | 'workers' | 'all'
   description: string
   input: z.ZodObject
   run(context: Context, input: any): unknown
 }
 
 const TOOLS: Record<string, Tool> = {
+  forget: {
+    for: 'all',
+    description:
+      'Permanently remove messages from this chat and its memory, only when the user asks you to forget or remove ' +
+      'something. ids are message ids from your memory: numbers, memory lines such as "120+8", or ranges such as ' +
+      '"120-127". A reply goes whole, with its tool calls. The user is shown each message and confirms first; the ' +
+      "turn that's running can't be forgotten. reason: a few words for yourself, never logged. Don't repeat what you " +
+      'forgot.',
+    input: z.object({
+      ids: z.array(z.union([z.number().int(), z.string()])).min(1),
+      reason: z.string().max(200).optional(),
+    }),
+    run({ hub, caller }: Context, { ids }: { ids: unknown }) {
+      return hub.forget(caller.id, ids)
+    },
+  },
   list_chats: {
     for: 'reach',
     description: 'List the chats this one can reach, with their status.',
@@ -163,6 +182,7 @@ export function openKotharMcp(hub: Hub) {
 
   const offers = (caller: ChatState, tool: Tool) => {
     const spawns = !caller.worker && hub.workers(caller.id).enabled
+    if (tool.for === 'all') return true
     if (tool.for === 'workers') return spawns
     return spawns || hub.seesAll(caller.id)
   }
