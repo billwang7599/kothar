@@ -502,8 +502,10 @@ it('lets every user chat spawn workers while agents may start them, up to the li
   const subchat = core.chats().find((c) => c.id !== 'main')!
   const offered = send(subchat.id, 'hi').options
   expect(offered.instructions).not.toContain(WORKER_INSTRUCTIONS)
-  // No tool to offer it, so no Kothar MCP server at all.
-  expect(offered.kotharMcp).toBeUndefined()
+  // Only forget, which every chat gets: no spawn_worker.
+  expect((await (await post(offered.kotharMcp!.token, 'spawn_worker', { task: 'x' })).json()).error.message).toBe(
+    'Tool spawn_worker not found',
+  )
 
   workersOn(core, 1)
   handle({ type: 'chat.interrupt', chatId: subchat.id, force: true })
@@ -786,7 +788,7 @@ const childExtension: Extension = {
 }
 
 it("lets an extension start a child chat as spawn_worker does, with agents kept from starting workers: frozen view, report, removal", async () => {
-  const { core, garage, json, tool, send, sessionOf } = await startHeld({ extensions: [mainExtension, childExtension] })
+  const { core, garage, json, tool, post, send, sessionOf } = await startHeld({ extensions: [mainExtension, childExtension] })
   handleOn(core)({ type: 'workers.set', start: false })
   const parent = send('main', 'Plan the release')
   const token = parent.options.kotharMcp!.token
@@ -795,8 +797,10 @@ it("lets an extension start a child chat as spawn_worker does, with agents kept 
   const child = sessionOf(chatId)
   expect(child.prompt).toBe('Check the changelog')
   expect(child.options.instructions).toContain('<message id="0" kind="user">\nPlan the release\n</message>')
-  // Its tool isn't offered to a child, and no memory extension is on, so the child has no Kothar MCP server at all.
-  expect(child.options.kotharMcp).toBeUndefined()
+  // Its tool isn't offered to a child, and no memory extension is on: Kothar's MCP server gives it only forget.
+  expect((await (await post(child.options.kotharMcp!.token, 'delegate', { task: 'x' })).json()).error.message).toBe(
+    'Tool delegate not found',
+  )
 
   // A child takes its folders from its space. An extension can start one below it (so research a worker runs doesn't
   // wait for the slot that worker holds), but no deeper.
@@ -868,7 +872,7 @@ it("tells an extension's tool who called it and what that caller may reach, by t
 })
 
 it("gives a worker its parent's latest messages frozen at launch when no memory extension is on", async () => {
-  const { core, garage, json, send, sessionOf } = await startHeld()
+  const { core, garage, json, post, send, sessionOf } = await startHeld()
   workersOn(core, -1)
   const parent = send('main', 'Plan the release')
   const { chatId } = await json(parent.options.kotharMcp!.token, 'spawn_worker', { task: 'Check the changelog' })
@@ -880,7 +884,7 @@ it("gives a worker its parent's latest messages frozen at launch when no memory 
   expect(chatIn(core, chatId).parentMessages).toBe(1)
   expect(JSON.parse(readFileSync(join(garage, 'chats', chatId, 'chat.json'), 'utf8')).parentMessages).toBe(1)
   expect(first.options.instructions).not.toContain('zoom')
-  expect(first.options.kotharMcp).toBeUndefined()
+  expect((await (await post(first.options.kotharMcp!.token, 'zoom', { id: 0 })).json()).error.message).toBe('Tool zoom not found')
   first.end('Checked')
   expect(core.chats().some((c) => c.id === chatId)).toBe(false)
 })

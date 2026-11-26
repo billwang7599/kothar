@@ -77,6 +77,7 @@ it('runs Home in the scratch folder with its instructions, and makes top-level s
   const token = session.options.kotharMcp!.token
   expect(await names(token)).toEqual([
     'create_chat',
+    'forget',
     'list_chats',
     'read_chat',
     'send_message',
@@ -105,6 +106,7 @@ it('runs Home in the scratch folder with its instructions, and makes top-level s
   expect(sessions.at(-1)).toMatchObject({ prompt: 'Look around', options })
   expect(JSON.parse((await tool(token, 'list_chats')).text).map((c: { id: string }) => c.id)).toEqual([chatId])
   expect(await names(sessions.at(-1)!.options.kotharMcp!.token)).toEqual([
+    'forget',
     'list_chats',
     'read_chat',
     'send_message',

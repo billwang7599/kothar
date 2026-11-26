@@ -72,7 +72,10 @@ What works today:
 - **Extensions that work together:** each session is told what it can use (Kothar's tools and every extension's, one
   line each, made from their names and descriptions) and to combine them on its own, such as handing a deep research
   run to a worker. Workers get the same tools as their lead. The intro is editable in Settings → Prompts.
-- **Memory:** every chat has its own.
+- **Memory:** every chat has its own. Ask an agent to forget something ("forget the CS343 thing") and its `forget`
+  tool removes those messages for good, from the log on disk, their attachments and the chat's memory, after you
+  confirm on a card that lists each one (Forget or Cancel). Only its own chat's finished turns can go; a "2 messages
+  forgotten" line marks the gap.
 - **Sandboxing (macOS):** agents work in a sandboxed work folder, with git folders checked out as worktrees. A repo with no commits yet is used as a plain folder, with its mode, until
   its first commit. Nothing an agent runs can put up a macOS authorization or keychain dialog (such as "Keychain Not
   Found ... Reset To Defaults"): the sandbox blocks the services that draw them, while keychain logins keep working.

@@ -1729,3 +1729,30 @@ test('an undone message comes back to the composer once, before what was typed, 
   expect(container.querySelectorAll('[aria-label="Attachments"] li')).toHaveLength(1)
   localStorage.clear()
 })
+
+test('a forget card asks in its own words, lists what goes, and answers with Forget or Cancel', () => {
+  const sent: ClientMessage[] = []
+  const forget: Item = {
+    kind: 'permission',
+    requestId: 'f1',
+    name: 'Forget 2 messages',
+    toolKind: 'other',
+    summary: 'You: TallyVotes quiz notes\nReply: Saved the notes.',
+    input: { ids: [0, 1] },
+    outcome: 'pending',
+    buttons: { allow: 'Forget', deny: 'Cancel' },
+  }
+  render({ status: 'waiting', items: [USER, forget] }, (m) => sent.push(m))
+  expect(container.textContent).toContain('Forget 2 messages?')
+  expect(container.textContent).not.toContain('Allow Forget')
+  expect(container.textContent).toContain('Reply: Saved the notes.')
+  const labels = [...container.querySelectorAll('button')].map((b) => b.textContent)
+  expect(labels).toEqual(expect.arrayContaining(['Forget', 'Cancel']))
+  expect(labels).not.toContain('Approve')
+  const cancel = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Cancel')!
+  act(() => cancel.click())
+  expect(sent.at(-1)).toEqual({ type: 'permission.respond', chatId: 'c1', requestId: 'f1', allow: false })
+  const yes = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Forget')!
+  act(() => yes.click())
+  expect(sent.at(-1)).toEqual({ type: 'permission.respond', chatId: 'c1', requestId: 'f1', allow: true })
+})

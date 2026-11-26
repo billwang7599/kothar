@@ -266,6 +266,16 @@ Why some things are the way they are. Add one when you make a choice the next co
 - **With every tool off, a few things stay.** Claude Code keeps `ToolSearch`, which it may need to load deferred MCP
   tools (Kothar's among them); pi uses `--no-builtin-tools`, not `--no-tools`, which would drop MCP too; OpenCode turns
   each built-in off by name, never `*`, which would match `kothar_*` as well.
+- **forget always asks, and nothing can answer for you.** An agent's `forget` tool erases messages for good (the
+  same removal as Delete: `entry.removed` in place, `log.jsonl` rewritten, files only they used deleted, Memory told
+  through `onMessagesRemoved`). Its card is asked of the user alone (`userOnly` in turn.ts): Allow all, automatic
+  permission answers, extensions' policies and read-only turns never answer it. An agent that could quietly erase its
+  own history could hide its mistakes, and a prompt injection could use it to wipe evidence; there's no undo once the
+  text is gone. It acts only on its own chat's finished turns (no other chat, not a parent's frozen view), reads ids as
+  the session was shown them (`chat.seen`), so a second forget in the same turn still names the right messages, and
+  keeps only ids in the log: the call's `reason` is dropped as it's logged, and the card keeps its count once the
+  messages are gone. It's a core tool beside `list_chats`, not Memory's, because it works with Memory off too and uses
+  the core's delete; no private hook was needed.
 
 ## Pull requests
 

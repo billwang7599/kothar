@@ -53,7 +53,16 @@ export function PermissionPrompt({ permission, chat, connected, send, space, sel
       aria-label={fromWorker ? `Request from worker ${chat.name}` : undefined}
     >
       <div className="text-body">
-        {fromWorker ? (
+        {permission.buttons ? (
+          <>
+            {fromWorker && (
+              <>
+                Worker <strong>{chat.name}</strong>:{' '}
+              </>
+            )}
+            <strong>{permission.name}</strong>?
+          </>
+        ) : fromWorker ? (
           <>
             Worker <strong>{chat.name}</strong> wants to run <strong>{permission.name}</strong>
           </>
@@ -82,13 +91,27 @@ export function PermissionPrompt({ permission, chat, connected, send, space, sel
         </div>
       ) : chat.status === 'waiting' ? (
         <div className="flex flex-wrap gap-8">
-          <Button variant="primary" disabled={!connected} onClick={() => respond(true)}>
-            Approve
-          </Button>
-          <Button variant="danger" disabled={!connected} onClick={() => respond(false)}>
-            Deny
-          </Button>
-          {permission.sshHost && (
+          {permission.buttons ? (
+            // A card that asks in its own words is about something that can't be undone (forget): the yes is red.
+            <>
+              <Button variant="danger" disabled={!connected} onClick={() => respond(true)}>
+                {permission.buttons.allow}
+              </Button>
+              <Button disabled={!connected} onClick={() => respond(false)}>
+                {permission.buttons.deny}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="primary" disabled={!connected} onClick={() => respond(true)}>
+                Approve
+              </Button>
+              <Button variant="danger" disabled={!connected} onClick={() => respond(false)}>
+                Deny
+              </Button>
+            </>
+          )}
+          {permission.sshHost && !permission.buttons && (
             <AlwaysAllow host={permission.sshHost} disabled={!connected} trust={(scope) => respond(true, scope)} />
           )}
         </div>

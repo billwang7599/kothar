@@ -328,7 +328,7 @@ describe('Kothar MCP server', () => {
       expect(await off.names('main')).not.toContain('spawn_worker')
       expect(await off.names('bbbb0001')).toEqual(['forget'])
 
-      const { names, mcp, chats } = await on()
+      const { names, chats } = await on()
       expect(await names('main')).toContain('spawn_worker')
       const tools = ['forget', 'list_chats', 'read_chat', 'send_message', 'spawn_worker', 'stop_chat']
       expect(await names('aaaa0001')).toEqual(tools)
