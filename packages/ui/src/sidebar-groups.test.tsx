@@ -228,6 +228,36 @@ test('a collapsed group shows a dot when a space inside is running, waiting or u
   expect(dot()).toBeNull()
 })
 
+test('a collapsed group counts the spaces in its top status, from two up', () => {
+  act(() => collapseGroup('g1', true))
+  const E = chat({ id: 'e', name: 'Epsilon', order: 2, group: 'g1' })
+  const counted = () => groupRow('Work').querySelector('[data-group-needing]')?.textContent ?? null
+  const label = () => groupRow('Work').querySelector('[role="img"]')?.getAttribute('aria-label') ?? null
+  // One waiting: just the dot.
+  render([{ ...A, status: 'waiting' }, { ...B, status: 'running' }, E])
+  expect(groupRow('Work').querySelector('[data-group-dot]')?.getAttribute('data-status')).toBe('waiting')
+  expect(counted()).toBeNull()
+  expect(label()).toBeNull()
+  // Two waiting (one through its worker), one running: "2 waiting".
+  const asking = chat({
+    ...WORKER,
+    status: 'waiting',
+    items: [{ kind: 'permission', id: 'p', tool: 'Bash', input: {}, outcome: 'pending' } as never],
+  })
+  render([A, { ...B, status: 'waiting' }, { ...E, status: 'running' }, asking])
+  expect(counted()).toBe('2')
+  expect(label()).toBe('2 waiting')
+  expect(groupRow('Work').querySelector('[role="img"]')?.getAttribute('title')).toBe('2 waiting')
+  // Nothing busy, three unread: "3 unread".
+  const done = { doneAt: '2026-02-01T00:00:00.000Z' }
+  render([{ ...A, ...done }, { ...B, ...done }, { ...E, ...done }])
+  expect(label()).toBe('3 unread')
+  // Unfolded: no dot and no count.
+  act(() => collapseGroup('g1', false))
+  expect(counted()).toBeNull()
+  expect(groupRow('Work').querySelector('[data-group-dot]')).toBeNull()
+})
+
 test('pinned spaces show in Pinned, not in their group, and offer no group moves', () => {
   render([{ ...A, pinned: true }, B, C])
   expect(names(pinned())).toEqual(['a'])

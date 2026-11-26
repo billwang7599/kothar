@@ -519,6 +519,10 @@ export function ChatNav({
         select(chatId)
       },
     }
+    // How many of its spaces are in that top status (or unread, with nothing busy): shown beside the dot when it's more
+    // than one.
+    const top = BUSIEST.find((s) => statuses.includes(s)) ?? 'idle'
+    const needing = peek.spaces.filter((space) => (top === 'idle' ? space.unread : space.status === top)).length
     return (
       <div key={`group:${group.id}`} role="group" aria-label={group.name} className="flex flex-col gap-1">
         <GroupRow
@@ -526,8 +530,9 @@ export function ChatNav({
           animate={settled.current}
           collapsed={isCollapsed}
           count={rows.filter((r) => r.depth === 0).length}
-          status={BUSIEST.find((s) => statuses.includes(s)) ?? 'idle'}
+          status={top}
           unread={unread}
+          needing={needing}
           toggle={toggle}
           menu={menu}
           renaming={renaming}
@@ -690,6 +695,8 @@ type GroupRowProps = {
   count: number
   status: ChatStatus
   unread: boolean
+  // How many spaces are in `status` (or unread, when it's idle); a count shows beside the dot from two up.
+  needing: number
   toggle: () => void
   menu: MenuItem[]
   renaming: boolean
@@ -702,6 +709,12 @@ type GroupRowProps = {
   drag?: GroupDrag
   peek?: Peek
 }
+
+/** A folded group's count takes its dot's colour, so it reads as part of the dot, not a second total. */
+const NEEDING_TEXT: Record<ChatStatus, string> = { idle: 'text-text', running: 'text-green', waiting: 'text-amber', stopping: 'text-muted' }
+const NEEDING: Record<ChatStatus, string> = { waiting: 'waiting', stopping: 'stopping', running: 'running', idle: 'unread' }
+/** What a folded group's count says: "2 waiting", "3 unread". */
+export const needingLabel = (count: number, status: ChatStatus) => `${count} ${NEEDING[status]}`
 
 /** A group's row: its chevron and name; collapsed, how many spaces it holds and a dot when one is busy or unread. */
 function GroupRow(props: GroupRowProps) {
@@ -768,7 +781,19 @@ function GroupRow(props: GroupRowProps) {
                 {count}
               </span>
             )}
-            {dot && <span className={`size-7 shrink-0 rounded-full ${dot}`} data-status={status} data-group-dot />}
+            {dot && (
+              <span
+                className="flex shrink-0 items-center gap-3"
+                {...(props.needing > 1 && { role: 'img', 'aria-label': needingLabel(props.needing, status), title: needingLabel(props.needing, status) })}
+              >
+                {props.needing > 1 && (
+                  <span className={`text-xs font-medium tabular-nums ${NEEDING_TEXT[status]}`} aria-hidden data-group-needing>
+                    {props.needing}
+                  </span>
+                )}
+                <span className={`size-7 shrink-0 rounded-full ${dot}`} data-status={status} data-group-dot />
+              </span>
+            )}
           </button>
           <RowMenu
             label={group.name}
