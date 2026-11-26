@@ -246,6 +246,9 @@ export type EngineAccounts = {
 }
 
 export const PERMISSION_DEFAULTS = {
+  // Approve everything: no sandbox, and every permission request is answered yes, logins and keys included. While
+  // it's on, the switches below are kept but not used.
+  allowAll: false,
   editAnywhere: false,
   autoRunCommands: true,
   autoNetworkCommands: false,
@@ -258,7 +261,15 @@ export type PermissionSwitch = keyof typeof PERMISSION_DEFAULTS
 
 export const PERMISSION_SWITCHES = Object.keys(PERMISSION_DEFAULTS) as PermissionSwitch[]
 
-export type PermissionSwitches = Partial<Record<PermissionSwitch, boolean>>
+// A server the user trusts for ssh, scp, sftp and rsync: commands that reach only these run without asking, even with
+// network commands asking, and may use the listed key. host: a name, optionally user@ in front and *. as its first part
+// (any subdomain). key: an identity file (~/ or absolute); without one, no -i key is let through for the host.
+export type SshHost = { host: string; key?: string }
+
+// The switches, and the allowed SSH hosts: like a switch, the nearest layer with a list of its own wins.
+export type PermissionSwitches = Partial<Record<PermissionSwitch, boolean>> & { sshHosts?: SshHost[] }
+
+export const sshHostsOf = (...layers: PermissionSwitches[]) => layers.find((layer) => layer.sshHosts !== undefined)?.sshHosts ?? []
 
 export const switchedOn = (name: PermissionSwitch, ...layers: PermissionSwitches[]) =>
   layers.find((layer) => layer[name] !== undefined)?.[name] ?? PERMISSION_DEFAULTS[name]
@@ -287,6 +298,11 @@ export type ChatInfo = PermissionSwitches & {
   // user moves or pins one. A space without it (a new one) sits above the ordered ones, newest first.
   pinned?: boolean
   order?: number
+  // Spaces only: the id of the sidebar group (groups.json) the space sits in. Purely visual. A pinned space keeps it and
+  // goes back into the group when unpinned; an id with no group behind it counts as no group.
+  group?: string
+  // Spaces only, while pinned: where the space sat before it was pinned, so Unpin puts it back (UnpinSpot).
+  unpinTo?: UnpinSpot
   createdAt: string
   role?: ModelRole
   model?: string
@@ -329,12 +345,25 @@ export type Setup = {
 
 export const MAX_SETUP_INSTRUCTIONS = 20_000
 
+/** A named folder of spaces in the sidebar (`<garage>/groups.json`, in order). Purely visual. */
+export type SpaceGroup = { id: string; name: string }
+export const MAX_GROUP_NAME = 80
+
 /** Finished since the user last saw it; chats from before read state existed have no doneAt until their next turn. */
 export const isUnread = (chat: Pick<ChatInfo, 'doneAt' | 'readAt'>) =>
   chat.doneAt !== undefined && (chat.readAt === undefined || chat.doneAt > chat.readAt)
 
 // from: the branch the folder was on when it was checked out.
 export type Worktree = { path: string; branch: string; from?: string }
+
+/**
+ * Where a pinned space sat before it was pinned, among the spaces of its group (or the ungrouped ones): the ids of the
+ * spaces just above and just below it, nearest first (up to UNPIN_NEIGHBOURS each), and its index there. Neighbours
+ * stay right when other spaces move, so Unpin goes next to the nearest one still in that place, and to the index only
+ * when none is.
+ */
+export type UnpinSpot = { above: string[]; below: string[]; index: number }
+export const UNPIN_NEIGHBOURS = 5
 
 /** How spaces sort in the sidebar: pinned first, then unordered (newest first), then by `order`. */
 export function bySpaceOrder(a: Pick<ChatInfo, 'pinned' | 'order' | 'createdAt'>, b: typeof a): number {
@@ -358,7 +387,9 @@ export type WorkFolder = PermissionSwitches & {
 }
 
 // Layers nearest first: a chat, the chats above it, then the work folder's defaults.
-export const editsAnywhere = (...layers: PermissionSwitches[]) => switchedOn('editAnywhere', ...layers)
+// Allow all drops the sandbox too.
+export const allowsAll = (...layers: PermissionSwitches[]) => switchedOn('allowAll', ...layers)
+export const editsAnywhere = (...layers: PermissionSwitches[]) => allowsAll(...layers) || switchedOn('editAnywhere', ...layers)
 
 export const MODEL_ROLES = ['chat', 'planning', 'searching', 'workers'] as const
 
@@ -537,8 +568,9 @@ export type { Attachment } from '@kothar/extension-api'
 
 export type Upload = { name: string; mimeType: string; base64: string }
 
-// A worker's final reply to its lead: which worker, and why its turn ended early, if it did.
-export type WorkerReport = { chatId: string; name: string; error?: string }
+// A worker's final reply to its lead: which worker, and why its turn ended early, if it did. from: an extension's
+// report of its own background work instead (ExtensionHost.report), by the extension's id, which chatId is then too.
+export type WorkerReport = { chatId: string; name: string; error?: string; from?: string }
 
 // steering: handed to the running turn, waiting for its next tool boundary; it can't be taken back.
 export type QueuedMessage = {
@@ -547,6 +579,8 @@ export type QueuedMessage = {
   attachments?: Attachment[]
   report?: WorkerReport
   steering?: true
+  // The composer mode the user sent it with (extension id and toggle id, as composer-toggles.ts's modeKey).
+  modes?: string[]
 }
 
 // An extension's tab in the right sidebar, and an extension's action in the General tab, for one chat.
@@ -617,8 +651,16 @@ export type ClientMessage =
   | ({ type: 'chat.create' } & NewChat)
   | { type: 'chat.rename'; chatId: string; name: string }
   | { type: 'chat.archive'; chatId: string; archived: boolean }
-  // Moves a space to `index` among the active spaces that are (un)pinned like `pinned`, pinning or unpinning it.
-  | { type: 'chat.move'; chatId: string; pinned: boolean; index: number }
+  // Moves a space to `index` among the active spaces that are (un)pinned like `pinned`, pinning or unpinning it. With
+  // `group`, it also goes into that group (null: out of any group); an unpinned space is placed among its group's spaces.
+  // Unpinning without an index puts the space back where it was before it was pinned (ChatInfo.unpinTo).
+  | { type: 'chat.move'; chatId: string; pinned: boolean; index?: number; group?: string | null }
+  // Sidebar groups of spaces. A new group goes at the bottom of the groups; with chatId, that space moves into it.
+  | { type: 'group.create'; name: string; chatId?: string }
+  | { type: 'group.rename'; groupId: string; name: string }
+  | { type: 'group.move'; groupId: string; index: number }
+  // Removes a group; its spaces go back to the ungrouped spaces.
+  | { type: 'group.delete'; groupId: string }
   | { type: 'chat.delete'; chatId: string }
   // The user has seen the chat's latest turn.
   | { type: 'chat.read'; chatId: string }
@@ -628,9 +670,19 @@ export type ClientMessage =
   // thinking level of its own, or none to take the list's.
   | { type: 'chat.setModel'; chatId: string; engine?: string; model?: string; thinking?: ThinkingLevel }
   | { type: 'chat.setPermission'; chatId: string; name: PermissionSwitch; enabled?: boolean }
+  // The chat's own allowed SSH hosts, or none to take its space's or Settings' again.
+  | { type: 'chat.setSshHosts'; chatId: string; hosts?: SshHost[] }
   // steer: hand it to the running turn if its engine can steer; otherwise, or without it, it waits for the turn to end.
   | { type: 'chat.send'; chatId: string; text: string; attachments?: Upload[]; steer?: boolean }
   | { type: 'chat.unqueue'; chatId: string; id: string }
+  // Deletes the message at entry in the chat's log: the user's, a worker's report, or the agent's reply with the tool
+  // calls and thinking around it. Not while its turn runs.
+  | { type: 'chat.deleteMessage'; chatId: string; entry: number }
+  // The user's message at entry, edited: it and everything after it are removed, and text runs as a new turn with the
+  // message's attachments. Only on a stopped chat.
+  | { type: 'chat.editMessage'; chatId: string; entry: number; text: string }
+  // Removes the user's message at entry and everything after it; replies with chat.undone, for the composer.
+  | { type: 'chat.undoMessage'; chatId: string; entry: number }
   | { type: 'chat.interrupt'; chatId: string; force?: boolean }
   | { type: 'permission.respond'; chatId: string; requestId: string; allow: boolean }
   | { type: 'question.respond'; chatId: string; requestId: string; answers?: Answers }
@@ -663,6 +715,7 @@ export type ClientMessage =
   | { type: 'instructions.write'; text: string }
   | { type: 'workFolder.set'; path: string }
   | { type: 'permission.setDefault'; name: PermissionSwitch; enabled: boolean }
+  | { type: 'permission.setSshHosts'; hosts: SshHost[] }
   | { type: 'extension.setEnabled'; extensionId: string; enabled: boolean }
   | { type: 'extension.setValue'; extensionId: string; key: string; value: string | number | boolean }
   // Saves the user's edit of one of an extension's prompts; without text (or with the default), back to the default.
@@ -756,6 +809,8 @@ export type CoreMessage =
       extensions: ExtensionInfo[]
       modelLists: ModelLists
       setups: Setup[]
+      // Absent from an older core.
+      groups?: SpaceGroup[]
       memory: MemorySettings
       workers: WorkersSettings
       // Absent from an older core.
@@ -775,6 +830,10 @@ export type CoreMessage =
   | { type: 'chat.entry'; chatId: string; entry: ChatEntry }
   // The answer to chat.history: the log's entries from `from` up to `before`.
   | { type: 'chat.history'; chatId: string; before: number; from: number; entries: ChatEntry[] }
+  // The chat's log changed in place (messages deleted): the latest page, to show instead of what the UI had.
+  | { type: 'chat.log'; chatId: string; from: number; entries: ChatEntry[] }
+  // The answer to chat.undoMessage, to its sender: what the message said and carried, to put back in the composer.
+  | { type: 'chat.undone'; chatId: string; text: string; attachments: Upload[] }
   | { type: 'chat.delta'; chatId: string; text: string }
   | { type: 'chat.thinking'; chatId: string; text: string }
   | { type: 'chat.status'; chatId: string; status: ChatStatus }
@@ -807,6 +866,7 @@ export type CoreMessage =
   | { type: 'restart.updated'; restart: RestartState }
   | { type: 'models.updated'; lists: ModelLists }
   | { type: 'setups.updated'; setups: Setup[] }
+  | { type: 'groups.updated'; groups: SpaceGroup[] }
   // The answer to setup.save, to its sender only: the setup as saved, or why it was refused.
   | { type: 'setup.saved'; setup: Setup }
   | { type: 'setup.refused'; error: string }

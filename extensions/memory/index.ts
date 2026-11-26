@@ -1,9 +1,20 @@
 import type { ChatSummary, MemoryMessage, Extension, ExtensionContext, ExtensionHost, ExtensionValues } from '@kothar/extension-api'
-import { FOLD_INSTRUCTIONS, openRollingCompactor, readRolling, ROLLING_INSTRUCTIONS, ROLLING_ZOOM_INSTRUCTIONS, rollingView } from './rolling.ts'
+import {
+  FOLD_INSTRUCTIONS,
+  openRollingCompactor,
+  readRolling,
+  removeStaleRolling,
+  ROLLING_FILE,
+  ROLLING_INSTRUCTIONS,
+  ROLLING_ZOOM_INSTRUCTIONS,
+  rollingView,
+  type Rolling,
+} from './rolling.ts'
 import { deleteSummaries, storageView } from './storage.ts'
 import {
   COMPACTOR_INSTRUCTIONS,
   dateOf,
+  isStale,
   MEMORY_INSTRUCTIONS,
   memoryView,
   openCompactor,
@@ -67,20 +78,46 @@ export function createMemoryExtension(options: MemoryExtensionOptions = {}): Ext
     values = context.values
     return context.host
   }
-  const treeOf = (host: ExtensionHost, chatId: string) => {
-    let summaries = trees.get(chatId)
-    if (!summaries) {
-      summaries = openSummaries(summaryFileOf(host.chatStorage(chatId)))
-      trees.set(chatId, summaries)
-    }
-    return summaries
-  }
   const messagesOf = (host: ExtensionHost, chatId: string): MemoryMessage[] | undefined => {
     try {
       return host.messages(chatId)
     } catch {
       return undefined
     }
+  }
+  // Opened once per chat. Summaries that no longer match its messages are dropped from the file as it opens: messages
+  // deleted while Memory was off leave summaries that may quote them.
+  const treeOf = (host: ExtensionHost, chatId: string) => {
+    let summaries = trees.get(chatId)
+    if (!summaries) {
+      summaries = openSummaries(summaryFileOf(host.chatStorage(chatId)))
+      const messages = messagesOf(host, chatId)
+      if (messages) summaries.drop((summary) => isStale(messages, summary))
+      trees.set(chatId, summaries)
+    }
+    return summaries
+  }
+  // The same for a chat's rolling summary, checked once per chat.
+  const rollingChecked = new Set<string>()
+  const checkRolling = (host: ExtensionHost, chatId: string, messages: MemoryMessage[]) => {
+    if (rollingChecked.has(chatId)) return
+    rollingChecked.add(chatId)
+    removeStaleRolling(host.chatStorage(chatId), messages)
+  }
+  // Messages were deleted from a chat: every summary that covers one of them, or a message after them (their ids moved),
+  // goes, in both modes' files, and the queues start again so no summary written from the old messages lands after.
+  const forgetFrom = (host: ExtensionHost, chatId: string, firstMessage: number) => {
+    reopen(host, 'tree')
+    reopen(host, 'rolling')
+    treeOf(host, chatId).drop(({ id, n }) => id + n > firstMessage)
+    const storage = host.chatStorage(chatId)
+    try {
+      const rolling = JSON.parse(storage.read(ROLLING_FILE) ?? 'null') as Rolling | null
+      if (rolling && !(Number.isInteger(rolling.upTo) && rolling.upTo <= firstMessage)) storage.remove(ROLLING_FILE)
+    } catch {
+      storage.remove(ROLLING_FILE)
+    }
+    if (compactors) catchUp(host)
   }
   const touch = (chatId: string) => compactors?.[modeOf(values)].touch(chatId)
 
@@ -108,6 +145,7 @@ export function createMemoryExtension(options: MemoryExtensionOptions = {}): Ext
       ...shared,
       chat(chatId) {
         const messages = messagesOf(host, chatId)
+        if (messages) checkRolling(host, chatId, messages)
         return messages && { messages, storage: host.chatStorage(chatId) }
       },
     }) as NonNullable<typeof compactors>[M]
@@ -222,6 +260,7 @@ export function createMemoryExtension(options: MemoryExtensionOptions = {}): Ext
       view({ chat, messages, tools }, context) {
         const host = remember(context)
         if (modeOf(context.values) === 'rolling') {
+          checkRolling(host, chat.id, messages)
           return rollingView(messages, readRolling(host.chatStorage(chat.id), messages), tools)
         }
         return memoryView(messages, treeOf(host, chat.id), { zoom: tools })
@@ -262,6 +301,9 @@ export function createMemoryExtension(options: MemoryExtensionOptions = {}): Ext
       compactors?.tree.close()
       compactors?.rolling.close()
       compactors = undefined
+      // Messages deleted while Memory is off don't reach it, so each chat is checked again once it's back on.
+      trees.clear()
+      rollingChecked.clear()
     },
     onSessionEnded({ chat }, context) {
       remember(context)
@@ -269,6 +311,10 @@ export function createMemoryExtension(options: MemoryExtensionOptions = {}): Ext
     },
     onChatRemoved(chat) {
       trees.delete(chat.id)
+      rollingChecked.delete(chat.id)
+    },
+    onMessagesRemoved({ chat, firstMessage }, context) {
+      forgetFrom(remember(context), chat.id, firstMessage)
     },
   }
 }

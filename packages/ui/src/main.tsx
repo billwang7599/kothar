@@ -15,6 +15,7 @@ import { MarketplaceDialog } from './marketplace.tsx'
 import { ResizeHandle, usePanelWidths } from './panel-width.tsx'
 import { ChatNav, NameDialog, SidebarFooter, type NameRequest } from './sidebar.tsx'
 import { nthSpace, stepSpace } from './nav.ts'
+import { collapsedGroups } from './collapsed-groups.ts'
 import { SearchPalette } from './search.tsx'
 import { ExtensionPopup, launcherEntries, usePanelShortcuts } from './extension-popups.tsx'
 import { placedLaunchers, useLauncherPlace } from './launchers.ts'
@@ -249,6 +250,7 @@ function App() {
   const [marketplace, setMarketplace] = useState(false)
   const openMarketplace = useCallback(() => setMarketplace(true), [])
   const goTo = (chatId: string | undefined) => chatId && select(chatId)
+  const navGroups = () => ({ groups: state.groups, collapsed: collapsedGroups() })
   // The open chat's extension panels: popups, their keys and left-sidebar launchers.
   const panels = (selected && state.extensionUi?.chatId === selected.id && state.extensionUi.panels) || []
   const showContext = useCallback(() => {
@@ -261,10 +263,10 @@ function App() {
   })
   const panelKeys = usePanelShortcuts(panels, showContext)
   const shortcuts: ShortcutHandlers = {
-    previousSpace: () => goTo(stepSpace(state.chats, state.selectedId, -1)),
-    nextSpace: () => goTo(stepSpace(state.chats, state.selectedId, 1)),
+    previousSpace: () => goTo(stepSpace(state.chats, state.selectedId, -1, navGroups())),
+    nextSpace: () => goTo(stepSpace(state.chats, state.selectedId, 1, navGroups())),
     ...Object.fromEntries(
-      Array.from({ length: 9 }, (_, i) => [`jump${i + 1}`, () => goTo(nthSpace(state.chats, i + 1))]),
+      Array.from({ length: 9 }, (_, i) => [`jump${i + 1}`, () => goTo(nthSpace(state.chats, i + 1, navGroups()))]),
     ),
     newSpace: () => connected && setNameRequest({ kind: 'new' }),
     settings: () => openSettings(),
@@ -314,6 +316,7 @@ function App() {
                     askName={setNameRequest}
                     newSpaceKeys={keys.newSpace}
                     launchers={launchers.top}
+                    groups={state.groups}
                   />
                   <SidebarFooter
                     settingsKeys={keys.settings}

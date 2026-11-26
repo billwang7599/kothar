@@ -26,8 +26,10 @@ import {
   type Setup,
 } from './shared.ts'
 import { checkSwitch } from './settings.ts'
+import { checkSshHosts } from './ssh-hosts.ts'
 import { messageOf } from './util.ts'
 import type { Workers } from './workers.ts'
+import type { GroupActions, Groups } from './groups.ts'
 import type { EngineTools } from './engine-tools.ts'
 import type { CorePrompts } from './core-prompts.ts'
 
@@ -50,7 +52,9 @@ export type ProtocolDeps = {
   createChat: (spec: NewChat) => ChatInfo
   renameChat: (chat: Chat, name: unknown) => void
   archiveChat: (chat: Chat, archived: boolean) => void
-  moveChat: (chat: Chat, pinned: boolean, index: unknown) => void
+  moveChat: (chat: Chat, pinned: boolean, index: unknown, group?: unknown) => void
+  groups: Pick<Groups, 'rename' | 'move'>
+  groupActions: Pick<GroupActions, 'create' | 'remove'>
   deleteChat: (chat: Chat) => void
   updateChat: (chat: Chat, change: Partial<ChatInfo>) => void
   checkActive: (chat: Chat) => void
@@ -58,6 +62,9 @@ export type ProtocolDeps = {
 
   // Turns
   sendMessage: (chat: Chat, text: unknown, uploads: unknown, steering?: boolean) => void
+  deleteMessage: (chat: Chat, entry: unknown) => void
+  editMessage: (chat: Chat, entry: unknown, text: unknown) => void
+  undoMessage: (chat: Chat, entry: unknown) => CoreMessage
   setQueue: (chat: Chat, queue: QueuedMessage[]) => void
   interrupt: (chat: Chat, force: boolean) => void
   respond: (chat: Chat, requestId: string, allow: boolean) => void
@@ -79,6 +86,7 @@ export type ProtocolDeps = {
   setEngineEnabled: (engine: string, enabled: boolean) => void
   setWorkFolder: (path: unknown) => void
   setPermissionDefault: (name: unknown, enabled: boolean) => void
+  setSshHostsDefault: (hosts: unknown) => void
   setTerminal: (terminal: unknown) => void
   setMemory: (engine?: string, model?: string) => void
   workers: Pick<Workers, 'set' | 'setInstructions'>
@@ -146,7 +154,12 @@ export function openProtocol(deps: ProtocolDeps) {
       }),
     'chat.rename': (message) => deps.renameChat(chatFor(message.chatId), message.name),
     'chat.archive': (message) => deps.archiveChat(chatFor(message.chatId), message.archived === true),
-    'chat.move': (message) => deps.moveChat(chatFor(message.chatId), message.pinned === true, message.index),
+    'chat.move': (message) =>
+      deps.moveChat(chatFor(message.chatId), message.pinned === true, message.index, message.group),
+    'group.create': (message) => void deps.groupActions.create(message.name, message.chatId),
+    'group.rename': (message) => deps.groups.rename(message.groupId, message.name),
+    'group.move': (message) => deps.groups.move(message.groupId, message.index),
+    'group.delete': (message) => deps.groupActions.remove(message.groupId),
     'chat.delete': (message) => deps.deleteChat(chatFor(message.chatId)),
     'chat.read': (message) => {
       const chat = chatFor(message.chatId)
@@ -171,6 +184,12 @@ export function openProtocol(deps: ProtocolDeps) {
       deps.checkActive(chat)
       return deps.updateChat(chat, { [name]: typeof message.enabled === 'boolean' ? message.enabled : undefined })
     },
+    'chat.setSshHosts': (message) => {
+      const chat = chatFor(message.chatId)
+      const hosts = message.hosts === undefined ? undefined : checkSshHosts(message.hosts)
+      deps.checkActive(chat)
+      return deps.updateChat(chat, { sshHosts: hosts })
+    },
     search: (message, reply) => {
       const spaces = deps.shownChats().filter((c) => !c.info.worker)
       const hits = searchChats(
@@ -191,6 +210,9 @@ export function openProtocol(deps: ProtocolDeps) {
       for (const { path } of removed.attachments ?? []) rmSync(path, { force: true })
       return deps.setQueue(chat, chat.queue.filter((q) => q !== removed))
     },
+    'chat.deleteMessage': (message) => deps.deleteMessage(chatFor(message.chatId), message.entry),
+    'chat.editMessage': (message) => deps.editMessage(chatFor(message.chatId), message.entry, message.text),
+    'chat.undoMessage': (message, reply) => reply(deps.undoMessage(chatFor(message.chatId), message.entry)),
     'chat.interrupt': (message) => deps.interrupt(chatFor(message.chatId), message.force === true),
     'permission.respond': (message) => deps.respond(chatFor(message.chatId), message.requestId, message.allow === true),
     'question.respond': (message) => deps.answer(chatFor(message.chatId), message.requestId, message.answers),
@@ -273,6 +295,7 @@ export function openProtocol(deps: ProtocolDeps) {
     'engine.setEnabled': (message) => deps.setEngineEnabled(String(message.engine), message.enabled === true),
     'workFolder.set': (message) => deps.setWorkFolder(message.path),
     'permission.setDefault': (message) => deps.setPermissionDefault(message.name, message.enabled === true),
+    'permission.setSshHosts': (message) => deps.setSshHostsDefault(message.hosts),
     'terminal.set': (message) => deps.setTerminal(message.terminal),
     'editor.set': (message) => deps.setEditor(message.editor, message.command),
     'memory.set': (message) => deps.setMemory(optionalText(message.engine), optionalText(message.model)),

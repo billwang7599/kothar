@@ -1,12 +1,13 @@
 // The message box: typing (with its draft kept), attachments, model and thinking pickers, and Send, Queue or Stop.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { THINKING_LABELS, type ClientMessage, type ComposerToggleInfo, type ThinkingLevel } from '@kothar/core/shared'
 import { Button, Hint, Select } from '../controls.tsx'
 import { draftOf, flushDrafts, saveDraft, saveDraftSoon } from '../drafts.ts'
 import { applyEdit, continueList, indentList } from '../lists.tsx'
 import { modelKey, type ChatView, type modelMenu } from '../state.ts'
 import { FILE_CHIP, FileLabel, PaperclipIcon, type Pending } from './attachments.tsx'
-import { ComposerToggles } from './composer-toggles.tsx'
+import { ModePicker } from './mode-picker.tsx'
+import { withQuote } from './quote.tsx'
 
 const SEND_HINT = 'Enter to send · Shift+Enter for a new line'
 const QUEUE_HINT = 'Enter to queue · ⌘Enter to interrupt and send'
@@ -33,9 +34,11 @@ type ComposerProps = {
   submit: (text: string, steer?: boolean) => boolean
   /** Offers to stop the turn, so what's queued sends now. */
   interrupt: () => void
-  /** Extensions' switches for this chat, beside Attach. */
+  /** Extensions' modes for this chat, in the mode picker beside the thinking level. */
   toggles?: readonly ComposerToggleInfo[]
   send?: (m: ClientMessage) => void
+  /** Set to a function that puts text selected in the transcript into the box as a quote (chat/quote.tsx). */
+  quoteRef?: RefObject<((text: string) => void) | null>
 }
 
 /**
@@ -51,6 +54,37 @@ export function Composer(props: ComposerProps) {
     saveDraftSoon(chat.id, typed)
   }
   useEffect(() => flushDrafts, [])
+  const box = useRef<HTMLTextAreaElement>(null)
+  // Where the caret goes once a quote put in has rendered.
+  const caret = useRef<number | undefined>(undefined)
+  const touched = useRef(false)
+  useLayoutEffect(() => {
+    const node = box.current
+    if (caret.current === undefined || !node) return
+    node.focus()
+    node.setSelectionRange(caret.current, caret.current)
+    caret.current = undefined
+  }, [text])
+  useLayoutEffect(() => {
+    const ref = props.quoteRef
+    if (!ref) return
+    ref.current = (quote: string) => {
+      const node = box.current
+      if (!node) return
+      const value = node.value
+      // The caret stays put when the box loses focus, so a quote goes where it was left; a box never focused has its
+      // caret at the start, so the quote goes after what's typed.
+      const used = touched.current
+      const start = used ? node.selectionStart : value.length
+      const end = used ? node.selectionEnd : value.length
+      const next = withQuote(value, start, end, quote)
+      caret.current = next.caret
+      setText(next.value)
+    }
+    return () => {
+      ref.current = null
+    }
+  })
   const fileInput = useRef<HTMLInputElement>(null)
   const archived = chat.archived
   const busy = chat.status !== 'idle'
@@ -111,6 +145,10 @@ export function Composer(props: ComposerProps) {
           </span>
         )}
         <textarea
+          ref={box}
+          onFocus={() => {
+            touched.current = true
+          }}
           className="block max-h-[calc(12lh+16px)] min-h-[calc(1lh+16px)] w-full resize-none border-none bg-transparent px-12 shadow-none py-8 text-body leading-[1.5] field-sizing-content"
           value={text}
           rows={1}
@@ -145,8 +183,16 @@ export function Composer(props: ComposerProps) {
           }}
         />
       </div>
-      <div className="flex items-center gap-8 px-6 pb-6">
-        <span className="flex min-w-0 flex-1 items-center gap-6">
+      {/*
+        The toolbar narrows in steps, by the composer's width (its @container), never by drawing one thing over another:
+        1. The mode picker shows only its icon (mode-picker.tsx).
+        2. The model name is cut short with an ellipsis; the thinking level, Send and Attach keep their size.
+        3. When the right-hand group would get narrower than its floor, it wraps onto a line of its own.
+        The left group is never squeezed beside the right one, so its chips can't spill under it; alone on a line, its
+        chips wrap.
+      */}
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-4 px-6 pb-6" data-composer-toolbar>
+        <span className="flex min-w-0 flex-wrap items-center gap-6">
           <Hint text="Attach files">
             <Button
               variant="ghost"
@@ -169,14 +215,14 @@ export function Composer(props: ComposerProps) {
               e.target.value = ''
             }}
           />
-          {props.toggles && props.send && (
-            <ComposerToggles toggles={props.toggles} chatId={chat.id} disabled={!connected || archived} send={props.send} />
-          )}
         </span>
-        <span className="flex min-w-0 flex-wrap items-center justify-end gap-6">
+        <span
+          className={`ml-auto flex min-w-0 grow items-center justify-end gap-6 ${busy && hasContent ? 'basis-280' : 'basis-200'}`}
+        >
           {menu.value && (
             <Select
               variant="chip"
+              className="shrink"
               label="Model"
               hint={MODEL_HINT}
               value={menu.value}
@@ -188,6 +234,7 @@ export function Composer(props: ComposerProps) {
           {menu.levels.length > 0 && (
             <Select
               variant="chip"
+              className="shrink-0"
               label="Thinking"
               hint={THINKING_HINT}
               value={menu.thinking ?? ''}
@@ -197,11 +244,14 @@ export function Composer(props: ComposerProps) {
               onChange={(thinking) => setModel(menu.value, thinking as ThinkingLevel)}
             />
           )}
+          {props.toggles && props.send && (
+            <ModePicker modes={props.toggles} chatId={chat.id} disabled={!connected || archived} send={props.send} />
+          )}
           {busy ? (
             <>
               {hasContent && (
                 <Hint text={steers ? STEER_HINT : QUEUE_HINT}>
-                  <Button size="small" disabled={!canQueue} onClick={() => submit()}>
+                  <Button size="small" className="shrink-0" disabled={!canQueue} onClick={() => submit()}>
                     Queue
                   </Button>
                 </Hint>
@@ -209,7 +259,7 @@ export function Composer(props: ComposerProps) {
               <Hint text={chat.status === 'stopping' && FORCE_STOP_HINT}>
                 <Button
                   variant="danger"
-                  className={chat.status === 'stopping' ? 'enabled:animate-[blink_1.4s_ease-in-out_infinite]' : ''}
+                  className={`shrink-0 ${chat.status === 'stopping' ? 'enabled:animate-[blink_1.4s_ease-in-out_infinite]' : ''}`}
                   disabled={!connected}
                   onClick={stop}
                 >
@@ -219,7 +269,7 @@ export function Composer(props: ComposerProps) {
             </>
           ) : (
             <Hint text={SEND_HINT}>
-              <span className="flex">
+              <span className="flex shrink-0">
                 <Button
                   variant="primary"
                   className="disabled:pointer-events-none"

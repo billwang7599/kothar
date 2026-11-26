@@ -99,7 +99,7 @@ describe('what the hooks send with no edits is unchanged', () => {
   it('Browser: its instructions, and with your own Chrome', () => {
     const browser = byId('browser')
     const { host } = hostFor(browser)
-    expect(browser.instructions!({ chat: chat(), tools: true } as never, context(host))).toBe(golden['browser:browser'])
+    expect(browser.instructions!({ chat: chat(), tools: true } as never, context(host))).toBe(`${golden['browser:browser']} ${golden['browser:your-chrome']}`)
     expect(browser.instructions!({ chat: chat(), tools: false } as never, context(host))).toBeUndefined()
   })
 

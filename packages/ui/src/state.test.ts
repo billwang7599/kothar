@@ -86,6 +86,54 @@ const entry = (chatId: string, e: NewEntry): CoreMessage =>
 const run = (...actions: Action[]): State => actions.reduce(reduce, initialState)
 const items = (state: State, id = 'a') => state.chats.find((c) => c.id === id)!.items
 
+describe('deleted messages', () => {
+  it('shows nothing for a removed entry, and keeps later entries at their place in the log', () => {
+    const state = run(
+      snapshot([
+        chat('a', [
+          { at, type: 'user.message', text: 'secret' },
+          { at, type: 'text.completed', text: 'noted' },
+          { at, type: 'user.message', text: 'next' },
+        ]),
+      ]),
+      {
+        type: 'chat.log',
+        chatId: 'a',
+        from: 0,
+        entries: [
+          { at, type: 'entry.removed' },
+          { at, type: 'text.completed', text: 'noted' },
+          { at, type: 'user.message', text: 'next' },
+        ],
+      },
+    )
+    expect(items(state)).toEqual([
+      { kind: 'text', text: 'noted', entry: 1 },
+      { kind: 'user', text: 'next', entry: 2 },
+    ])
+    expect(JSON.stringify(state)).not.toContain('secret')
+  })
+
+  it('keeps an undone message for the composer, a new nonce each time', () => {
+    const undone: Action = { type: 'chat.undone', chatId: 'a', text: 'oops', attachments: [] }
+    const state = run(snapshot([chat('a', [])]), undone, undone)
+    expect(state.chats.find((c) => c.id === 'a')!.restored).toEqual({ text: 'oops', attachments: [], nonce: 2 })
+  })
+
+  it('takes the latest page in place of every page loaded before', () => {
+    const page = (_from: number, texts: string[]) => texts.map((text): ChatEntry => ({ at, type: 'user.message', text }))
+    const state = run(snapshot([chat('a', page(40, ['forty', 'forty-one']), { from: 40 })]), {
+      type: 'chat.log',
+      chatId: 'a',
+      from: 41,
+      entries: page(41, ['forty-one']),
+    })
+    const shown = state.chats.find((c) => c.id === 'a')!
+    expect(shown.from).toBe(41)
+    expect(shown.items).toEqual([{ kind: 'user', text: 'forty-one', entry: 41 }])
+  })
+})
+
 describe('reduce', () => {
   it('loads a snapshot, folding saved entries into items and selecting Main', () => {
     const state = run(
@@ -180,6 +228,11 @@ describe('reduce', () => {
     ])
   })
 
+  it('keeps which extension an extension’s report is from', () => {
+    const state = run(snapshot([chat('a', [])]), entry('a', { type: 'worker.report', chatId: 'deep-research', name: 'Deep research: X', text: 'Found it', from: 'deep-research' }))
+    expect(items(state)).toEqual([{ kind: 'report', chatId: 'deep-research', name: 'Deep research: X', text: 'Found it', from: 'deep-research', entry: 0 }])
+  })
+
   it('adds a worker without switching the view to it', () => {
     const sub: Action = { type: 'chat.added', chat: chat('s', [], { name: 'Search', parentId: 'c' }) }
     const state = run(snapshot([chat(MAIN_CHAT_ID), chat('c')]), { type: 'select', chatId: 'c' }, sub)
@@ -223,6 +276,22 @@ describe('reduce', () => {
     const cleared = reduce(state, { type: 'chat.updated', chat: { ...info, thinking: 'high' } })
     expect(cleared.chats[1]?.model).toBeUndefined()
     expect(cleared.chats[1]?.thinking).toBe('high')
+  })
+
+  it('clears any field the core cleared, since JSON drops it: an unpinned space is no longer pinned', () => {
+    const { status, entries, draft, queue, ...info } = chat('c')
+    const state = run(snapshot([chat(MAIN_CHAT_ID), chat('c', [], { pinned: true, order: 3, setup: 's', workDir: '/w' })]))
+    const wire = JSON.parse(JSON.stringify({ ...info, pinned: undefined, order: 0 }))
+    const unpinned = reduce({ ...state, chats: state.chats.map((c) => (c.id === 'c' ? { ...c, draft: 'typing' } : c)) }, {
+      type: 'chat.updated',
+      chat: wire,
+    })
+    const c = unpinned.chats[1]!
+    expect(c).not.toHaveProperty('pinned')
+    expect(c).not.toHaveProperty('setup')
+    expect(c).not.toHaveProperty('workDir')
+    expect(c).toMatchObject({ order: 0, draft: 'typing', status: 'idle' })
+    expect(reduce(unpinned, { type: 'chat.updated', chat: { ...wire, pinned: true } }).chats[1]?.pinned).toBe(true)
   })
 
   it('removes a chat and selects the pinned chat if the selection went with it', () => {

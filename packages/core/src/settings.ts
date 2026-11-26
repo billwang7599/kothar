@@ -8,6 +8,7 @@ import { PERMISSION_SWITCHES, type Adapter, type CoreMessage, type EngineInfo, t
 import { AUTOMATIC, MAC_TERMINALS } from './terminal.ts'
 import { CUSTOM_EDITOR, EDITORS, installedEditors, splitCommand, SYSTEM_EDITOR } from './editors.ts'
 import { within } from './util.ts'
+import { checkSshHosts } from './ssh-hosts.ts'
 
 export type SettingsDeps = {
   garage: string
@@ -46,6 +47,7 @@ export function openAppSettings(deps: SettingsDeps) {
     ...Object.fromEntries(
       PERMISSION_SWITCHES.flatMap((name) => (settings[name] === undefined ? [] : [[name, settings[name]]])),
     ),
+    ...(settings.sshHosts?.length && { sshHosts: settings.sshHosts }),
   })
   const setEngineEnabled = (engine: string, enabled: boolean) => {
     checkEngine(engine)
@@ -94,6 +96,14 @@ export function openAppSettings(deps: SettingsDeps) {
     saveSettings()
     broadcast({ type: 'workFolder.updated', workFolder: workFolder() })
   }
+  // The allowed SSH hosts every chat takes unless it or its space has its own list.
+  const setSshHostsDefault = (hosts: unknown) => {
+    const checked = checkSshHosts(hosts)
+    if (checked.length) settings.sshHosts = checked
+    else delete settings.sshHosts
+    saveSettings()
+    broadcast({ type: 'workFolder.updated', workFolder: workFolder() })
+  }
   const setTerminal = (rawTerminal: unknown) => {
     const terminal = String(rawTerminal ?? '')
     if (terminal !== AUTOMATIC && !MAC_TERMINALS.some((t) => t.id === terminal)) {
@@ -123,7 +133,7 @@ export function openAppSettings(deps: SettingsDeps) {
     broadcast({ type: 'workFolder.updated', workFolder: workFolder() })
   }
 
-  return { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setTerminal, setEditor }
+  return { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setSshHostsDefault, setTerminal, setEditor }
 }
 
 export const checkSwitch = (name: unknown) => {

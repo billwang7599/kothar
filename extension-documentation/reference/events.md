@@ -50,6 +50,7 @@ See [Depending on other extensions](dependencies.md#ondependencychanged).
 |---|---|
 | `onChatCreated(chat, context)` | A chat is made: a space, a worker or an extension's chat. |
 | `onChatArchived(chat, archived, context)` | A chat is archived (`archived` is `true`) or brought back (`false`). |
+| `onMessagesRemoved(removed, context)` | The user deleted messages from a chat, or cut it back to edit or undo a message. `removed` is `{ chat, entries, firstMessage, since }`: the log entries that are now `entry.removed`, the first memory message id that's gone or renumbered (memory numbers only what's left), and when the oldest was logged. Drop whatever you kept that quotes them, such as summaries from `firstMessage` on or prompts sent from `since` on: users delete secrets they pasted by mistake. |
 | `onChatRemoved(chat, context)` | A chat is deleted. By now it's gone from Kothar, with its log and folder. |
 | `onSpaceRemoved(space, context)` | A space is deleted, after `onChatRemoved` for it and each of its workers. `space` is its `SpaceDetail` as it was, with its work folder and checkouts. Kothar removes the work folder and the checkouts itself, since it made them; use this to forget what your extension kept about them. |
 | `onStatusChanged(chat, status, context)` | A chat's status changes: `idle`, `running`, `waiting` (on the user, such as a permission request) or `stopping`. |
@@ -260,8 +261,8 @@ nothing unless an extension that's on has this hook.
 |---|---|---|
 | `model` | A model call outside the chat's turn: `model`, the `sections` sent (instructions and prompt), the `result` or `error` | `host.complete` (under `chatId` if the call gave one) |
 | `permission` | A permission request answered: `decision` (`allowed` or `denied`) and the `rule` that answered it: a switch, a folder mode, the sandbox, a read-only turn, an extension (`Extension: <name>`) or `You` | Kothar |
-| `turn` | How an extension changed a turn: read only (with the reason), another model list, a composer toggle that was on, a message rewritten by `transformMessage` (before and after) | Kothar |
-| `worker` | A child chat an extension started (quiet or not), or a message it sent a chat (`host.send`; a worker's is listed under its parent too) | `host.createChat`, `host.send` |
+| `turn` | How an extension changed a turn: read only (with the reason), another model list, a composer mode that was on, a message rewritten by `transformMessage` (before and after) | Kothar |
+| `worker` | A child chat an extension started (quiet or not), a message it sent a chat (`host.send`; a worker's is listed under its parent too), or a report it handed a chat (`host.report`) | `host.createChat`, `host.send`, `host.report` |
 | `tool` | An extension called a tool (`host.callTool`): the input and the result or error | `host.callTool` |
 | `retry` | A turn carried on (`host.continue`, with what was sent) or run again (`host.retry`) | `host.continue`, `host.retry` |
 | `account` | An account switch, not tied to a chat | `host.useAccount` |

@@ -14,7 +14,7 @@ names the missing entry.
 | Calls | List in `uses` |
 |---|---|
 | `chats`, `chat`, `read`, `space`, `messages`, `reaches`, `reachable` | `readChats` |
-| `send`, `createChat`, `retry`, `continue`, `interrupt` | `sendMessages` |
+| `send`, `report`, `createChat`, `retry`, `continue`, `interrupt` | `sendMessages` |
 | `accounts`, `useAccount` | `accounts` |
 | `run`, `spawn`, `openTerminal`, `reveal` | `run` |
 | `complete` | `models` |
@@ -90,6 +90,7 @@ export { lastQuestion, workFolder }
 | Call | What it does |
 |---|---|
 | `send(chatId, text)` | Sends a message as if you typed it. If a turn is running, it waits in the queue behind it. |
+| `report(chatId, { name, text, error? })` | Hands the chat's agent the result of background work it started, as a worker's final reply reaches its lead: shown in the transcript as a folded report under `name`, queued behind a running turn (or sent at once when the chat is idle), and waking the agent to tell the user. `text` is what the agent reads; `error` says why the work failed or ended early. Deep Research uses it for runs the agent didn't wait for. Throws when the chat is gone or archived. |
 | `createChat({ name?, folders?, files?, engine?, parentId?, role?, quiet?, task? })` | Makes a new chat and returns `{ id }`. Without `parentId` it's a space and needs a `name`; `folders` and `files` are absolute paths that go into its context. With `parentId` it's a worker: see [Start a worker](#start-a-worker). |
 | `retry(chatId)` | Sends the chat's last message again, ahead of anything queued. |
 | `continue(chatId, text)` | Carries on the chat's last turn with a prompt from Kothar, as a turn of its own. The agent sees the turn so far in its memory. The prompt isn't shown or logged as a message, and queued messages run after it. The chat must be idle. |
@@ -310,7 +311,7 @@ listed as not tied to a chat.
 ## Activity
 
 `activity({ kind, title, chatId?, detail?, sections?, result?, error? })` lists something your extension did on its own
-in the chat's **Activity** (the Inspector), labelled with your extension's name: it launched a browser, handed one to the
+in the chat's **Activity** (the Inspector), labelled with your extension's name: it opened a tab, handed one to the
 user, checked a source. `kind` is one of the [`ActivityKind`s](events.md#onactivity), usually `browser` or `other`.
 Kothar already lists your model calls, the messages you send (`send`, `continue`, `retry`), the chats you start, account
 switches and `callTool` calls, so don't repeat those. Any extension may call it.
@@ -318,11 +319,11 @@ switches and `callTool` calls, so don't repeat those. Any extension may call it.
 ```ts
 import type { ExtensionHost } from '@kothar/extension-api'
 
-function launched(host: ExtensionHost, chatId: string) {
-  host.activity({ kind: 'browser', chatId, title: 'Launched the browser', detail: 'On Google Chrome' })
+function handedOver(host: ExtensionHost, chatId: string) {
+  host.activity({ kind: 'browser', chatId, title: 'Asked you to take over in Chrome', detail: 'Why: Sign in to GitHub' })
 }
 
-export { launched }
+export { handedOver }
 ```
 
 ## Settings per space
@@ -502,18 +503,18 @@ const { allow, message } = await host.requestPermission(chatId, {
 if (!allow) return { content: [{ type: 'text', text: message ?? 'The user said no' }], isError: true }
 ```
 
-## Composer toggles
+## Composer modes
 
 | Call | What it does |
 |---|---|
 | `prompt(id)` | One of this extension's [prompts](settings.md#prompts) as it's sent now: the user's edit from Settings, else its default. Throws for a prompt the extension doesn't declare. Needs nothing in `uses`. |
-| `toggled(chatId, id)` | Whether one of this extension's [composer toggles](panels.md#composer-toggles) is on in the chat (its `default` if the chat never set it). Throws for a toggle the extension doesn't have. |
-| `setToggle(chatId, id, on)` | Turns it on or off in the chat, as the user flipping it does, without calling `onChange`. The chip redraws. |
+| `toggled(chatId, id)` | Whether one of this extension's [composer modes](panels.md#composer-modes) is on in the chat: picked for the next message (its `default` if the chat never set it), or sent with the turn that's running. Throws for a mode the extension doesn't have. |
+| `setToggle(chatId, id, on)` | Picks or clears it in the chat, as the user does, without calling `onChange`. Picking it turns any other mode off; clearing it also ends it for the running turn. The picker redraws. |
 
 ## Processes rows
 
 The Processes tab lists the commands agents start. An extension can add rows of its own for something it runs in a
-space, such as the Browser extension's browser, with `processes(spaceId, context)` on the extension (see [The extension
+space, such as a server it runs, with `processes(spaceId, context)` on the extension (see [The extension
 object](extension.md#optional-fields)):
 
 ```ts

@@ -189,6 +189,28 @@ test('Settings → Work folder sets the default of each permission every chat fo
   }
 })
 
+test('Settings → Work folder folds the other permission defaults away while Allow all is on', () => {
+  const shown = () => PERMISSION_SWITCHES.filter((name) => dialog().querySelector(`[aria-label="${PERMISSIONS[name].label}"]`))
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: true })
+  expect(shown()).toEqual(['allowAll'])
+  expect(dialog().textContent).toContain('not used while Allow all is on')
+  expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')).toBeNull()
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: false })
+  expect(shown()).toEqual(PERMISSION_SWITCHES)
+  expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')).not.toBeNull()
+})
+
+test('Settings → Work folder adds and removes the allowed SSH hosts every chat follows', () => {
+  const sent = renderSettings({ ...workFolder, path: '/garage/work' })
+  expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')!.textContent).toContain('None.')
+  type(dialog().querySelector('input[aria-label="SSH host"]') as HTMLInputElement, 'build.example.com')
+  act(() => button('Add')!.click())
+  expect(sent).toEqual([{ type: 'permission.setSshHosts', hosts: [{ host: 'build.example.com' }] }])
+  renderSettings({ ...workFolder, path: '/garage/work', sshHosts: [{ host: 'build.example.com' }] }, sent)
+  act(() => (dialog().querySelector('button[aria-label="Remove build.example.com"]') as HTMLButtonElement).click())
+  expect(sent.at(-1)).toEqual({ type: 'permission.setSshHosts', hosts: [] })
+})
+
 test('Settings → Work folder picks the terminal Open in Terminal uses, where there is a choice', () => {
   const terminals = [
     { id: 'terminal', name: 'Terminal' },

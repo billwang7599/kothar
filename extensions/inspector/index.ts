@@ -81,7 +81,17 @@ export function sentStore(storage: ExtensionStorage) {
     turns.push({ ...rest, sections: sections.map((section) => keep(section)) })
     write(turns, limit)
   }
-  return { read, text, add }
+  // Forgets every turn sent from `since` on, and messages steered in from then: their prompts carried messages the user
+  // has deleted since, as the memory every later turn starts with quotes them.
+  const forgetSince = (since: string) => {
+    const turns = read()
+    const kept = turns
+      .filter((turn) => turn.at < since)
+      .map((turn) => ({ ...turn, sections: turn.sections.filter((section) => !section.at || section.at < since) }))
+    const changed = kept.length !== turns.length || kept.some((turn, i) => turn.sections.length !== turns[i]!.sections.length)
+    if (changed) write(kept, Math.max(1, kept.length))
+  }
+  return { read, text, add, forgetSince }
 }
 
 // One of the user's messages in a chat's log: where it is (its entry), when it was sent and what it said.
@@ -384,6 +394,10 @@ export function createInspectorExtension(): Extension {
         },
       },
     ],
+    onMessagesRemoved({ chat, since }, { host }) {
+      storeOf(host, chat.id).forgetSince(since)
+      host.refresh(chat.id)
+    },
     onChatRemoved(chat) {
       filters.delete(chat.id)
       watching.delete(chat.id)

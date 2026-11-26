@@ -12,7 +12,7 @@ import { panelKey, type State } from './state.ts'
  * An extension's dock panel (ExtensionPanel placement 'dock'): a column beside the chat, between the transcript and the
  * right sidebar, for something to look at while the chat goes on, such as an artifact. Resized by its left edge,
  * widened to fill the chat pane, closed with ×. It never takes focus when it opens, so typing in the composer carries
- * on. In a pane too narrow for both, it fills the pane.
+ * on. In a pane too narrow for both, it fills the pane under the chat's header, on a solid surface.
  */
 
 // The transcript keeps at least this much beside a dock; under it the dock fills the pane.
@@ -99,7 +99,9 @@ export function ExtensionDock({ chatId, panel, panelViews, connected, send, hidd
         hidden
           ? 'invisible pointer-events-none absolute inset-y-0 right-0 flex min-w-0 flex-col overflow-hidden bg-panel'
           : fills
-            ? 'absolute inset-y-0 right-0 z-10 flex min-w-0 flex-col bg-panel'
+            ? // Over the transcript, below the chat's header (h-44), so the header's title and toggles stay in reach and
+              // the two never draw in one row. surface-over keeps it solid on a see-through window (styles.css).
+              'surface-over absolute top-44 right-0 bottom-0 z-10 flex min-w-0 flex-col bg-panel'
             : 'relative flex shrink-0 flex-col overflow-hidden border-l bg-panel'
       }
       style={

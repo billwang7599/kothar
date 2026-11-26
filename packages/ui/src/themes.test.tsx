@@ -142,7 +142,7 @@ describe('theme table', () => {
   it('tints every surface of the see-through window, and paints floating layers solid', () => {
     expect(css).toMatch(/:root \{[^}]*\bbackground: var\(--bg\)/)
     expect(css).toMatch(
-      /:root\[data-glass='vibrancy'\] :is\(\.shadow-floating, \.shadow-overlay\) \{[^}]*background-color: var\(--glass-base\)/,
+      /:root\[data-glass='vibrancy'\] :is\(\.shadow-floating, \.shadow-overlay, \.surface-over\) \{[^}]*background-color: var\(--glass-base\)/,
     )
     for (const scheme of SCHEMES) {
       const alpha = parseInt(THEMES.glass.vibrancy[scheme].bg.slice(7), 16)
@@ -150,6 +150,22 @@ describe('theme table', () => {
       expect(alpha, scheme).toBeLessThan(255)
       expect(THEMES.glass.backdrop[scheme].at(-1), scheme).toMatch(/^#[0-9a-f]{6}$/i)
     }
+  })
+
+  it('paints every layer over other content solid on the see-through window', () => {
+    // A positioned bg-panel or bg-bg (both see-through in Glass) needs a class the solid rule above covers, or the
+    // content under it shows through (an artifact dock over the transcript did). Invisible layers and see-through
+    // tints on purpose (bg-bg/85) are fine.
+    const src = new URL('./', import.meta.url)
+    const files = readdirSync(src, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.tsx') && !f.includes('.test.'))
+    const bare: string[] = []
+    for (const file of files) {
+      for (const [cls] of readFileSync(new URL(file, src), 'utf8').matchAll(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g)) {
+        if (!/\b(absolute|fixed)\b/.test(cls) || !/\bbg-(panel|bg)\b(?!\/)/.test(cls) || /\binvisible\b/.test(cls)) continue
+        if (!/\b(shadow-floating|shadow-overlay|surface-over)\b/.test(cls)) bare.push(`${file}: ${cls}`)
+      }
+    }
+    expect(bare).toEqual([])
   })
 
   it('blurs and dims the app under a lone dialog on the see-through window, and tints the dialog', () => {

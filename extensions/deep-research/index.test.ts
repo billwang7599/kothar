@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChatSummary, Extension, ExtensionHost, ExtensionValues } from '@kothar/extension-api'
@@ -120,11 +120,12 @@ async function core(settings: Record<string, string | number | boolean> = {}, ot
     return listed?.type === 'chat.extensions' ? listed.toggles : undefined
   }
   const flip = (chatId: string, on: boolean) => handle({ type: 'extension.toggle', chatId, extension: 'deep-research', toggle: 'research', on })
-  // The deep_research tool, as the Kothar MCP server runs it for the chat's agent.
-  const callTool = (chatId: string, question: string) => {
+  // The deep_research tool, as the Kothar MCP server runs it for the chat's agent. Waiting for the report unless told
+  // otherwise (more: {} runs it as an agent does by default, in the background).
+  const callTool = (chatId: string, question: string, more: Record<string, unknown> = { wait: true }) => {
     const tool = extension.tools!.find((t) => t.name === 'deep_research')!
     const caller: ChatSummary = { id: chatId, name: chat(chatId).name, engine: 'fake' }
-    return tool.run({ question }, { caller, values: { ...values, ...settings }, host: host! }) as Promise<Outcome>
+    return tool.run({ question, ...more }, { caller, values: { ...values, ...settings }, host: host! }) as Promise<Outcome>
   }
   return { garage, messages, handle, chats, chat, create, send, toggles, flip, callTool, prompts, hold, extension, host: () => host! }
 }
@@ -142,7 +143,7 @@ describe('the Deep research toggle', () => {
     expect(t.chat(b).toggles).toBeUndefined()
   })
 
-  it('turns each message sent while on into a deep_research request, and leaves it alone when off', async () => {
+  it('turns the message sent with it into a deep_research request, once, and leaves others alone', async () => {
     const t = await core()
     const on = t.create('On')
     const off = t.create('Off')
@@ -152,12 +153,10 @@ describe('the Deep research toggle', () => {
     const researched = t.prompts.filter((p) => p.includes('Call the deep_research tool'))
     expect(researched).toHaveLength(1)
     expect(researched[0]).toContain('Which Greek letter comes first?')
-    // It stays on for the next message, until turned off.
-    await t.send(on, 'And which comes last?')
-    expect(t.prompts.filter((p) => p.includes('Call the deep_research tool'))).toHaveLength(2)
-    await t.flip(on, false)
+    // One-shot: the message took it, so the next one is left alone and the composer is back to no mode.
+    expect(t.toggles(on)).toEqual([expect.objectContaining({ id: 'research', on: false })])
     await t.send(on, 'Thanks')
-    expect(t.prompts.filter((p) => p.includes('Call the deep_research tool'))).toHaveLength(2)
+    expect(t.prompts.filter((p) => p.includes('Call the deep_research tool'))).toHaveLength(1)
     // The log keeps what the user typed.
     expect(t.chat(on).entries.filter((e) => e.type === 'user.message').map((e) => (e as { text: string }).text)).toContain('Which Greek letter comes first?')
   })
@@ -308,7 +307,8 @@ describe('the deep_research tool', () => {
     const worker = t.host().createChat({ name: 'Researcher', parentId: space }).id
     t.host().send(worker, 'Look into Greek letters')
     await until(() => t.chat(worker).status === 'running')
-    const outcome = await t.callTool(worker, 'Greek letters?')
+    // A worker waits for its report without being told to: it goes once its turn ends.
+    const outcome = await t.callTool(worker, 'Greek letters?', {})
     expect(outcome).toMatchObject({ status: 'done', sources: 1 })
     // Its searches ran below it, not below the space, so they never waited for the worker's own slot.
     expect(t.messages.some((m) => m.type === 'chat.added' && m.chat.parentId === worker)).toBe(true)
@@ -386,6 +386,108 @@ function readRunId(garage: string, space: string): string {
   const dir = join(garage, 'extensions', 'deep-research', 'runs', space)
   return readdirSync(dir).find((name) => name.endsWith('.json'))!.slice(0, -'.json'.length)
 }
+
+describe('research in the background', () => {
+  type Started = { status: string; run: string; question: string; note: string }
+  const fromResearch = (e: { type: string }) => e.type === 'worker.report' && (e as { from?: string }).from === 'deep-research'
+
+  it('returns at once with the run’s id, and the chat goes on while it runs', async () => {
+    const t = await core({ askFirst: false, depth: 'quick' })
+    const space = t.create()
+    t.hold.workers = true
+    const started = (await t.callTool(space, 'Greek letters?', {})) as unknown as Started
+    expect(started).toMatchObject({ status: 'started', question: 'Greek letters?', note: expect.stringContaining('the report will arrive in this chat') })
+    expect(started.run).toBe(readRunIdOrNone(t.garage, space))
+    // Still researching, and the chat takes a message meanwhile.
+    await until(() => t.hold.releaseWorkers.length === 2)
+    await t.send(space, 'Something else while it runs')
+    expect(t.chat(space).entries.some(fromResearch)).toBe(false)
+    for (const release of t.hold.releaseWorkers.splice(0)) release()
+    await until(() => t.chat(space).entries.some(fromResearch))
+  })
+
+  it('hands its report to the chat that asked when it’s done, which wakes its agent', async () => {
+    const t = await core({ askFirst: false, depth: 'quick' })
+    const space = t.create()
+    const started = (await t.callTool(space, 'Greek letters?', {})) as unknown as Started
+    await until(() => t.chat(space).entries.some(fromResearch))
+    const report = t.chat(space).entries.find(fromResearch) as { name: string; text: string; error?: string; chatId: string }
+    expect(report).toMatchObject({ name: 'Deep research: Greek letters?', chatId: 'deep-research' })
+    expect(report.error).toBeUndefined()
+    expect(report.text).toContain(`Research ${started.run}: Greek letters?`)
+    expect(report.text).toContain('Alpha is first [1]')
+    expect(report.text).toMatch(/Report saved as the file .*research\/.*\.md/)
+    // The report started a turn: its agent reads it, to tell the user.
+    await until(() => t.chat(space).status === 'idle' && t.chat(space).entries.some((e) => e.type === 'turn.completed'))
+    const woke = t.prompts.find((p) => p.includes('Report from the deep-research extension, "Deep research: Greek letters?"'))
+    expect(woke).toContain('Alpha is first [1]')
+    expect(t.chat(space).queue).toEqual([])
+  })
+
+  it('queues its report behind a running turn, as a worker’s', async () => {
+    const t = await core({ askFirst: false, depth: 'quick' })
+    const space = t.create()
+    t.hold.on = true
+    t.handle({ type: 'chat.send', chatId: space, text: 'Research Greek letters, then keep going' })
+    await until(() => t.chat(space).status === 'running')
+    await t.callTool(space, 'Greek letters?', {})
+    await until(() => t.chat(space).queue.length === 1)
+    expect(t.chat(space).queue[0]).toMatchObject({ report: { name: 'Deep research: Greek letters?', from: 'deep-research' } })
+    t.hold.on = false
+    t.hold.release?.()
+    await until(() => t.chat(space).entries.some(fromResearch) && t.chat(space).status === 'idle')
+    expect(t.chat(space).queue).toEqual([])
+  })
+
+  it('hands over a failure the same way, with why', async () => {
+    const t = await core({ askFirst: false, depth: 'quick' })
+    const space = t.create()
+    t.hold.workers = true
+    await t.callTool(space, 'Greek letters?', {})
+    await until(() => t.hold.releaseWorkers.length === 2)
+    // Its record can't be saved any more, so the run fails.
+    const runs = join(t.garage, 'extensions', 'deep-research', 'runs', space)
+    chmodSync(runs, 0o500)
+    cleanups.push(() => chmodSync(runs, 0o700))
+    for (const release of t.hold.releaseWorkers.splice(0)) release()
+    await until(() => t.chat(space).entries.some(fromResearch))
+    const report = t.chat(space).entries.find(fromResearch) as { text: string; error?: string }
+    expect(report.error).toBeTruthy()
+    expect(report.text).toContain('It failed:')
+    await until(() => t.prompts.some((p) => p.includes('Report from the deep-research extension') && p.includes('It ended early:')))
+  })
+
+  it('shows the plan in its card, not the bar, and Cancel tells no one', async () => {
+    const t = await core({ depth: 'quick' })
+    const space = t.create()
+    const started = (await t.callTool(space, 'Greek letters?', {})) as unknown as Started
+    expect(started.note).toContain('Its plan waits for the user’s Start')
+    await until(() => t.chat(space).entries.some((e) => e.type === 'extension.note'))
+    const phase = () => JSON.parse(readFileSync(join(t.garage, 'extensions', 'deep-research', 'runs', space, `${started.run}.json`), 'utf8')).phase
+    await until(() => phase() === 'awaiting')
+    expect(t.chat(space).waits ?? []).toEqual([])
+    await t.handle({ type: 'extension.noteView.action', chatId: space, extension: 'deep-research', noteView: 'run', key: started.run, action: { name: 'cancel' } })
+    await until(() => phase() === 'cancelled')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(t.chat(space).entries.some(fromResearch)).toBe(false)
+    expect(t.chat(space).status).toBe('idle')
+  })
+
+  it('still blocks with wait: true, returning the report once it’s written and handing nothing over', async () => {
+    const t = await core({ askFirst: false, depth: 'quick' })
+    const space = t.create()
+    t.hold.workers = true
+    let settled = false
+    const done = t.callTool(space, 'Greek letters?', { wait: true }).then((o) => ((settled = true), o))
+    await until(() => t.hold.releaseWorkers.length === 2)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(settled).toBe(false)
+    for (const release of t.hold.releaseWorkers.splice(0)) release()
+    expect(await done).toMatchObject({ status: 'done', sources: 1, summary: 'Alpha is first [1]' })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(t.chat(space).entries.some(fromResearch)).toBe(false)
+  })
+})
 
 describe('a deleted space', () => {
   it('takes its research with it', async () => {

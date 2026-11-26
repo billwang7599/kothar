@@ -2,10 +2,11 @@
 import { useState, type FormEvent } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog } from 'radix-ui'
-import { PERMISSION_SWITCHES, switchedOn, type ClientMessage, type WorkFolder } from '@kothar/core/shared'
-import { PERMISSIONS } from '../context-panel.tsx'
+import { sshHostsOf, switchedOn, type ClientMessage, type WorkFolder } from '@kothar/core/shared'
+import { FOLDED_SWITCHES, PERMISSIONS, switchesShown } from '../context-panel.tsx'
 import { Button, CHAT_NOUN, ErrorText, GROUP, Hint, MOTION, Select, Switch, useReturnFocus } from '../controls.tsx'
 import { SettingRow } from './rows.tsx'
+import { SSH_HOSTS_ABOUT, SshHostsEditor } from '../ssh-hosts.tsx'
 import type { PageProps } from './types.ts'
 
 const WORK_FOLDER_TITLE = 'Choose a work folder'
@@ -52,7 +53,7 @@ export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }
         </SettingRow>
       )}
       <EditorRow workFolder={workFolder} connected={connected} send={send} />
-      {PERMISSION_SWITCHES.map((name) => {
+      {switchesShown(switchedOn('allowAll', workFolder)).map((name) => {
         const { label, about, amberWhileOn } = PERMISSIONS[name]
         const on = switchedOn(name, workFolder)
         return (
@@ -70,6 +71,18 @@ export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }
           </SettingRow>
         )
       })}
+      {switchedOn('allowAll', workFolder) ? (
+        <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>
+      ) : (
+        <div className="border-t py-12">
+          <SshHostsEditor
+            hosts={sshHostsOf(workFolder)}
+            about={SSH_HOSTS_ABOUT}
+            disabled={!connected}
+            onChange={(hosts) => send({ type: 'permission.setSshHosts', hosts })}
+          />
+        </div>
+      )}
     </div>
   )
 }

@@ -1,18 +1,12 @@
 // Packs Kothar into Kothar.app and a DMG (npm run package). The app folder it packs is laid out by scripts/stage.mjs.
 //
-// Signing switches on by itself. With a Developer ID certificate (CSC_LINK + CSC_KEY_PASSWORD, or CSC_NAME naming one
-// in the keychain), the app is signed with the hardened runtime, and notarized when Apple credentials are set too
-// (APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER, or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID, or
-// APPLE_KEYCHAIN + APPLE_KEYCHAIN_PROFILE). With none of them, it gets an ad-hoc signature, which Apple Silicon needs to
-// run it at all.
-const env = process.env
-const signed = Boolean(env.CSC_LINK || env.CSC_NAME)
-const notarizable = Boolean(
-  (env.APPLE_API_KEY && env.APPLE_API_KEY_ID && env.APPLE_API_ISSUER) ||
-    (env.APPLE_ID && env.APPLE_APP_SPECIFIC_PASSWORD && env.APPLE_TEAM_ID) ||
-    (env.APPLE_KEYCHAIN && env.APPLE_KEYCHAIN_PROFILE),
-)
-if (notarizable && !signed) console.warn('Apple credentials are set but no certificate (CSC_LINK or CSC_NAME): not notarizing')
+// Signing and notarization switch on by themselves once you have a Developer ID certificate and a notarytool profile;
+// scripts/signing.ts decides how (and says so in one line at the start of the build), and README.md has the one-time
+// setup. With no certificate the app gets an ad-hoc signature, which Apple Silicon needs to run it at all.
+const signing = require('./scripts/signing.ts')
+
+const plan = signing.signingPlan(process.env)
+console.log(plan.message)
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -34,14 +28,22 @@ module.exports = {
     icon: 'assets/icon.icns',
     minimumSystemVersion: '13.0',
     darkModeSupport: true,
-    identity: signed ? undefined : '-',
-    hardenedRuntime: signed,
+    // undefined: the certificate from CSC_LINK. '-': ad-hoc.
+    identity: plan.identity,
+    hardenedRuntime: plan.signed,
+    // The main app and every Electron helper (renderer, GPU, plugin) get the same short list.
     entitlements: 'assets/entitlements.mac.plist',
     entitlementsInherit: 'assets/entitlements.mac.plist',
-    notarize: signed && notarizable,
+    // scripts/signing.ts notarizes with notarytool itself (hooks below), so it can use a keychain profile, check
+    // Apple's verdict and notarize the DMG as well as the app.
+    notarize: false,
   },
   dmg: {
     title: '${productName} ${version}',
     artifactName: '${productName}-${version}-${arch}.${ext}',
+    // Signed with the app's identity, then notarized and stapled, so the download itself opens without a warning.
+    sign: plan.signed,
   },
+  afterSign: signing.afterSign(plan),
+  afterAllArtifactBuild: signing.afterAllArtifactBuild(plan),
 }

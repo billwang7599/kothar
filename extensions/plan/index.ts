@@ -1,8 +1,9 @@
-// Plan: plan first, then build, the same on every engine. A "Plan first" chip in the composer makes the chat's turns read
-// only (TurnOptions, enforced by Kothar's sandbox and permission answers) and runs them on the Planning model list. The
-// agent hands in a structured plan with submit_plan; the amber bar asks the user to approve, edit or cancel it.
-// Approving turns the chip off and carries the turn on with the chat's usual permissions and the plan in the agent's
-// instructions, and the agent ticks steps off with update_plan_step as the Plan tab follows along.
+// Plan: plan first, then build, the same on every engine. The "Plan first" mode in the composer makes the turn it's sent
+// with read only, and the turns after while the plan it hands in waits for the user (TurnOptions, enforced by Kothar's
+// sandbox and permission answers), and runs them on the Planning model list. The agent hands in a structured plan with
+// submit_plan; the amber bar asks the user to approve, edit or cancel it. Approving carries the turn on with the chat's
+// usual permissions and the plan in the agent's instructions, and the agent ticks steps off with update_plan_step as
+// the Plan tab follows along.
 // Only the public extension API. Each chat's plan is in its chat storage, so it goes when the chat (or its space) does.
 import type {
   ChatDetail,
@@ -196,12 +197,15 @@ function store(host: ExtensionHost, chatId: string) {
   }
 }
 
+// Planning: the mode was sent with the running turn's message, or a plan it handed in still waits for the user (so a
+// message written back about it plans again, as the mode is one-shot and went off once that first message took it).
 const planOn = (host: ExtensionHost, chatId: string) => {
   try {
-    return host.toggled(chatId, TOGGLE)
+    if (host.toggled(chatId, TOGGLE)) return true
   } catch {
     return false
   }
+  return store(host, chatId).read()?.status === 'proposed'
 }
 
 // Chats with a space to plan changes in, that the user types in: not one that keeps no context (Home), not workers.
@@ -221,9 +225,9 @@ export function createPlanExtension(): Extension {
     host.wait(chatId, {
       text: waitText(plan),
       buttons: [
-        { id: 'approve', label: 'Approve', primary: true, closes: true, hint: 'Turn Plan first off and start the work with this plan' },
+        { id: 'approve', label: 'Approve', primary: true, closes: true, hint: 'Start the work with this plan' },
         { id: 'edit', label: 'Edit', closes: true, hint: 'Change the plan in the Plan tab, then approve it' },
-        { id: 'cancel', label: 'Cancel', closes: true, hint: 'Drop this plan; Plan first stays on' },
+        { id: 'cancel', label: 'Cancel', closes: true, hint: 'Drop this plan' },
       ],
     })
 
@@ -261,7 +265,7 @@ export function createPlanExtension(): Extension {
         type: 'empty',
         text: chat.worker
           ? 'Your lead has no plan.'
-          : 'No plan yet. Turn on Plan first beside the message box, then ask for a change: the agent reads the code and proposes a plan for you to approve.',
+          : 'No plan yet. Pick Plan first in the message box’s mode menu, then ask for a change: the agent reads the code and proposes a plan for you to approve.',
       }
     }
     if (editing.has(owner) && !chat.worker) {
@@ -347,9 +351,9 @@ export function createPlanExtension(): Extension {
             {
               type: 'row',
               children: [
-                { type: 'button', label: 'Approve', variant: 'primary', action: { name: 'approve' }, hint: 'Turn Plan first off and start the work with this plan' },
+                { type: 'button', label: 'Approve', variant: 'primary', action: { name: 'approve' }, hint: 'Start the work with this plan' },
                 { type: 'button', label: 'Edit', action: { name: 'edit' }, hint: 'Change the plan, then approve it' },
-                { type: 'button', label: 'Cancel', variant: 'ghost', action: { name: 'cancel' }, hint: 'Drop this plan; Plan first stays on' },
+                { type: 'button', label: 'Cancel', variant: 'ghost', action: { name: 'cancel' }, hint: 'Drop this plan' },
               ],
             },
           ]
@@ -364,7 +368,7 @@ export function createPlanExtension(): Extension {
     id: 'plan',
     name: 'Plan',
     description:
-      'Plan first, then build, on every engine. Turn on Plan first beside the message box: the agent can only read ' +
+      'Plan first, then build, on every engine. Pick Plan first in the message box’s mode menu: the agent can only read ' +
       'while it works out a plan, then you approve, edit or cancel it, and the Plan tab ticks off its steps as the ' +
       'work goes on.',
     enabledByDefault: true,
@@ -375,8 +379,8 @@ export function createPlanExtension(): Extension {
     settings: [
       {
         key: 'showToggle',
-        label: 'Show Plan first toggle',
-        description: 'The Plan first chip beside the message box. Agents can still read and update a plan without it.',
+        label: 'Show Plan first mode',
+        description: 'Plan first in the message box’s mode menu. Agents can still read and update a plan without it.',
         type: 'boolean',
         default: true,
       },
@@ -393,8 +397,8 @@ export function createPlanExtension(): Extension {
         id: TOGGLE,
         label: 'Plan first',
         icon: 'book',
-        hint: 'Plan first: the agent only reads and proposes a plan for you to approve',
-        activeHint: 'On: read only until you approve a plan',
+        hint: 'The agent only reads and proposes a plan for you to approve',
+        activeHint: 'Your next message: read only until you approve a plan',
         shown: (chat, { values }) => values.showToggle !== false && isUsersChat(chat),
       },
     ],

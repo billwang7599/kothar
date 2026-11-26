@@ -17,6 +17,7 @@ import {
   PERMISSION_DEFAULTS,
   PERMISSION_SWITCHES,
   type ClientMessage,
+  type ComposerToggleInfo,
   type ContextItem,
   type EngineInfo,
   type ModelLists,
@@ -389,6 +390,62 @@ test('the header warns while a chat may edit anywhere, and where nothing is sand
   render({}, () => {}, { workFolder: { canSandbox: false } })
   expect(header()).toContain('Not sandboxed')
   expect(header()).not.toContain('Edits anywhere')
+  render({ allowAll: true })
+  expect(header()).toContain('Allow all')
+  expect(header()).not.toContain('Edits anywhere')
+  render({ allowAll: false }, () => {}, { workFolder: { allowAll: true } })
+  expect(header()).not.toContain('Allow all')
+})
+
+test('while Allow all is on, the Permissions section folds the other switches away and keeps them', () => {
+  localStorage.setItem('kothar.panelTab', 'general')
+  const shown = () =>
+    PERMISSION_SWITCHES.filter((name) => container.querySelector(`aside button[aria-label="${PERMISSIONS[name].label}"]`))
+  const section = () => container.querySelector('aside section[aria-label="Permissions"]')!.textContent
+  render({}, () => {}, { contextOpen: true })
+  expect(shown()).toEqual(PERMISSION_SWITCHES)
+  expect(PERMISSION_SWITCHES[0]).toBe('allowAll')
+  render({ allowAll: true, autoNetworkCommands: true }, () => {}, { contextOpen: true })
+  expect(shown()).toEqual(['allowAll'])
+  expect(section()).toContain(`${PERMISSION_SWITCHES.length - 1} more switches and the allowed SSH hosts, not used while Allow all is on`)
+  expect(container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]')).toBeNull()
+  render({ allowAll: false, autoNetworkCommands: true }, () => {}, { contextOpen: true })
+  expect(shown()).toEqual(PERMISSION_SWITCHES)
+  expect(section()).not.toContain('not used while Allow all is on')
+  expect(container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]')).not.toBeNull()
+})
+
+test("the Permissions section adds and removes a chat's allowed SSH hosts, over Settings' list", () => {
+  localStorage.setItem('kothar.panelTab', 'general')
+  const sent: ClientMessage[] = []
+  const group = () => container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]') as HTMLElement
+  const input = (label: string) => group().querySelector(`input[aria-label="${label}"]`) as HTMLInputElement
+  const buttonOf = (text: string) => [...group().querySelectorAll('button')].find((b) => b.textContent === text)
+  const typeInto = (target: HTMLInputElement, value: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(target, value)
+      target.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  const settings = [{ host: 'build.example.com' }]
+  render({}, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
+  expect(group().textContent).toContain('build.example.com')
+  expect(group().textContent).toContain('From Settings')
+  expect(buttonOf('Reset')).toBeUndefined()
+  typeInto(input('SSH host'), ' b36wang@linux.student.cs.uwaterloo.ca ')
+  typeInto(input('SSH key (optional)'), '~/.ssh/keys/uwstudent')
+  act(() => buttonOf('Add')!.click())
+  expect(sent.at(-1)).toEqual({
+    type: 'chat.setSshHosts',
+    chatId: 'c1',
+    hosts: [...settings, { host: 'b36wang@linux.student.cs.uwaterloo.ca', key: '~/.ssh/keys/uwstudent' }],
+  })
+  const own = [{ host: 'a.example.com' }, { host: 'b.example.com', key: '~/.ssh/b' }]
+  render({ sshHosts: own }, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
+  expect(group().textContent).not.toContain('build.example.com')
+  act(() => (group().querySelector('button[aria-label="Remove a.example.com"]') as HTMLButtonElement).click())
+  expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1', hosts: [own[1]] })
+  act(() => buttonOf('Reset')!.click())
+  expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1' })
 })
 
 const hintOf = async (element: Element) => {
@@ -652,19 +709,55 @@ test('a pending question is a card: a tab per question, option rows, number keys
   ])
 })
 
-test('Submit waits for an answer to every question, Enter shows the first one left, and Skip declines', () => {
+test('before the last question the main button is Next, then Back returns and Submit shows on the last', () => {
+  const sent: ClientMessage[] = []
+  render({ status: 'waiting', items: [USER, question()] }, (m) => sent.push(m))
+  const tab = (name: string) =>
+    [...card()!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent?.includes(name))!
+  expect(buttonNamed('Submit')).toBeUndefined()
+  expect(buttonNamed('Back')).toBeUndefined()
+  expect(buttonNamed('Next').disabled).toBe(true)
+  press('Enter')
+  expect(tab('Format').getAttribute('aria-selected')).toBe('true')
+
+  // A multi-select question never moves on by itself, so Next does.
+  act(() => tab('Sections').click())
+  act(() => choices()[1]!.click())
+  act(() => buttonNamed('Back').click())
+  expect(tab('Format').getAttribute('aria-selected')).toBe('true')
+  expect(buttonNamed('Next')).toBeDefined()
+  press('1')
+  expect(tab('Sections').getAttribute('aria-selected')).toBe('true')
+  press('ArrowLeft')
+  expect(buttonNamed('Next').disabled).toBe(false)
+  act(() => buttonNamed('Next').click())
+  expect(tab('Sections').getAttribute('aria-selected')).toBe('true')
+  expect(buttonNamed('Next')).toBeUndefined()
+  press('ArrowLeft')
+  press('Enter')
+  expect(tab('Sections').getAttribute('aria-selected')).toBe('true')
+  expect(sent.filter((m) => m.type === 'question.respond')).toEqual([])
+  act(() => buttonNamed('Submit').click())
+  expect(sent.filter((m) => m.type === 'question.respond')).toEqual([
+    { type: 'question.respond', chatId: 'c1', requestId: 'q1', answers: { [FORMAT]: ['Summary'], [SECTIONS]: ['Body'] } },
+  ])
+})
+
+test('Submit with an earlier question open shows that question, and Skip declines', () => {
   const sent: ClientMessage[] = []
   render({ status: 'waiting', items: [USER, question()] }, (m) => sent.push(m))
   const tabs = () => [...card()!.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
   const tab = (name: string) => tabs().find((t) => t.textContent?.includes(name))!
   act(() => tab('Sections').click())
   act(() => choices()[1]!.click())
-  expect(buttonNamed('Submit').disabled).toBe(true)
-  press('Enter')
+  expect(buttonNamed('Submit').disabled).toBe(false)
+  act(() => buttonNamed('Submit').click())
   expect(sent.filter((m) => m.type === 'question.respond')).toEqual([])
   expect(tab('Format').getAttribute('aria-selected')).toBe('true')
+  act(() => tab('Sections').click())
+  press('Enter')
+  expect(tab('Format').getAttribute('aria-selected')).toBe('true')
   act(() => choices()[0]!.click())
-  expect(buttonNamed('Submit').disabled).toBe(false)
   act(() => buttonNamed('Submit').click())
   press('Enter')
   expect(sent.filter((m) => m.type === 'question.respond')).toEqual([
@@ -680,6 +773,9 @@ test('Submit waits for an answer to every question, Enter shows the first one le
 test('one question shows no tabs, and keys typed elsewhere never pick an option', () => {
   render({ status: 'waiting', items: [USER, question({ questions: QUESTIONS.slice(0, 1) })] })
   expect(card()!.querySelector('[role="tab"]')).toBeNull()
+  expect(buttonNamed('Submit').disabled).toBe(false)
+  expect(buttonNamed('Next')).toBeUndefined()
+  expect(buttonNamed('Back')).toBeUndefined()
   const composer = container.querySelector('textarea')!
   composer.focus()
   press('1', composer)
@@ -1401,28 +1497,100 @@ test("extensions' message details fold under the messages they list, closed what
   act(() => showStepsByDefault(false))
 })
 
-test("extensions' composer toggles show as chips beside Attach, pressed while on, and ask the core to flip", () => {
-  const sent: ClientMessage[] = []
-  const toggles = [
-    { extension: 'deep-research', id: 'research', label: 'Deep research', icon: 'search' as const, on: true, activeHint: 'On: researches your next message' },
-    { extension: 'other', id: 'web', label: 'Web', on: false },
-  ]
-  render({}, (m) => sent.push(m), { extensionUi: { chatId: 'c1', panels: [], commands: [], toggles } })
-  const chips = [...container.querySelectorAll<HTMLButtonElement>('[data-composer-toggle]')]
-  expect(chips.map((c) => [c.textContent, c.getAttribute('aria-pressed')])).toEqual([
-    ['Deep research', 'true'],
-    ['Web', 'false'],
-  ])
-  act(() => chips[0]!.click())
-  expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'deep-research', toggle: 'research', on: false })
-  act(() => chips[1]!.click())
-  expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'other', toggle: 'web', on: true })
+describe('the mode picker', () => {
+  const research = { extension: 'deep-research', id: 'research', label: 'Deep research', icon: 'search' as const, on: false, hint: 'Research your next message in depth' }
+  const plan = { extension: 'plan', id: 'plan', label: 'Plan first', icon: 'book' as const, on: false, hint: 'The agent only reads and proposes a plan' }
+  const trigger = () => container.querySelector<HTMLButtonElement>('[data-mode-picker]')
+  const open = () =>
+    act(() => {
+      trigger()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+  const items = () => [...document.querySelectorAll<HTMLElement>('[data-mode]')]
+  const item = (key: string) => items().find((i) => i.dataset.mode === key)!
+  const show = (toggles: ComposerToggleInfo[], send: (m: ClientMessage) => void = () => {}, chatId = 'c1') =>
+    render({}, send, { extensionUi: { chatId, panels: [], commands: [], toggles } })
+
+  test('is one menu beside the thinking level, not chips beside Attach, listing every mode extensions offer', () => {
+    // A mode from any extension, stock or installed, is listed the same way.
+    const shout = { extension: 'shouty', id: 'shout', label: 'Shout', on: false }
+    show([research, plan, shout])
+    expect(container.querySelectorAll('[data-composer-toggle]')).toHaveLength(0)
+    const toolbar = container.querySelector<HTMLElement>('[data-composer-toolbar]')!
+    const [left, right] = [...toolbar.children] as HTMLElement[]
+    expect(left!.contains(trigger())).toBe(false)
+    expect(right!.contains(trigger())).toBe(true)
+    expect(trigger()!.textContent).toContain('Mode')
+    open()
+    expect(items().map((i) => i.textContent)).toEqual([
+      '✓No mode',
+      expect.stringContaining('Deep research'),
+      expect.stringContaining('Plan first'),
+      'Shout',
+    ])
+    expect(item('deep-research\nresearch').textContent).toContain('Research your next message in depth')
+  })
+
+  test('picking a mode asks the core for it; picking it again, or No mode, clears it', () => {
+    const sent: ClientMessage[] = []
+    show([research, plan], (m) => sent.push(m))
+    open()
+    act(() => item('plan\nplan').click())
+    expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'plan', toggle: 'plan', on: true })
+    // The core turns the other off and says so; the picker shows the one that's on.
+    show([research, { ...plan, on: true }], (m) => sent.push(m))
+    expect(trigger()!.textContent).toContain('Plan first')
+    expect(trigger()!.getAttribute('aria-label')).toBe('Mode: Plan first')
+    open()
+    act(() => item('plan\nplan').click())
+    expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'plan', toggle: 'plan', on: false })
+    open()
+    act(() => item('').click())
+    expect(sent.at(-1)).toEqual({ type: 'extension.toggle', chatId: 'c1', extension: 'plan', toggle: 'plan', on: false })
+  })
+
+  test('selecting one shows only that one as picked', () => {
+    show([{ ...research, on: true }, plan])
+    open()
+    const ticked = items().filter((i) => i.textContent!.startsWith('✓'))
+    expect(ticked.map((i) => i.dataset.mode)).toEqual(['deep-research\nresearch'])
+  })
+
+  test('goes back to no mode once the core says the message took it', () => {
+    show([{ ...research, on: true }, plan])
+    expect(trigger()!.textContent).toContain('Deep research')
+    show([research, plan])
+    expect(trigger()!.textContent).not.toContain('Deep research')
+    expect(trigger()!.getAttribute('aria-label')).toBe('Mode for your next message')
+  })
+
+  test('is hidden when no extension offers a mode, and for another chat', () => {
+    show([])
+    expect(trigger()).toBeNull()
+    show([research], () => {}, 'other')
+    expect(trigger()).toBeNull()
+  })
+
+  test('in a narrow composer shows only the icon, keeping its name for screen readers and the hint', () => {
+    show([{ ...research, on: true, activeHint: 'Your next message starts deep research' }])
+    const label = trigger()!.querySelector('span')!
+    expect(label.className).toContain('@max-[600px]:sr-only')
+    expect(trigger()!.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(trigger()!.hasAttribute('data-hint')).toBe(true)
+  })
 })
 
-test("another chat's composer toggles aren't shown", () => {
-  const toggles = [{ extension: 'deep-research', id: 'research', label: 'Deep research', on: true }]
-  render({}, () => {}, { extensionUi: { chatId: 'other', panels: [], commands: [], toggles } })
-  expect(container.querySelectorAll('[data-composer-toggle]')).toHaveLength(0)
+test("the composer's toolbar wraps instead of letting its two groups overlap", () => {
+  const toggles = [{ extension: 'plan', id: 'plan', label: 'Plan first', icon: 'book' as const, on: false }]
+  render({}, () => {}, { extensionUi: { chatId: 'c1', panels: [], commands: [], toggles } })
+  const toolbar = container.querySelector<HTMLElement>('[data-composer-toolbar]')!
+  expect(toolbar.className.split(' ')).toContain('flex-wrap')
+  const [left, right] = [...toolbar.children] as HTMLElement[]
+  // The chips' group may only shrink when it is alone on its line, and then wraps its chips.
+  expect(left!.className.split(' ')).toContain('flex-wrap')
+  expect(left!.className.split(' ')).not.toContain('flex-1')
+  // The pickers and Send keep a floor, below which they move to a line of their own.
+  expect(right!.className).toMatch(/\bbasis-\d+\b/)
+  expect(right!.className.split(' ')).toContain('grow')
 })
 
 describe('one right-hand column at a time', () => {
@@ -1511,4 +1679,23 @@ describe('one right-hand column at a time', () => {
       delete (HTMLElement.prototype as unknown as Record<string, unknown>).offsetHeight
     }
   })
+})
+
+test('an undone message comes back to the composer once, before what was typed, with its files', () => {
+  localStorage.clear()
+  localStorage.setItem('kothar.drafts', JSON.stringify({ c1: 'typed meanwhile' }))
+  const restored = {
+    text: 'oops, wrong chat',
+    attachments: [{ name: 'a.txt', mimeType: 'text/plain', base64: btoa('contents') }],
+    nonce: 1,
+  }
+  render({ restored })
+  const area = () => container.querySelector('textarea')!
+  expect(area().value).toBe('oops, wrong chat\n\ntyped meanwhile')
+  expect(container.querySelector('[aria-label="Attachments"]')!.textContent).toContain('a.txt')
+  // The same undo isn't taken again when the chat draws again.
+  render({ restored, draft: '' })
+  expect(area().value).toBe('oops, wrong chat\n\ntyped meanwhile')
+  expect(container.querySelectorAll('[aria-label="Attachments"] li')).toHaveLength(1)
+  localStorage.clear()
 })

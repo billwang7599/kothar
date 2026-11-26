@@ -65,6 +65,14 @@ export function readRolling(storage: Pick<ExtensionStorage, 'read'>, messages: M
   }
 }
 
+// Removes a rolling summary that no longer matches the messages (readRolling ignores it), so text it kept of deleted
+// messages leaves the disk. Returns whether it removed one.
+export function removeStaleRolling(storage: Pick<ExtensionStorage, 'read' | 'remove'>, messages: MemoryMessage[]) {
+  if (storage.read(ROLLING_FILE) === undefined || readRolling(storage, messages)) return false
+  storage.remove(ROLLING_FILE)
+  return true
+}
+
 // Where the latest messages in full begin: newest first while they fit TAIL_MAX_CHARS, the newest always.
 export function tailStart(messages: MemoryMessage[], zoomable: boolean) {
   let budget = TAIL_MAX_CHARS

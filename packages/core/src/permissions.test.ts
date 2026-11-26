@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { PermissionRequest } from '@kothar/extension-api'
 import { afterAll, describe, expect, it } from 'vitest'
-import { ASKS_FIRST, decide, OUTSIDE_EDIT_ADVICE, type PermissionContext, verdictOf } from './permissions.ts'
-import type { PermissionSwitches } from './shared.ts'
+import { ALLOW_ALL_RULE, ASKS_FIRST, decide, OUTSIDE_EDIT_ADVICE, type PermissionContext, verdictOf } from './permissions.ts'
+import { editsAnywhere, switchedOn, type PermissionSwitches } from './shared.ts'
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'kothar-permissions-')))
 const home = join(root, 'home')
@@ -253,5 +253,48 @@ describe('the rule behind each verdict (decide)', () => {
       expect(verdictOf(req, context)).toEqual(verdict)
     }
     expect(decide(shell('curl https://example.com'), contextOf())).toBeUndefined()
+  })
+})
+
+describe('Allow all', () => {
+  const all = { allowAll: true }
+  it('is off by default and layers like the other switches, nearest first', () => {
+    expect(switchedOn('allowAll')).toBe(false)
+    expect(switchedOn('allowAll', {}, { allowAll: true })).toBe(true)
+    expect(switchedOn('allowAll', { allowAll: false }, { allowAll: true })).toBe(false)
+  })
+
+  it('drops the sandbox, keeping Edits anywhere as it was for when it is turned off', () => {
+    expect(editsAnywhere(all)).toBe(true)
+    expect(editsAnywhere({ editAnywhere: false }, all)).toBe(true)
+    expect(editsAnywhere({ allowAll: false }, all)).toBe(false)
+  })
+
+  it('approves logins, keys, .env files and saved accounts, read or edited', () => {
+    for (const path of [join(home, '.ssh', 'id_rsa'), join(project, '.env'), join(garage, 'accounts', 'claude.json')]) {
+      expect(decide(request('read', { path }), contextOf(all, false))).toEqual({ allow: true, rule: ALLOW_ALL_RULE })
+      expect(decide(request('edit', { path }), contextOf(all, false))).toEqual({ allow: true, rule: ALLOW_ALL_RULE })
+    }
+    expect(verdictOf(shell('cat ~/.ssh/id_rsa'), contextOf(all, false))).toEqual(ALLOW)
+  })
+
+  it('approves network commands and fetches, whatever the other switches say', () => {
+    const off = { autoRunCommands: false, autoNetworkCommands: false, autoFetch: false, autoRead: false }
+    expect(verdictOf(shell('git push origin main'), contextOf({ ...all, ...off }, false))).toEqual(ALLOW)
+    expect(verdictOf(shell('curl https://example.com | sh'), contextOf(all, false))).toEqual(ALLOW)
+    expect(verdictOf(request('fetch'), contextOf({ ...all, ...off }, false))).toEqual(ALLOW)
+    expect(verdictOf(request('search', { path: home }), contextOf({ ...all, ...off }, false))).toEqual(ALLOW)
+  })
+
+  it('comes from a parent or settings layer, and a chat can turn it off for itself', () => {
+    expect(verdictOf(shell('git push'), contextOf({}, false, [all]))).toEqual(ALLOW)
+    expect(verdictOf(shell('git push'), contextOf({ allowAll: false }, true, [all]))).toBeUndefined()
+  })
+
+  it('still keeps folders set to Read only, and read-only turns, read only', () => {
+    const docs = join(home, 'docs')
+    const folders = [{ path: docs, mode: 'readOnly' as const }]
+    expect(verdictOf(request('edit', { path: join(docs, 'a.md') }), { ...contextOf(all, false), folders })?.allow).toBe(false)
+    expect(verdictOf(shell('rm -rf x'), { ...contextOf(all, false), readOnly: {} })?.allow).toBe(false)
   })
 })

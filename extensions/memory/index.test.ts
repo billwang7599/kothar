@@ -415,3 +415,76 @@ describe('Storage: where summaries live, and cleaning them up', () => {
     expect(after.prompt).not.toContain('summary of')
   })
 })
+
+describe('messages the user deletes', () => {
+  const SECRET = 'sk-SECRET-123'
+  // Each message a second apart, so a summary left over from the old numbering is told apart by its time.
+  const secretLog = (count: number): ChatEntry[] =>
+    Array.from({ length: count }, (_, i) => {
+      const at = new Date(Date.UTC(2026, 10, 6, 0, 0, i)).toISOString()
+      return i % 2
+        ? { at, type: 'text.completed', text: longReply(i) }
+        : { at, type: 'user.message', text: i === 10 ? `my key is ${SECRET}` : `question ${i}` }
+    })
+  // A summarizer that quotes the secret whenever it reads it, as a real one might.
+  const quoting: Adapter['complete'] = async (_machine, request) => {
+    const items = [...request.prompt.matchAll(/<item key="([^"]+)"[^>]*>([\s\S]*?)<\/item>/g)]
+    if (!items.length) return `rolled${request.prompt.includes(SECRET) ? ` ${SECRET}` : ''}`
+    const summaries = items.map(([, key, body]) => ({ key, text: `summary of ${key}${body!.includes(SECRET) ? ` ${SECRET}` : ''}` }))
+    return JSON.stringify({ summaries })
+  }
+  const read = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8') : '')
+
+  it.each(['tree', 'rolling'] as const)(
+    '%s: drops every summary that covers a deleted message, then writes them again without it',
+    async (mode) => {
+      const garage = tempGarage()
+      const dir = join(garage, 'chats', 'aaaa0001')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'log.jsonl'), secretLog(40).map((e) => JSON.stringify(e) + '\n').join(''))
+      writeFileSync(join(dir, 'chat.json'), JSON.stringify({ id: 'aaaa0001', name: 'Old', folders: [], files: [], engine: 'held', archived: false, createdAt: at }))
+      const memory = createMemoryExtension({ debounceMs: 0 })
+      const t = await start({ garage, mode, complete: quoting, memory })
+      const file = join(dir, mode === 'tree' ? 'summaries.jsonl' : ROLLING_FILE)
+      await until(() => read(file).includes(SECRET))
+      await memory.whenIdle()
+
+      t.handle({ type: 'chat.deleteMessage', chatId: 'aaaa0001', entry: 10 })
+
+      expect(read(file)).not.toContain(SECRET)
+      if (mode === 'tree') {
+        const left = read(file).split('\n').filter(Boolean).map((line) => JSON.parse(line) as { id: number; n: number })
+        expect(left.every(({ id, n }) => id + n <= 10)).toBe(true)
+      }
+      await until(() => t.completions.length > 0 && read(file).length > 0)
+      await memory.whenIdle()
+      expect(read(file)).not.toContain(SECRET)
+      if (mode === 'tree') {
+        const rebuilt = read(file).split('\n').filter(Boolean).map((line) => JSON.parse(line) as { id: number; n: number })
+        expect(rebuilt.some(({ id, n }) => id + n > 10)).toBe(true)
+      }
+      expect(t.send('aaaa0001', 'next').prompt).not.toContain(SECRET)
+    },
+  )
+
+  it('drops summaries left from before messages were deleted while it was off, as it opens a chat', async () => {
+    const garage = tempGarage()
+    const dir = join(garage, 'chats', 'aaaa0001')
+    mkdirSync(dir, { recursive: true })
+    const log = secretLog(40)
+    // Message 10 went while Memory was off: the summaries still number the old messages.
+    const old = (id: number, n: number) => ({ id, n, text: `old ${id}+${n} ${SECRET}`, at: log[id + n - 1]!.at })
+    writeFileSync(join(dir, 'summaries.jsonl'), [old(0, 8), old(8, 8), old(16, 16)].map((s) => JSON.stringify(s) + '\n').join(''))
+    log[10] = { at: log[10]!.at, type: 'entry.removed' }
+    writeFileSync(join(dir, 'log.jsonl'), log.map((e) => JSON.stringify(e) + '\n').join(''))
+    writeFileSync(join(dir, 'chat.json'), JSON.stringify({ id: 'aaaa0001', name: 'Old', folders: [], files: [], engine: 'held', archived: false, createdAt: at }))
+    const memory = createMemoryExtension({ debounceMs: 0 })
+    const t = await start({ garage, mode: 'tree', memory })
+    await memory.whenIdle()
+    const kept = read(join(dir, 'summaries.jsonl'))
+    expect(kept).toContain('old 0+8')
+    expect(kept).not.toContain('old 8+8')
+    expect(kept).not.toContain('old 16+16')
+    expect(t.send('aaaa0001', 'next').prompt).not.toContain(SECRET)
+  })
+})

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog, DropdownMenu } from 'radix-ui'
-import type { ChatStatus, ClientMessage } from '@kothar/core/shared'
+import type { ChatStatus, ClientMessage, SpaceGroup } from '@kothar/core/shared'
+import { collapsedGroups, collapseGroup, useCollapsedGroups } from './collapsed-groups.ts'
 import { Button, CHAT_NOUN, Chevron, confirm, Hint, MOTION, NAV_LABEL, useReturnFocus, useSettled } from './controls.tsx'
 import { foldChat, useFoldedChats } from './folded.ts'
-import { chatTree, familyOf, folderOf, workerRequests, type ChatView, type TreeRow } from './state.ts'
+import { chatTree, familyOf, folderOf, groupOf, workerRequests, type ChatView, type TreeRow } from './state.ts'
 import { Keys } from './shortcuts-page.tsx'
 import type { Binding } from './shortcuts.ts'
 import { showsUnread } from './unread.ts'
@@ -20,16 +21,58 @@ const DOTS: Record<ChatStatus, string> = {
 /** A folded row shows the busiest status among the workers it hides. */
 const BUSIEST: ChatStatus[] = ['waiting', 'stopping', 'running', 'idle']
 const INDENTS = ['pl-8', 'pl-22', 'pl-36', 'pl-50']
-const ROW_ACTION = 'hidden group-hover/row:block group-focus-within/row:block'
+// A row's ⋯: shown on hover, on keyboard focus and while its menu is open. Its place is always kept (never display:
+// none), so nothing in the row moves when the pointer comes in: the workers chevron beside it stays put under the click.
+const ROW_ACTION =
+  'pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100 ' +
+  'group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 ' +
+  'has-data-[state=open]:pointer-events-auto has-data-[state=open]:opacity-100'
+// The Spaces label's New group button: the same, shown on hover or focus with its place kept.
+const LABEL_ACTION =
+  'pointer-events-none opacity-0 group-hover/label:pointer-events-auto group-hover/label:opacity-100 ' +
+  'focus-visible:pointer-events-auto focus-visible:opacity-100'
 // After a keyboard move, the row is focused again for this long, while the core's updates reorder the list.
 const REFOCUS_MS = 1000
 
-type MenuItem = { label: string; run: () => void; danger?: boolean; disabledReason?: string }
+type MenuItem = { label: string; run?: () => void; danger?: boolean; disabledReason?: string; items?: MenuItem[] }
+
+const MENU_ITEM = 'flex h-26 items-center rounded-sm px-12 text-sm whitespace-nowrap outline-none data-disabled:text-faint'
+const MENU_PANEL = 'z-20 flex min-w-140 flex-col rounded-lg border bg-panel p-4 shadow-floating outline-none'
+
+function MenuItems({ items }: { items: MenuItem[] }) {
+  return items.map((item) =>
+    item.items ? (
+      <DropdownMenu.Sub key={item.label}>
+        <DropdownMenu.SubTrigger
+          disabled={!!item.disabledReason}
+          className={`${MENU_ITEM} justify-between gap-12 after:text-faint after:content-['›'] data-highlighted:bg-raised data-[state=open]:bg-raised`}
+        >
+          {item.label}
+        </DropdownMenu.SubTrigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.SubContent sideOffset={2} alignOffset={-4} className={MENU_PANEL}>
+            <MenuItems items={item.items} />
+          </DropdownMenu.SubContent>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Sub>
+    ) : (
+      <Hint key={item.label} text={item.disabledReason} side="left">
+        <DropdownMenu.Item
+          disabled={!!item.disabledReason}
+          onSelect={item.run}
+          className={`${MENU_ITEM} ${item.danger ? 'text-red data-highlighted:bg-red/10' : 'data-highlighted:bg-raised'}`}
+        >
+          {item.label}
+        </DropdownMenu.Item>
+      </Hint>
+    ),
+  )
+}
 
 function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
   return (
     <DropdownMenu.Root modal={false}>
-      <div className={`mr-2 has-data-[state=open]:block ${ROW_ACTION}`}>
+      <div className={`mr-2 shrink-0 ${ROW_ACTION}`} data-row-action>
         <DropdownMenu.Trigger asChild>
           <Button variant="ghost" size="icon" aria-label={`More for ${label}`}>
             ⋯
@@ -39,22 +82,12 @@ function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
       <DropdownMenu.Portal>
         <DropdownMenu.Content asChild align="end" sideOffset={4}>
           <m.div
-            className="z-20 flex min-w-140 flex-col rounded-lg border bg-panel p-4 shadow-floating outline-none"
+            className={MENU_PANEL}
             initial={MOTION.menu.initial}
             animate={MOTION.menu.animate}
             transition={MOTION.menu.transition}
           >
-            {items.map((item) => (
-              <Hint key={item.label} text={item.disabledReason} side="left">
-                <DropdownMenu.Item
-                  disabled={!!item.disabledReason}
-                  onSelect={item.run}
-                  className={`flex h-26 items-center rounded-sm px-12 text-sm whitespace-nowrap outline-none data-disabled:text-faint ${item.danger ? 'text-red data-highlighted:bg-red/10' : 'data-highlighted:bg-raised'}`}
-                >
-                  {item.label}
-                </DropdownMenu.Item>
-              </Hint>
-            ))}
+            <MenuItems items={items} />
           </m.div>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -86,20 +119,20 @@ type RowProps = {
   menu?: MenuItem[]
   fold?: { folded: boolean; hidden: ChatView[]; toggle: () => void }
   reorder?: Reorder
+  // Inside a sidebar group: one step further in.
+  inGroup?: boolean
 }
 
 function ChatRow(props: RowProps) {
-  const { row, animate, title, selected, status: own, unread, showEngine, select, menu, fold, reorder } = props
-  const { chat, depth } = row
+  const { row, animate, title, selected, status: own, unread, showEngine, select, menu, fold, reorder, inGroup } = props
+  const { chat } = row
+  const depth = row.depth + (inGroup ? 1 : 0)
   const status = fold?.folded ? BUSIEST.find((s) => [own, ...fold.hidden.map((c) => c.status)].includes(s))! : own
   const highlight = selected
     ? 'bg-raised text-text'
     : unread
     ? 'text-text hover:bg-raised has-data-[state=open]:bg-raised'
     : 'text-muted hover:bg-raised hover:text-text has-data-[state=open]:bg-raised has-data-[state=open]:text-text'
-  const engineHidden = menu
-    ? 'group-hover/row:hidden group-focus-within/row:hidden group-has-data-[state=open]/row:hidden'
-    : ''
   return (
     <m.div
       className={`group/row relative flex shrink-0 items-center rounded transition-colors ${highlight} ${reorder?.dragging ? 'opacity-50' : ''}`}
@@ -111,7 +144,7 @@ function ChatRow(props: RowProps) {
         title={title}
         onClick={select}
         data-chat-id={chat.id}
-        draggable={reorder && depth === 0 ? true : undefined}
+        draggable={reorder && row.depth === 0 ? true : undefined}
         onDragStart={reorder?.start}
         onDragOver={reorder?.over}
         onDrop={reorder?.land}
@@ -124,7 +157,8 @@ function ChatRow(props: RowProps) {
           {chat.name}
         </span>
         {chat.worker && <span className="rounded border px-5 text-xs text-muted">worker</span>}
-        {showEngine && <span className={`text-xs text-faint ${engineHidden}`}>{chat.engine}</span>}
+        {/* Always shown: the ⋯ has its own place, so nothing needs to make room for it on hover. */}
+        {showEngine && <span className="shrink-0 text-xs text-faint">{chat.engine}</span>}
       </button>
       {fold && (
         <Hint text={fold.folded ? 'Show workers' : 'Hide workers'}>
@@ -177,6 +211,8 @@ type SidebarProps = {
   newSpaceKeys?: Binding | null
   // Extension launchers to list at the top, under Home (Settings → Appearance can move them to the bottom).
   launchers?: Launcher[]
+  // The user's groups of spaces, top to bottom (groups.json).
+  groups?: SpaceGroup[]
 }
 
 export function ChatNav({
@@ -189,14 +225,16 @@ export function ChatNav({
   askName,
   newSpaceKeys,
   launchers = [],
+  groups = [],
 }: SidebarProps) {
   const offline = connected ? undefined : 'Disconnected from the core'
   const settled = useSettled(chats.length > 0)
-  const tree = chatTree(chats)
+  const tree = chatTree(chats, groups)
   // Extension chats (Home) sort first; they sit above the spaces, apart from them.
   const firstSpace = tree.active.findIndex((r) => r.depth === 0 && !r.chat.extension)
   const split = firstSpace < 0 ? tree.active.length : firstSpace
   const folded = useFoldedChats()
+  const collapsed = useCollapsedGroups()
   // A row is hidden while a chat above it is folded, unless it's the chat being viewed.
   const ancestors = (chat: ChatView): ChatView[] => {
     const parent = chats.find((c) => c.id === chat.parentId)
@@ -206,43 +244,82 @@ export function ChatNav({
   const mixedEngines = new Set(chats.map((c) => c.engine)).size > 1
   const rootOf = (chat: ChatView) => ancestors(chat).at(-1) ?? chat
   const spaceRows = tree.active.slice(split)
-  const groupRows = (pinned: boolean) => spaceRows.filter((r) => !!rootOf(r.chat).pinned === pinned)
-  const spacesIn = (pinned: boolean) =>
-    groupRows(pinned)
+  // Where a space sits: Pinned, a group (by id), or the ungrouped spaces ('').
+  type Place = 'pinned' | string
+  const placeOf = (space: ChatView): Place => (space.pinned ? 'pinned' : (groupOf(space, groups)?.id ?? ''))
+  const rowsIn = (place: Place) => spaceRows.filter((r) => placeOf(rootOf(r.chat)) === place)
+  const spacesIn = (place: Place) =>
+    rowsIn(place)
       .filter((r) => r.depth === 0)
       .map((r) => r.chat)
 
-  const [drag, setDrag] = useState<{ id: string; over?: { id: string; after: boolean } } | null>(null)
+  // Opening a space hidden in a collapsed group (from search, a shortcut or a link) opens its group.
+  // Only when the open chat changes, so the user can still collapse the group the open space is in.
+  const selected = chats.find((c) => c.id === selectedId)
+  const selectedPlace = selected && !selected.archived ? placeOf(rootOf(selected)) : 'pinned'
+  useEffect(() => {
+    if (selectedPlace !== 'pinned' && selectedPlace !== '' && collapsedGroups().has(selectedPlace)) {
+      collapseGroup(selectedPlace, false)
+    }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- on a new open chat only, not on every move or collapse
+  }, [selectedId])
+
+  const [drag, setDrag] = useState<{
+    id: string
+    kind: 'space' | 'group'
+    over?: { id: string; after: boolean } | { into: string }
+  } | null>(null)
+  // Naming a group inline: a new one (with the space that goes in it, from a space's menu) or a rename.
+  const [naming, setNaming] = useState<{ kind: 'new'; chatId?: string } | { kind: 'rename'; groupId: string } | null>(
+    null,
+  )
   const refocus = useRef<{ id: string; until: number } | null>(null)
   useEffect(() => {
     const pending = refocus.current
     if (!pending) return
     if (Date.now() > pending.until) refocus.current = null
-    else document.querySelector<HTMLElement>(`nav [data-chat-id="${pending.id}"]`)?.focus()
-  }, [chats])
-  const move = (chat: ChatView, pinned: boolean, index: number) =>
-    send({ type: 'chat.move', chatId: chat.id, pinned, index })
-  // Moves a space one place up or down within its group, keeping it focused when done from the keyboard.
+    else document.querySelector<HTMLElement>(`nav [data-chat-id="${pending.id}"], nav [data-group-id="${pending.id}"]`)?.focus()
+  }, [chats, groups])
+  // group: into that group, or null for none; left out, the space stays in its own. With no index, an unpinned space
+  // goes back where it was before it was pinned (the core keeps the spot).
+  const move = (chat: ChatView, pinned: boolean, index?: number, group?: string | null) =>
+    send({
+      type: 'chat.move',
+      chatId: chat.id,
+      pinned,
+      ...(index !== undefined && { index }),
+      ...(group !== undefined && { group }),
+    })
+  // Moves a space one place up or down where it sits, keeping it focused when done from the keyboard.
   const step = (chat: ChatView, by: -1 | 1, keyboard = false) => {
-    const group = spacesIn(!!chat.pinned)
-    const index = group.findIndex((c) => c.id === chat.id) + by
-    if (index < 0 || index >= group.length) return
+    const place = spacesIn(placeOf(chat))
+    const index = place.findIndex((c) => c.id === chat.id) + by
+    if (index < 0 || index >= place.length) return
     // oxlint-disable-next-line react/purity -- step runs only from key and menu handlers, never during render
     if (keyboard) refocus.current = { id: chat.id, until: Date.now() + REFOCUS_MS }
     move(chat, !!chat.pinned, index)
   }
+  const stepGroup = (group: SpaceGroup, by: -1 | 1, keyboard = false) => {
+    const index = groups.findIndex((g) => g.id === group.id) + by
+    if (index < 0 || index >= groups.length) return
+    // oxlint-disable-next-line react/purity -- stepGroup runs only from key and menu handlers, never during render
+    if (keyboard) refocus.current = { id: group.id, until: Date.now() + REFOCUS_MS }
+    send({ type: 'group.move', groupId: group.id, index })
+  }
+  const after = (e: DragEvent) => {
+    const box = e.currentTarget.getBoundingClientRect()
+    return e.clientY > box.top + box.height / 2
+  }
   const reorder = (row: TreeRow): Reorder | undefined => {
     if (!connected || row.chat.archived || row.chat.extension) return undefined
     const space = rootOf(row.chat)
-    const target = (e: DragEvent) => {
-      const box = e.currentTarget.getBoundingClientRect()
-      return { id: space.id, after: row.depth > 0 || e.clientY > box.top + box.height / 2 }
-    }
+    const isAfter = (e: DragEvent) => row.depth > 0 || after(e)
+    const over = drag?.over && 'id' in drag.over ? drag.over : undefined
     return {
       dragging: drag?.id === row.chat.id,
       drop:
-        drag && drag.id !== space.id && drag.over?.id === row.chat.id
-          ? drag.over.after
+        drag?.kind === 'space' && drag.id !== space.id && over?.id === row.chat.id
+          ? over.after
             ? 'after'
             : 'before'
           : undefined,
@@ -250,27 +327,30 @@ export function ChatNav({
         if (row.depth > 0) return e.preventDefault()
         e.dataTransfer?.setData('text/plain', row.chat.name)
         if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-        setDrag({ id: row.chat.id })
+        setDrag({ id: row.chat.id, kind: 'space' })
       },
       over: (e) => {
-        if (!drag) return
+        if (drag?.kind !== 'space') return
         e.preventDefault()
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-        const { after } = target(e)
+        const below = isAfter(e)
         // The indicator sits on the row the space lands next to: below a space's last worker when after it.
-        const family = groupRows(!!space.pinned).filter((r) => rootOf(r.chat).id === space.id && shown(r))
-        const id = after ? family.at(-1)!.chat.id : space.id
-        if (drag.over?.id !== id || drag.over.after !== after) setDrag({ ...drag, over: { id, after } })
+        const family = rowsIn(placeOf(space)).filter((r) => rootOf(r.chat).id === space.id && shown(r))
+        const id = below ? family.at(-1)!.chat.id : space.id
+        if (over?.id !== id || over.after !== below) setDrag({ ...drag, over: { id, after: below } })
       },
       land: (e) => {
-        if (!drag) return
+        if (drag?.kind !== 'space') return
         e.preventDefault()
         const dragged = chats.find((c) => c.id === drag.id)
         setDrag(null)
         if (!dragged || dragged.id === space.id) return
         const pinned = !!space.pinned
-        const group = spacesIn(pinned).filter((c) => c.id !== dragged.id)
-        move(dragged, pinned, group.findIndex((c) => c.id === space.id) + (target(e).after ? 1 : 0))
+        const place = spacesIn(placeOf(space)).filter((c) => c.id !== dragged.id)
+        const index = place.findIndex((c) => c.id === space.id) + (isAfter(e) ? 1 : 0)
+        // Dropped among unpinned spaces, it joins their group (or none); in Pinned, it keeps its own.
+        const target = groupOf(space, groups)?.id ?? null
+        move(dragged, pinned, index, pinned || target === (groupOf(dragged, groups)?.id ?? null) ? undefined : target)
       },
       end: () => setDrag(null),
       key: (e) => {
@@ -291,16 +371,37 @@ export function ChatNav({
         `Delete “${chat.name}”${below}? Messages are deleted from Kothar; your folders and files stay on disk.` + work
       if (await confirm(text)) send({ type: 'chat.delete', chatId: chat.id })
     }
-    const group = spacesIn(!!chat.pinned)
-    const index = group.findIndex((c) => c.id === chat.id)
+    const place = spacesIn(placeOf(chat))
+    const index = place.findIndex((c) => c.id === chat.id)
+    const group = groupOf(chat, groups)
+    // Pinned spaces sit in Pinned whatever their group, so they're grouped once unpinned.
+    const grouping: MenuItem[] =
+      chat.archived || chat.pinned
+        ? []
+        : [
+            {
+              label: 'Move to group',
+              disabledReason: offline,
+              items: [
+                ...groups
+                  .filter((g) => g.id !== group?.id)
+                  .map((g) => ({ label: g.name, run: () => move(chat, false, Number.MAX_SAFE_INTEGER, g.id) })),
+                { label: 'New group…', run: () => setNaming({ kind: 'new', chatId: chat.id }) },
+              ],
+            },
+            ...(group
+              ? [{ label: 'Remove from group', disabledReason: offline, run: () => move(chat, false, 0, null) }]
+              : []),
+          ]
     const placing: MenuItem[] = chat.archived
       ? []
       : [
           chat.pinned
-            ? { label: 'Unpin', disabledReason: offline, run: () => move(chat, false, 0) }
-            : { label: 'Pin', disabledReason: offline, run: () => move(chat, true, spacesIn(true).length) },
+            ? { label: 'Unpin', disabledReason: offline, run: () => move(chat, false) }
+            : { label: 'Pin', disabledReason: offline, run: () => move(chat, true, spacesIn('pinned').length) },
+          ...grouping,
           ...(index > 0 ? [{ label: 'Move up', disabledReason: offline, run: () => step(chat, -1) }] : []),
-          ...(index < group.length - 1
+          ...(index < place.length - 1
             ? [{ label: 'Move down', disabledReason: offline, run: () => step(chat, 1) }]
             : []),
         ]
@@ -319,13 +420,14 @@ export function ChatNav({
       { label: 'Delete…', danger: true, disabledReason, run: remove },
     ]
   }
-  const pinnedRows = groupRows(true)
+  const pinnedRows = rowsIn('pinned')
   const row = (row: TreeRow) => {
     const { chat } = row
     const folder = folderOf(chats, chat) ?? 'Not tied to a folder'
     const below = familyOf(chats, chat.id).filter((c) => c.id !== chat.id && c.archived === chat.archived)
     const isFolded = folded.has(chat.id)
     const asksBelow = !chat.worker && workerRequests(chats, chat.id).length > 0
+    const root = rootOf(chat)
     return (
       <ChatRow
         key={chat.id}
@@ -340,9 +442,118 @@ export function ChatNav({
         menu={chat.extension || chat.worker ? undefined : chatMenu(chat)}
         fold={below.length ? { folded: isFolded, hidden: below, toggle: () => foldChat(chat.id, !isFolded) } : undefined}
         reorder={reorder(row)}
+        inGroup={!root.archived && !root.extension && placeOf(root) !== 'pinned' && placeOf(root) !== ''}
       />
     )
   }
+
+  const nameGroup = (name: string) => {
+    if (!naming || !connected) return setNaming(null)
+    if (naming.kind === 'new') send({ type: 'group.create', name, ...(naming.chatId && { chatId: naming.chatId }) })
+    else send({ type: 'group.rename', groupId: naming.groupId, name })
+    setNaming(null)
+  }
+  const groupBlock = (group: SpaceGroup, index: number) => {
+    const rows = rowsIn(group.id)
+    const isCollapsed = collapsed.has(group.id)
+    const toggle = () => collapseGroup(group.id, !isCollapsed)
+    // What a collapsed group hides: the busiest status among its spaces and their workers, and whether any is unread.
+    const statuses = rows.map((r) =>
+      !r.chat.worker && workerRequests(chats, r.chat.id).length > 0 ? 'waiting' : r.chat.status,
+    )
+    const unread = rows.some((r) => r.depth === 0 && showsUnread(r.chat, looking && r.chat.id === selectedId))
+    const into = drag?.over && 'into' in drag.over && drag.over.into === group.id
+    const between = drag?.over && 'id' in drag.over && drag.over.id === group.id ? drag.over : undefined
+    const menu: MenuItem[] = [
+      { label: 'Rename…', disabledReason: offline, run: () => setNaming({ kind: 'rename', groupId: group.id }) },
+      ...(index > 0 ? [{ label: 'Move up', disabledReason: offline, run: () => stepGroup(group, -1) }] : []),
+      ...(index < groups.length - 1
+        ? [{ label: 'Move down', disabledReason: offline, run: () => stepGroup(group, 1) }]
+        : []),
+      // Nothing is lost: its spaces go back to the ungrouped ones.
+      {
+        label: 'Delete group',
+        danger: true,
+        disabledReason: offline,
+        run: () => send({ type: 'group.delete', groupId: group.id }),
+      },
+    ]
+    const renaming = naming?.kind === 'rename' && naming.groupId === group.id
+    return (
+      <div key={`group:${group.id}`} role="group" aria-label={group.name} className="flex flex-col gap-1">
+        <GroupRow
+          group={group}
+          animate={settled.current}
+          collapsed={isCollapsed}
+          count={rows.filter((r) => r.depth === 0).length}
+          status={BUSIEST.find((s) => statuses.includes(s)) ?? 'idle'}
+          unread={unread}
+          toggle={toggle}
+          menu={menu}
+          renaming={renaming}
+          rename={nameGroup}
+          cancelRename={() => setNaming(null)}
+          dragging={drag?.id === group.id}
+          into={!!into}
+          drop={between && drag?.id !== group.id ? (between.after ? 'after' : 'before') : undefined}
+          drag={
+            connected
+              ? {
+                  start: (e) => {
+                    e.dataTransfer?.setData('text/plain', group.name)
+                    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+                    setDrag({ id: group.id, kind: 'group' })
+                  },
+                  over: (e) => {
+                    if (!drag || drag.id === group.id) return
+                    e.preventDefault()
+                    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+                    const next = drag.kind === 'space' ? { into: group.id } : { id: group.id, after: after(e) }
+                    if (JSON.stringify(next) !== JSON.stringify(drag.over)) setDrag({ ...drag, over: next })
+                  },
+                  land: (e) => {
+                    if (!drag || drag.id === group.id) return
+                    e.preventDefault()
+                    setDrag(null)
+                    if (drag.kind === 'space') {
+                      const dragged = chats.find((c) => c.id === drag.id)
+                      if (dragged) move(dragged, false, Number.MAX_SAFE_INTEGER, group.id)
+                      return
+                    }
+                    const rest = groups.filter((g) => g.id !== drag.id)
+                    const at = rest.findIndex((g) => g.id === group.id) + (after(e) ? 1 : 0)
+                    send({ type: 'group.move', groupId: drag.id, index: at })
+                  },
+                  end: () => setDrag(null),
+                  key: (e) => {
+                    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+                    e.preventDefault()
+                    stepGroup(group, e.key === 'ArrowUp' ? -1 : 1, true)
+                  },
+                }
+              : undefined
+          }
+        />
+        <AnimatePresence>{isCollapsed ? null : rows.filter(shown).map(row)}</AnimatePresence>
+      </div>
+    )
+  }
+  // The Spaces label takes a dragged space out of its group, to the top of the ungrouped ones.
+  const intoUngrouped = {
+    onDragOver: (e: DragEvent) => {
+      if (drag?.kind !== 'space') return
+      e.preventDefault()
+      if (!drag.over || !('into' in drag.over) || drag.over.into !== '') setDrag({ ...drag, over: { into: '' } })
+    },
+    onDrop: (e: DragEvent) => {
+      if (drag?.kind !== 'space') return
+      e.preventDefault()
+      const dragged = chats.find((c) => c.id === drag.id)
+      setDrag(null)
+      if (dragged) move(dragged, false, 0, null)
+    },
+  }
+  const overUngrouped = !!drag?.over && 'into' in drag.over && drag.over.into === ''
 
   return (
     <nav className="flex flex-1 scroll-inset flex-col gap-1 overflow-y-auto pt-10 pr-0 pb-8 pl-8">
@@ -362,11 +573,33 @@ export function ChatNav({
           </div>
         </>
       )}
-      <h2 id="spaces-label" className={NAV_LABEL}>
-        {CHAT_NOUN.many}
-      </h2>
+      <div className="group/label flex items-center rounded" {...intoUngrouped}>
+        <h2
+          id="spaces-label"
+          className={`${NAV_LABEL} flex-1 rounded ${overUngrouped ? 'text-accent' : ''}`}
+          data-drop-into={overUngrouped || undefined}
+        >
+          {CHAT_NOUN.many}
+        </h2>
+        <Hint text="New group" side="right">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="New group"
+            className={`mt-10 mr-2 ${LABEL_ACTION}`}
+            disabled={!connected}
+            onClick={() => setNaming({ kind: 'new' })}
+          >
+            <FolderPlusIcon />
+          </Button>
+        </Hint>
+      </div>
+      {groups.map(groupBlock)}
+      {naming?.kind === 'new' && (
+        <GroupNameInput label="New group name" initial="" done={nameGroup} cancel={() => setNaming(null)} />
+      )}
       <div role="group" aria-labelledby="spaces-label" className="flex flex-col gap-1">
-        <AnimatePresence>{groupRows(false).filter(shown).map(row)}</AnimatePresence>
+        <AnimatePresence>{rowsIn('').filter(shown).map(row)}</AnimatePresence>
       </div>
       <Hint text={newSpaceKeys && <Keys binding={newSpaceKeys} />} side="right">
         {/* As wide and tall as a space row, its label under the space names: the + sits where a row's dot does
@@ -395,6 +628,133 @@ export function ChatNav({
         </details>
       )}
     </nav>
+  )
+}
+
+type GroupDrag = Omit<Reorder, 'dragging' | 'drop'>
+
+type GroupRowProps = {
+  group: SpaceGroup
+  animate: boolean
+  collapsed: boolean
+  count: number
+  status: ChatStatus
+  unread: boolean
+  toggle: () => void
+  menu: MenuItem[]
+  renaming: boolean
+  rename: (name: string) => void
+  cancelRename: () => void
+  dragging: boolean
+  // A space dragged over it goes in; a group dragged over it lands before or after it.
+  into: boolean
+  drop?: 'before' | 'after'
+  drag?: GroupDrag
+}
+
+/** A group's row: its chevron and name; collapsed, how many spaces it holds and a dot when one is busy or unread. */
+function GroupRow(props: GroupRowProps) {
+  const { group, animate, collapsed, count, status, unread, toggle, menu, renaming, dragging, into, drop, drag } = props
+  // Collapsed, a busy space inside shows its status here; unread with nothing busy shows a plain dot.
+  const dot = collapsed && status !== 'idle' ? DOTS[status] : collapsed && unread ? 'bg-text' : undefined
+  if (renaming) {
+    return <GroupNameInput label="Group name" initial={group.name} done={props.rename} cancel={props.cancelRename} />
+  }
+  return (
+    <m.div
+      className={`group/row relative flex shrink-0 items-center rounded text-muted transition-colors hover:bg-raised hover:text-text has-data-[state=open]:bg-raised ${dragging ? 'opacity-50' : ''} ${into ? 'bg-accent/15 text-text ring-1 ring-accent' : ''}`}
+      {...MOTION.collapse}
+      initial={animate && MOTION.collapse.initial}
+    >
+      <button
+        className="group flex h-control min-w-0 flex-1 items-center gap-8 pr-8 pl-6 text-left whitespace-nowrap"
+        aria-expanded={!collapsed}
+        data-open={collapsed ? undefined : ''}
+        data-group-id={group.id}
+        title={group.name}
+        onClick={toggle}
+        draggable={drag ? true : undefined}
+        onDragStart={drag?.start}
+        onDragOver={drag?.over}
+        onDrop={drag?.land}
+        onDragEnd={drag?.end}
+        onKeyDown={drag?.key}
+      >
+        <Chevron />
+        <span className={`min-w-0 flex-1 truncate ${unread && collapsed ? 'font-semibold text-text' : ''}`}>
+          {group.name}
+        </span>
+        {collapsed && (
+          <span className="text-xs text-faint tabular-nums" data-count>
+            {count}
+          </span>
+        )}
+        {dot && <span className={`size-7 shrink-0 rounded-full ${dot}`} data-status={status} data-group-dot />}
+      </button>
+      <RowMenu label={group.name} items={menu} />
+      {drop && (
+        <span
+          aria-hidden
+          data-drop={drop}
+          className={`pointer-events-none absolute inset-x-4 h-2 rounded-full bg-accent ${drop === 'before' ? '-top-2' : '-bottom-2'}`}
+        />
+      )}
+    </m.div>
+  )
+}
+
+/** Names a group in place: Enter or leaving the box saves, Escape (or an empty name) cancels. */
+function GroupNameInput({
+  label,
+  initial,
+  done,
+  cancel,
+}: {
+  label: string
+  initial: string
+  done: (name: string) => void
+  cancel: () => void
+}) {
+  const finished = useRef(false)
+  const finish = (value: string | null) => {
+    if (finished.current) return
+    finished.current = true
+    if (value?.trim() && value.trim() !== initial) done(value.trim())
+    else cancel()
+  }
+  return (
+    <div className="flex h-control shrink-0 items-center gap-8 pr-8 pl-6">
+      <Chevron />
+      <input
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- the user just asked to name it
+        autoFocus
+        aria-label={label}
+        defaultValue={initial}
+        maxLength={80}
+        className="h-24 min-w-0 flex-1 px-6"
+        onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') finish(e.currentTarget.value)
+          else if (e.key === 'Escape') {
+            e.stopPropagation()
+            finish(null)
+          }
+        }}
+        onBlur={(e) => finish(e.currentTarget.value)}
+      />
+    </div>
+  )
+}
+
+function FolderPlusIcon() {
+  return (
+    <svg className="size-14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path
+        d="M2 4.5V12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H8L6.5 3.5H3a1 1 0 0 0-1 1ZM8 7.5v3.5M6.25 9.25h3.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
   )
 }
 

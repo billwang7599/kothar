@@ -325,7 +325,8 @@ const pinMessages: Extension = {
 | `run(message, chat, context)` | Runs on a click, with the message as an `ExtensionMessage`. Then the chat's marks and open panels draw again. |
 
 An `ExtensionMessage` is `{ entry, kind, at, text }`. `entry` is where the message is in the chat's log (its index in
-[`host.read`](host.md#reading-chats)), which never changes, since the log only grows, so it's the key to keep. Read a
+[`host.read`](host.md#reading-chats)), which never changes, since the log only grows (a message the user deletes
+stays as an `entry.removed` entry, so no index is used twice), so it's the key to keep. Read a
 message again with [`host.message`](host.md#reading-chats), and quote one in a panel with a `message` view, which
 scrolls the chat to it when clicked.
 
@@ -426,39 +427,69 @@ const batch: Extension = {
 List `panels` in the manifest's `uses` for `noteViews`.
 
 
-## Composer toggles
+## Composer modes
 
-`composerToggles` adds an on/off chip to a chat's composer, beside **Attach**, such as **Deep research** or **Web
-only**. The user flips it per chat: each chat keeps its own state, saved with the chat (so it outlives a restart) and
-never shared with another chat. Several extensions can each add theirs.
+`composerToggles` adds modes to the composer's **mode picker**, the menu beside the thinking level, such as **Deep
+research** or **Plan first**. Every extension uses this same field, built-in or installed: Kothar has no list of its
+own, and the picker shows whatever modes the extensions that are on offer in the chat. (The field is called
+`composerToggles` for historical reasons; each entry is one mode.)
 
-Read a chat's state with `host.toggled(chatId, id)` wherever you need it: in `transformMessage` to change what the next
-message does, in a tool, in `onTurnStarted`. `onChange` runs after the user flips it and the new state is saved.
+How modes behave:
+
+- **One at a time.** Picking a mode turns any other mode off, including another extension's, and each `onChange`
+  hears about it. Picking the picked mode again, or **No mode**, clears it.
+- **One-shot.** The next message the user sends takes the mode, and the picker goes back to no mode. If the message
+  is queued behind a running turn, the mode waits with it. If it can't be sent, the mode stays picked.
+- **On for that message's turn.** `host.toggled(chatId, id)` is true while the mode is picked and throughout the turn
+  its message starts or is steered into, including in your tools, `turnOptions` and `instructions`. When that turn
+  ends, it's off.
+- **Namespaced by extension.** A mode is identified by your extension's id plus its own id, so two extensions can
+  both have a mode called `go` without clashing.
+
+A mode can change its message in two ways, and you can use both:
+
+- **`prefix`**: declarative text that Kothar puts before the message, followed by a blank line. Use this for a simple
+  mode; it needs nothing else in `uses`.
+- **Your own hooks**, reading `host.toggled`: `transformMessage` to rewrite the message, `turnOptions` to make the turn
+  read only or run it on another model list, `instructions`, or a tool. Plan first works this way.
 
 ```ts
 const shout: Extension = {
   id: 'shout',
   name: 'Shout',
-  description: 'Asks for replies in capitals while its chip is on.',
+  description: 'A mode that asks for the reply in capitals.',
   enabledByDefault: false,
-  composerToggles: [{ id: 'shout', label: 'Shout', icon: 'bolt', hint: 'Replies in capitals', activeHint: 'On: replies in capitals' }],
+  composerToggles: [{ id: 'shout', label: 'Shout', icon: 'bolt', hint: 'The reply comes in capitals', prefix: 'Reply in capital letters.' }],
+}
+
+// The same with a hook instead of prefix, when it needs to decide per message:
+const terse: Extension = {
+  id: 'terse',
+  name: 'Terse',
+  description: 'A mode for one-line answers.',
+  enabledByDefault: false,
+  composerToggles: [{ id: 'terse', label: 'One line', icon: 'sparkle', hint: 'Answer in one line' }],
   transformMessage: (text, chat, { host }) =>
-    host.toggled(chat.id, 'shout') ? `${text}\n\n(Reply in capital letters.)` : text,
+    host.toggled(chat.id, 'terse') && !text.includes('```') ? `${text}\n\n(Answer in one line.)` : text,
 }
 ```
 
 | Field | What it is |
 |---|---|
-| `id` | Unique within the extension. |
-| `label` | Short; shown on the chip. |
-| `icon?` | `search`, `globe`, `book`, `sparkle` or `bolt`. |
-| `hint?`, `activeHint?` | Shown on hover, while off and while on (both default to `label`). |
-| `default?` | Its state in a chat that never set it. Off without it. |
-| `shown(chat, context)` | Optional. Whether this chat gets the chip. Home is the Home extension's own chat, so `chat.extension` is set there: to leave out workers, check `chat.worker`, not `chat.extension`. |
-| `onChange(on, chat, context)` | Optional. Runs after the user flips it. A throw shows as an error; the new state stays. |
+| `id` | Unique within the extension. Another extension may use the same id. |
+| `label` | Short; shown in the picker and on it while picked. |
+| `icon?` | One of `search`, `globe`, `book`, `sparkle` or `bolt`. A fixed set keeps every mode in the same style and lets no extension inject markup into the composer. Without one, the label shows alone. |
+| `hint?` | One line under the label in the menu, saying what the mode does. |
+| `activeHint?` | Shown on hover over the picker while the mode is picked. Defaults to `hint`, then `label`. |
+| `prefix?` | Text put before the message the mode is sent with. The log keeps what the user typed. |
+| `default?` | Picked in a chat that has never set it, until its first message takes it. |
+| `shown(chat, context)` | Optional. Whether this chat lists the mode. Home is the Home extension's own chat, so `chat.extension` is set there: to leave out workers, check `chat.worker`, not `chat.extension`. |
+| `onChange(on, chat, context)` | Optional. Runs after the user picks or clears it, and when picking another mode turns it off. It doesn't run when a message takes it. A throw shows as an error; the new state stays. |
 
-`host.setToggle(chatId, id, on)` sets it from the extension (say, to turn a one-shot switch off once it's used); that
-doesn't call `onChange`. While the extension is off, or a chat's setup leaves it out, the chip isn't shown and the chat's
-saved state waits for it to come back.
+`host.setToggle(chatId, id, on)` picks or clears it from the extension, also turning any other mode off, without
+calling `onChange`. Clearing it also ends it for the running turn. While the extension is off, or a chat's setup
+leaves it out, the mode isn't listed, and a picked one waits for it to come back: messages sent in the meantime don't
+take it.
 
-List `commands` in the manifest's `uses` for `composerToggles`, `host.toggled` and `host.setToggle`.
+List `commands` in the manifest's `uses` for `composerToggles`, `host.toggled` and `host.setToggle`. A hook such as
+`transformMessage` needs its own `uses` entry as usual.

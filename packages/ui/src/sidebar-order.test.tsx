@@ -4,9 +4,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, expect, test } from 'vitest'
-import type { ClientMessage } from '@kothar/core/shared'
+import type { ChatInfo, ClientMessage } from '@kothar/core/shared'
+import { bySpaceOrder } from '@kothar/core/shared'
 import { ChatNav } from './sidebar.tsx'
-import type { ChatView } from './state.ts'
+import { initialState, reduce, type ChatView, type State } from './state.ts'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -148,7 +149,7 @@ test('Alt+Arrow keys move a focused space within its group', () => {
 test('the row menu pins, unpins and moves a space, offering only the moves it can make', () => {
   render([{ ...A, pinned: true }, B, C])
   const beta = menuItems('Beta')
-  expect(beta.map((i) => i.textContent)).toEqual(['Rename…', 'Pin', 'Move down', 'Archive', 'Delete…'])
+  expect(beta.map((i) => i.textContent)).toEqual(['Rename…', 'Pin', 'Move to group', 'Move down', 'Archive', 'Delete…'])
   act(() => beta.find((i) => i.textContent === 'Pin')!.click())
   expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'b', pinned: true, index: 1 })
 
@@ -160,7 +161,7 @@ test('the row menu pins, unpins and moves a space, offering only the moves it ca
 
   const alpha = menuItems('Alpha')
   act(() => alpha.find((i) => i.textContent === 'Unpin')!.click())
-  expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'a', pinned: false, index: 0 })
+  expect(sent.at(-1)).toEqual({ type: 'chat.move', chatId: 'a', pinned: false })
 })
 
 test('archived spaces and a disconnected sidebar can’t be reordered', () => {
@@ -168,4 +169,86 @@ test('archived spaces and a disconnected sidebar can’t be reordered', () => {
   expect(rowOf('Alpha').draggable).toBe(false)
   key(rowOf('Alpha'), 'ArrowDown')
   expect(sent).toEqual([])
+})
+
+// What the core does with a chat.move (chat-lifecycle.ts moveChat): renumber the group the space joins, with pinned
+// cleared by leaving it out, and send each changed chat's whole info as JSON, which drops the cleared field. Unpin sends
+// no index; these spaces were pinned with no saved spot, so they go to the top, as the core does.
+const coreMove = (chats: ChatInfo[], m: Extract<ClientMessage, { type: 'chat.move' }>): ChatInfo[] => {
+  const moved = chats.find((c) => c.id === m.chatId)!
+  const group = chats
+    .filter((c) => !c.extension && !c.parentId && !!c.pinned === m.pinned && c.id !== m.chatId)
+    .sort(bySpaceOrder)
+  group.splice(Math.max(0, Math.min(m.index ?? 0, group.length)), 0, moved)
+  return group.flatMap((info, order) => {
+    if (info.order === order && !!info.pinned === m.pinned) return []
+    const { pinned, ...rest } = info
+    return [JSON.parse(JSON.stringify({ ...rest, order, ...(m.pinned && { pinned: true }) })) as ChatInfo]
+  })
+}
+const infoOf = ({ status, items, entries, from, shift, draft, queue, waits, run, ...info }: ChatView): ChatInfo => info
+
+test('Unpin takes a space out of Pinned and back into the spaces list, and pinning it again works, after reload too', async () => {
+  const start = [HOME, { ...A, pinned: true, order: 0 }, { ...B, pinned: true, order: 1 }, C].map((c) => ({
+    ...infoOf(c),
+    status: 'idle' as const,
+    entries: [],
+    draft: '',
+    queue: [],
+  }))
+  let state: State = reduce(initialState, {
+    type: 'snapshot',
+    engines: [],
+    accounts: [],
+    chats: start,
+    contextDefaults: { agents: true, folders: true, files: true },
+    extensions: [],
+    modelLists: { chat: [], planning: [], searching: [], workers: [] },
+    setups: [],
+    memory: {},
+    workers: { start: true, limit: 4, instructions: { id: 'i', label: 'i', where: 'instructions', default: '', text: '' } },
+    corePrompts: [],
+    workFolder: { defaultPath: '/g/work', canSandbox: true },
+    themes: [],
+    installed: [],
+    communityExtensions: false,
+    restart: { changes: [], canRestart: false },
+  })
+  // A row leaving a group plays its (zero-length) exit animation before it goes.
+  const settle = () => act(() => new Promise((done) => setTimeout(done, 30)))
+  const click = async (name: string, label: string) => {
+    render(state.chats)
+    sent = []
+    key(container.querySelector(`[aria-label="More for ${name}"]`)!, 'Enter', false)
+    // Earlier tests' menus can linger in the page; this one is the newest.
+    const menu = [...document.querySelectorAll('[role="menu"]')].at(-1)!
+    const item = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) => i.textContent === label)!
+    act(() => item.click())
+    const move = sent.at(-1) as Extract<ClientMessage, { type: 'chat.move' }>
+    for (const info of coreMove(state.chats.map(infoOf), move)) state = reduce(state, { type: 'chat.updated', chat: info })
+    render(state.chats)
+    await settle()
+  }
+
+  await click('Beta', 'Unpin')
+  expect(names(group('pinned'))).toEqual(['Alpha'])
+  expect(names(group('spaces'))).toEqual(['Beta', 'Gamma'])
+  expect(state.chats.find((c) => c.id === 'b')?.pinned).toBeUndefined()
+
+  await click('Alpha', 'Unpin')
+  expect(group('pinned')).toBeNull()
+  expect(names(group('spaces'))).toEqual(['Alpha', 'Beta', 'Gamma'])
+
+  await click('Gamma', 'Pin')
+  expect(names(group('pinned'))).toEqual(['Gamma'])
+  await click('Gamma', 'Unpin')
+  expect(group('pinned')).toBeNull()
+  await click('Beta', 'Pin')
+  expect(names(group('pinned'))).toEqual(['Beta'])
+  expect(names(group('spaces'))).toEqual(['Gamma', 'Alpha'])
+
+  // A reload gets the same places from the core's saved infos.
+  render(state.chats.map((c) => ({ ...c, ...(JSON.parse(JSON.stringify(infoOf(c))) as ChatInfo) })))
+  expect(names(group('pinned'))).toEqual(['Beta'])
+  expect(names(group('spaces'))).toEqual(['Gamma', 'Alpha'])
 })

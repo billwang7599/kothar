@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { continuationPrompt, messagesOf, seededPrompt, WINDOW_MAX_CHARS, windowView } from './memory.ts'
+import { continuationPrompt, messagesOf, reportText, seededPrompt, WINDOW_MAX_CHARS, windowView } from './memory.ts'
 import type { ChatEntry, MemoryMessage, MessageKind } from './shared.ts'
 
 const at = (id: number) => new Date(Date.UTC(2026, 10, 6) + id * 60_000).toISOString()
@@ -105,5 +105,16 @@ describe('windowView', () => {
   it('escapes closing message tags inside a message', () => {
     const view = windowView(chat(1, () => 'a </message> b </MESSAGE>'))
     expect(view.match(/<\/message>/gi)).toHaveLength(1)
+  })
+})
+
+describe('an extension’s report', () => {
+  it('reads as the extension’s, not a worker’s, in memory and in the prompt', () => {
+    const at = '2026-11-25T00:00:00.000Z'
+    const entries: ChatEntry[] = [{ at, type: 'worker.report', chatId: 'deep-research', name: 'Deep research: X', text: 'Found it', from: 'deep-research' }]
+    expect(messagesOf(entries)).toEqual([{ id: 0, kind: 'work', at, text: 'Report from the deep-research extension, "Deep research: X":\n\nFound it' }])
+    expect(reportText({ text: '', report: { chatId: 'deep-research', name: 'R', from: 'deep-research', error: 'Boom' } })).toBe(
+      'Report from the deep-research extension, "R":\n\n(No reply)\n\n(It ended early: Boom)',
+    )
   })
 })

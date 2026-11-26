@@ -38,7 +38,7 @@ The built-in extensions today:
 | Reconnect | Yes | When a turn ends because the connection dropped or the engine's service was down, wait for it to come back and continue the turn. |
 | Skills | Yes | Saved instructions for kinds of task, in the Agent Skills format (a folder with a SKILL.md), the same on every engine. Agents see a one-line list of the skills that are on and read one when a task fits. Its page in Settings lists them, turns each on or off, and imports more from a folder, a .zip or .skill file, a GitHub link, or the skills folders of Claude Code, Codex and pi. Skills from GitHub start off, so you can read them first. |
 | Inspector | Yes | A folded **What was sent** row under each of your messages: everything Kothar handed the engine for that turn, labelled. Its **Activity** tab lists what Kothar and extensions did on their own. Its page in Settings sets how many turns each chat keeps. See [Inspector](#inspector). |
-| Deep Research | Yes | Long, multi-source research that ends in a cited report. Turn on **Deep research** in a chat's composer, use **New research** (⌘⇧D), or ask the agent. You approve a plan of sub-questions, workers search and read the web, and every claim in the report cites a quote Kothar found on its page. |
+| Deep Research | Yes | Long, multi-source research that ends in a cited report. Turn on **Deep research** in a chat's composer, use **New research** (⌘⇧D), or ask the agent. You approve a plan of sub-questions, workers search and read the web, and every claim in the report cites a quote Kothar found on its page. Research runs in the background: you can keep chatting, and the agent tells you what it found when the report is ready. |
 | MCP servers | Yes | Connect MCP servers (GitHub, Linear, Notion, a filesystem server, …) to your chats, on every engine. Kothar connects to them itself and offers their tools as its own, so keys never reach an engine and every call is asked for and recorded. Pick from a catalog or add your own in its page in Settings; switch one off for a chat in its MCP tab. See [MCP servers](#mcp-servers). |
 
 ### Where Memory keeps its summaries, and cleaning up
@@ -163,7 +163,7 @@ The Inspector shows what Kothar actually sends the engine, so nothing it adds is
   - **Permission answers**, allowed or denied, and **which rule decided**: a switch (such as Read anywhere without
     asking), a folder mode, the sandbox, a read-only turn, an extension's policy, or you.
   - **How extensions changed a turn**: made it read only (with the reason the agent is told), ran it on another model
-    list, a composer toggle that was on, or rewrote your message (before and after).
+    list, a composer mode that was on, or rewrote your message (before and after).
   - **Workers and tools**: chats an extension started (such as Deep Research's quiet workers), messages it sent them,
     and tools it called.
   - **Carrying on**: Reconnect and Account rotation carrying a turn on (with what was sent), account switches, and
@@ -265,56 +265,35 @@ or the address of a remote server (Streamable HTTP, or SSE for an address ending
 - **A remote catalog.** **Catalog address** adds a list in the same JSON format as the built-in one, read from an https
   address.
 
-### Browser: your profile, in the background
+### Browser: your own Chrome
 
-**Which browser.** Kothar's own profile runs on the browser you have installed: Google Chrome first (then Chrome Beta
-or Canary), else Edge, Brave, Arc or Chromium. Kothar installs no browser of its own; with none of these, the settings
-page says to install Chrome. Chrome runs on a profile of Kothar's own per space
-(`<data folder>/extensions/browser/chrome-profiles/<space>/`; another browser's is `<browser>-profiles/`), never your
-everyday Chrome profile, its cookies or its tabs.
-
-**Signing in.** Google, and some other sites, refuse to sign you in on a browser that software controls. So signing
-in happens in a plain window: **Sign in…** in a chat's General tab or on the Browser row in Processes, and an agent's
-`ask_user_in_browser`, open the space's profile as an ordinary browser window, with no remote debugging and nothing of
-Kothar's attached, on the agent's tabs. Sign in, then click **Done** (or quit the browser): it closes, and the agents'
-browser goes on in the background on the same profile, signed in, with the tabs the window had. Kothar can't see into
-that window, so closing its last window doesn't end it on macOS; Done or quitting does.
-
-**Which profile.** Settings → Extensions → Browser → **Profile** offers **Kothar's own** (the default: a profile per
-space that starts logged out; **Sign in…** logs it in) and **Your Chrome (Kothar extension)**. Kothar never copies
-your own browser profiles: Google signs you out in a copy. A copy picked in an older Kothar becomes Kothar's own, and
-the copies it made (`<data folder>/extensions/browser/mirrors/`) are deleted when the extension starts.
-
-**Your own Chrome.** Pick **Your Chrome (Kothar extension)** in **Profile** and agents browse in the Chrome you use
-every day, with your logins, Google included, and nothing copied. No browser of Kothar's starts. Setting it up once:
+Agents browse in the Chrome you use every day, with your logins, Google included, through the Kothar Chrome
+extension. Kothar runs no browser of its own and copies no profile. Setting it up once:
 
 1. In Chrome, open `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and pick the folder Settings → Extensions → Browser shows
    (`extensions/browser/chrome-extension/` in Kothar).
 3. Click the Kothar extension's icon and paste the pairing code from the same settings page. It turns **Connected**.
 
-Each space gets a blue **Kothar · *space*** tab group, which opens in a window of its own behind yours. Agents open,
-read, click, type and close tabs only in their space's group. The extension refuses any other tab, and Kothar refuses
-calls that read every cookie, change permissions or close Chrome. Drag a tab out of the group to take it back: agents
-lose it at once. Popups from an agent's tab join its group. While agents work, Chrome shows its own "Kothar started
-debugging this browser" bar. Clicking its Cancel detaches them until they next browse. `show_browser` and
-`ask_user_in_browser` bring the space's group to the front, and **Done** carries on, as above. **Show browser** in a
-chat's General tab does the same.
+Until it's connected, an agent's browser calls fail at once and say so, and the agent asks you instead.
+
+Each space gets a blue **Kothar · *space*** tab group in the Chrome window you last used (never an incognito one). Its
+tabs open in the background: no window opens, nothing takes focus, and the tab you're on stays in front. With no
+Chrome window open, one opens without taking focus. Each chat in the space gets a tab of its own. Agents open, read,
+click, type and close tabs only in their space's group. The extension refuses any other tab, and Kothar refuses calls
+that read every cookie, change permissions or close Chrome. Drag a tab out of the group to take it back: agents lose
+it at once. Popups from an agent's tab join its group. While agents work, Chrome shows its own "Kothar started
+debugging this browser" bar. Clicking its Cancel detaches them until they next browse.
 
 The extension talks only to Kothar on `127.0.0.1`. It has to present the pairing code, and its connection must come
 from the extension itself, so web pages can't connect. **New code** on the settings page makes a new code and
-disconnects the extension until you paste the new one. If Kothar isn't running, or the extension isn't paired, an
-agent's browser calls say so, and it asks you instead.
+disconnects the extension until you paste the new one.
 
-**In the background.** Agents' browsers run headless: no window, no Dock icon, and they never take focus, so you can
-keep working in other apps. They say they're Chrome rather than headless Chrome, which some sites turn away, and they
-don't tell pages they're automated (`navigator.webdriver`). Nothing fakes a fingerprint beyond that.
-
-**When you're needed.** An agent calls `ask_user_in_browser` (log in, CAPTCHA, payment: a plain window, as above) or
-`show_browser` (look at this). The browser opens in a window with the agent's tabs, in front of your other apps, the chat shows **Open
-browser** and **Done** (with a notification if you're away from Kothar), and Done puts it back in the background
-where you left it. You can look at any time: **Show browser** in a chat's General tab,
-or **Show** on the Browser row in Processes; **Hide** puts it back.
+**When you're needed.** An agent calls `ask_user_in_browser` (sign in, CAPTCHA, payment) or `show_browser` (look at
+this). Its own tab comes to the front in your Chrome, and the chat shows **Show tab** and **Done** (with a notification
+if you're away from Kothar). Sign in there yourself, as you always would; agents never ask for passwords or codes.
+Click **Done** and the agent carries on, signed in. One chat at a time per space asks you; the next waits its turn.
+**Show browser** in a chat's General tab brings the space's group forward at any time.
 
 **What agents get.** Seven tools of Kothar's own, about 2,900 characters (roughly 800 tokens) in each session that
 has the browser: `browser_open` (a URL, or back, forward, reload), `browser_snapshot` (the page as short lines with

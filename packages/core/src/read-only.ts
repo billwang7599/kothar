@@ -105,22 +105,44 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // --- Shell parsing ---
 
-type Word = { text: string; globbed: boolean; tilde: boolean }
-type Token = { op: string } | { word: Word }
+// A word's pieces, for expanding variables (vars mode): literal text, quoted or not, and $NAME or ${NAME}.
+export type Part = { text: string; quoted: boolean } | { name: string; quoted: boolean }
+export type Word = { text: string; globbed: boolean; tilde: boolean; parts: Part[] }
+export type Token = { op: string } | { word: Word }
+
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*/
 
 // Splits a command line into words and operators. Undefined for anything it doesn't fully understand: expansions,
-// substitutions, here-docs, unbalanced quotes.
-const tokenize = (command: string): Token[] | undefined => {
+// substitutions, here-docs, unbalanced quotes. With vars, plain $NAME and ${NAME} are kept as parts of their word
+// (their text is left as written) for the caller to expand; every other expansion is still not understood.
+export const tokenize = (command: string, vars = false): Token[] | undefined => {
   const tokens: Token[] = []
   let word: Word | undefined
   const push = () => {
     if (word) tokens.push({ word })
     word = undefined
   }
-  const add = (text: string, globbable = false) => {
-    word ??= { text: '', globbed: false, tilde: false }
+  const add = (text: string, globbable = false, quoted = !globbable) => {
+    word ??= { text: '', globbed: false, tilde: false, parts: [] }
     word.text += text
     if (globbable && /[*?[]/.test(text)) word.globbed = true
+    const last = word.parts.at(-1)
+    if (last && 'text' in last && last.quoted === quoted) last.text += text
+    else word.parts.push({ text, quoted })
+  }
+  // $NAME or ${NAME} at i: its name and length, if vars mode understands it.
+  const variable = (i: number) => {
+    if (!vars) return
+    const braced = command[i + 1] === '{'
+    const name = NAME.exec(command.slice(i + (braced ? 2 : 1)))?.[0]
+    if (!name) return
+    if (braced && command[i + 2 + name.length] !== '}') return
+    return { name, length: 1 + name.length + (braced ? 2 : 0) }
+  }
+  const addVariable = (name: string, written: string, quoted: boolean) => {
+    word ??= { text: '', globbed: false, tilde: false, parts: [] }
+    word.text += written
+    word.parts.push({ name, quoted })
   }
   for (let i = 0; i < command.length; i++) {
     const c = command[i]!
@@ -143,9 +165,20 @@ const tokenize = (command: string): Token[] | undefined => {
     if (c === '"') {
       let j = i + 1
       let text = ''
+      // Even "" makes a word.
+      add('')
       for (; j < command.length && command[j] !== '"'; j++) {
         const d = command[j]!
-        if (d === '$' || d === '`') return
+        if (d === '$') {
+          const found = variable(j)
+          if (!found) return
+          add(text)
+          text = ''
+          addVariable(found.name, command.slice(j, j + found.length), true)
+          j += found.length - 1
+          continue
+        }
+        if (d === '`') return
         if (d === '\\') {
           const next = command[j + 1]
           if (next === undefined) return
@@ -167,7 +200,14 @@ const tokenize = (command: string): Token[] | undefined => {
       i++
       continue
     }
-    if (c === '$' || c === '`' || c === '{' || c === '}' || c === '(' || c === ')' || c === '!') return
+    if (c === '$') {
+      const found = variable(i)
+      if (!found) return
+      addVariable(found.name, command.slice(i, i + found.length), false)
+      i += found.length - 1
+      continue
+    }
+    if (c === '`' || c === '{' || c === '}' || c === '(' || c === ')' || c === '!') return
     if (c === '#' && !word) break
     if ('|&;<>'.includes(c)) {
       // A redirect's file descriptor is the digits just before it, written as one word.
@@ -186,7 +226,7 @@ const tokenize = (command: string): Token[] | undefined => {
       continue
     }
     if (c === '~' && !word) {
-      word = { text: '~', globbed: false, tilde: true }
+      word = { text: '~', globbed: false, tilde: true, parts: [{ text: '~', quoted: false }] }
       continue
     }
     add(c, true)
@@ -202,8 +242,13 @@ const safeRedirect = (op: string, target: string) =>
 
 type Simple = Word[]
 
-// Splits tokens into simple commands joined by |, &&, || and ;. Undefined if any other operator is used.
-const commandsOf = (tokens: Token[]): Simple[] | undefined => {
+// File redirects (with an optional descriptor), not here-docs.
+const FILE_REDIRECT = /^\d*(?:>>?|<|&>>?|>&|<&|<>|>\|)$/
+
+// Splits tokens into simple commands joined by |, &&, || and ;. Undefined if any other operator is used. With targets,
+// any file redirect is allowed too, and its target word is added to targets, with the index of its command, for the
+// caller to check.
+export const commandsOf = (tokens: Token[], targets?: { word: Word; command: number }[]): Simple[] | undefined => {
   const commands: Simple[] = [[]]
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!
@@ -217,7 +262,9 @@ const commandsOf = (tokens: Token[]): Simple[] | undefined => {
       continue
     }
     const target = tokens[i + 1]
-    if (!target || !('word' in target) || target.word.globbed || !safeRedirect(token.op, target.word.text)) return
+    if (!target || !('word' in target) || target.word.globbed) return
+    if (targets && FILE_REDIRECT.test(token.op)) targets.push({ word: target.word, command: commands.length - 1 })
+    else if (!safeRedirect(token.op, target.word.text)) return
     i++
   }
   if (!commands.at(-1)!.length) {

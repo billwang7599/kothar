@@ -54,7 +54,7 @@ extension and before you turn it on, and holds the extension to it:
 | `setup` | Installs software it needs | `setup` |
 | `mcpServers` | Starts MCP servers for agents | `mcpServers` |
 | `permissions` | Approves or denies agents' requests for you, makes turns read only, and asks your leave itself | `onPermissionRequested`, `turnOptions`, `host.requestPermission` |
-| `sendMessages` | Sends messages and starts chats as you | `host.send`, `host.createChat`, `host.retry`, `host.continue`, `host.interrupt`, `host.addContextFile` |
+| `sendMessages` | Sends messages and starts chats as you | `host.send`, `host.report`, `host.createChat`, `host.retry`, `host.continue`, `host.interrupt`, `host.addContextFile` |
 | `accounts` | Sees and switches your engine accounts | `host.accounts`, `host.useAccount` |
 | `models` | Makes model calls on your accounts | `host.complete` |
 | `memory` | Decides what agents remember of each chat | `memory`, `host.chatStorage`, `host.everyChatStorage` |
@@ -62,7 +62,7 @@ extension and before you turn it on, and holds the extension to it:
 | `transforms` | Rewrites your messages or agents' replies | `transformMessage`, `transformOutput` |
 | `instructions` | Adds to every agent's instructions | `instructions`, `prompts` |
 | `tools` | Gives agents tools, and uses other extensions' tools | `tools`, `toolsFor`, `host.callTool` |
-| `events` | Watches chats as they run | `onEvent`, `onTurnStarted`, `onTurnCompleted`, `onStatusChanged`, `onSessionEnded`, `onChatCreated`, `onChatRemoved`, `onChatArchived`, `onSpaceRemoved`, `onLimitReached`, `onStart`, `onStop`, `onDependencyChanged` |
+| `events` | Watches chats as they run | `onEvent`, `onTurnStarted`, `onTurnCompleted`, `onStatusChanged`, `onSessionEnded`, `onChatCreated`, `onChatRemoved`, `onChatArchived`, `onMessagesRemoved`, `onSpaceRemoved`, `onLimitReached`, `onStart`, `onStop`, `onDependencyChanged` |
 | `chats` | Adds chats of its own | `chats` |
 | `panels` | Adds panels | `panels`, `messageDetails`, `processes`, `onProcessAction`, `onProcessesChanged`, `onWaitAction`, `host.wait`, `host.endWait`, `host.processes`, `host.processAction`, `host.processesChanged` |
 | `commands` | Adds commands | `commands`, `messageActions`, `composerToggles`, `host.toggled`, `host.setToggle` |

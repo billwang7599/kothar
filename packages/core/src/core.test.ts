@@ -19,7 +19,7 @@ import type { LimitReached, Extension, ExtensionChat, ExtensionHost, ExtensionSe
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeAdapter, FAKE_DEFAULTS, FAKE_MODELS, FAKE_THINKING, type FakeStep } from './adapters/fake.ts'
 import { sandboxingMachine } from './adapters/test-machine.ts'
-import { CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
+import { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
 import { LOCK_FILE } from './garage-lock.ts'
 import { openModels, snapLevel, SUMMARY_MODELS } from './models.ts'
 import { localMachine } from './machine.ts'
@@ -193,7 +193,8 @@ const settled = (core: Core, id: string) => (statusOf(core, id) ?? 'idle') === '
 const entriesOf = (core: Core, id: string) => core.chats().find((p) => p.id === id)?.entries ?? []
 const types = (entries: ChatEntry[]) => entries.map((e) => e.type)
 const chatFile = (t: { garage: string }, id: string) => join(t.garage, 'chats', id, 'chat.json')
-const rulesOf = (t: { garage: string }, folder: string) => `${WRITE_RULES}\nYour work folder: ${join(t.garage, 'work', folder)}`
+const rulesOf = (t: { garage: string }, folder: string) =>
+  `${WRITE_RULES}\nYour work folder: ${join(t.garage, 'work', folder)}\n${BROWSER_LAUNCH_RULES}`
 const byId = (chats: ChatState[]) => chats.toSorted((a, b) => a.id.localeCompare(b.id))
 
 beforeEach(() => {
@@ -467,6 +468,186 @@ describe('chats', () => {
     expect(places(reopened.core)).toEqual(['A*', 'B', 'C'])
     createChat(reopened, { name: 'D' })
     expect(places(reopened.core)).toEqual(['A*', 'D', 'B', 'C'])
+  })
+
+  it('groups spaces in the sidebar, keeping groups and places across a restart', () => {
+    const t = setup(textScript)
+    const [a, b, c, d] = ['A', 'B', 'C', 'D'].map((name) => createChat(t, { name })) as ChatState[] as [
+      ChatState,
+      ChatState,
+      ChatState,
+      ChatState,
+    ]
+    const info = (core: Core, id: string) => core.chats().find((x) => x.id === id)!
+    const groupIds = (core: Core) => core.groups().map((g) => g.name)
+    // Spaces in each group (or '' for none), by their place.
+    const places = (core: Core) => {
+      const out: Record<string, string[]> = {}
+      for (const x of core.chats().filter((x) => !x.extension && !x.parentId && !x.archived).sort(bySpaceOrder)) {
+        const group = x.pinned ? '*' : (core.groups().find((g) => g.id === x.group)?.name ?? '')
+        ;(out[group] ??= []).push(x.name)
+      }
+      return out
+    }
+    for (const [i, x] of [a, b, c, d].entries()) t.handle({ type: 'chat.move', chatId: x.id, pinned: false, index: i })
+
+    t.handle({ type: 'group.create', name: ' Work ', chatId: b.id })
+    expect(groupIds(t.core)).toEqual(['Work'])
+    const work = t.core.groups()[0]!
+    expect(t.messages).toContainEqual({ type: 'groups.updated', groups: [work] })
+    expect(JSON.parse(readFileSync(join(t.garage, 'groups.json'), 'utf8'))).toEqual({ groups: [work] })
+    expect(info(t.core, b.id).group).toBe(work.id)
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: false, index: 0, group: work.id })
+    expect(places(t.core)).toEqual({ Work: ['D', 'B'], '': ['A', 'C'] })
+    // Moves within a group keep to it.
+    t.handle({ type: 'chat.move', chatId: b.id, pinned: false, index: 0 })
+    expect(places(t.core)).toEqual({ Work: ['B', 'D'], '': ['A', 'C'] })
+
+    t.handle({ type: 'group.create', name: 'Play' })
+    const play = t.core.groups()[1]!
+    t.handle({ type: 'group.move', groupId: play.id, index: 0 })
+    expect(groupIds(t.core)).toEqual(['Play', 'Work'])
+    t.handle({ type: 'group.rename', groupId: play.id, name: 'Fun' })
+    expect(groupIds(t.core)).toEqual(['Fun', 'Work'])
+    expect(() => t.handle({ type: 'group.rename', groupId: play.id, name: '  ' })).toThrow(/name/)
+    expect(() => t.handle({ type: 'group.rename', groupId: 'nope', name: 'X' })).toThrow(/group/)
+    expect(() => t.handle({ type: 'chat.move', chatId: a.id, pinned: false, index: 0, group: 'nope' })).toThrow(/group/)
+    expect(() => t.handle({ type: 'group.create', name: 'X', chatId: 'main' })).toThrow(/spaces/)
+    expect(groupIds(t.core)).toEqual(['Fun', 'Work'])
+
+    // Pinned spaces sit in Pinned and keep their group, going back into it when unpinned.
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: true, index: 0 })
+    expect(places(t.core)).toEqual({ '*': ['D'], Work: ['B'], '': ['A', 'C'] })
+    expect(info(t.core, d.id).group).toBe(work.id)
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: false, index: 0 })
+    expect(places(t.core)).toEqual({ Work: ['D', 'B'], '': ['A', 'C'] })
+    // Out of a group.
+    t.handle({ type: 'chat.move', chatId: d.id, pinned: false, index: 1, group: null })
+    expect(places(t.core)).toEqual({ Work: ['B'], '': ['A', 'D', 'C'] })
+    expect(JSON.parse(readFileSync(chatFile(t, d.id), 'utf8'))).not.toHaveProperty('group')
+    t.handle({ type: 'chat.move', chatId: c.id, pinned: false, index: 5, group: work.id })
+    t.core.close()
+
+    const reopened = setup(textScript, t.garage)
+    expect(groupIds(reopened.core)).toEqual(['Fun', 'Work'])
+    expect(places(reopened.core)).toEqual({ Work: ['B', 'C'], '': ['A', 'D'] })
+    // Deleting a group keeps its spaces, below the ungrouped ones in their order.
+    reopened.handle({ type: 'group.delete', groupId: work.id })
+    expect(groupIds(reopened.core)).toEqual(['Fun'])
+    expect(places(reopened.core)).toEqual({ '': ['A', 'D', 'B', 'C'] })
+    expect(reopened.core.chats().filter((x) => x.group)).toEqual([])
+    expect(reopened.core.chats().filter((x) => !x.extension)).toHaveLength(4)
+  })
+
+  describe('Unpin puts a space back where it was before it was pinned', () => {
+    // Five spaces A-E in that order, ungrouped.
+    const five = () => {
+      const t = setup(textScript)
+      const spaces = ['A', 'B', 'C', 'D', 'E'].map((name) => createChat(t, { name }))
+      spaces.forEach((x, i) => t.handle({ type: 'chat.move', chatId: x.id, pinned: false, index: i }))
+      const id = (name: string) => spaces.find((x) => x.name === name)!.id
+      return { t, id }
+    }
+    // Spaces in each place ('*' for Pinned, a group's name, or '' for none), in order.
+    const places = (core: Core) => {
+      const out: Record<string, string[]> = {}
+      for (const x of core.chats().filter((x) => !x.extension && !x.parentId && !x.archived).sort(bySpaceOrder)) {
+        const group = x.pinned ? '*' : (core.groups().find((g) => g.id === x.group)?.name ?? '')
+        ;(out[group] ??= []).push(x.name)
+      }
+      return out
+    }
+    const pin = (t: ReturnType<typeof setup>, chatId: string) => t.handle({ type: 'chat.move', chatId, pinned: true, index: 0 })
+    const unpin = (t: ReturnType<typeof setup>, chatId: string) => t.handle({ type: 'chat.move', chatId, pinned: false })
+
+    it('restores its index, even after the others are reordered', () => {
+      const { t, id } = five()
+      pin(t, id('C'))
+      expect(places(t.core)).toEqual({ '*': ['C'], '': ['A', 'B', 'D', 'E'] })
+      // Moved while C is pinned: C still goes back below B.
+      t.handle({ type: 'chat.move', chatId: id('E'), pinned: false, index: 0 })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['E', 'A', 'B', 'C', 'D'] })
+      expect(t.core.chats().find((x) => x.id === id('C'))).not.toHaveProperty('unpinTo')
+    })
+
+    it('restores it into its old group', () => {
+      const { t, id } = five()
+      t.handle({ type: 'group.create', name: 'Work', chatId: id('B') })
+      const work = t.core.groups()[0]!.id
+      t.handle({ type: 'chat.move', chatId: id('C'), pinned: false, index: 1, group: work })
+      t.handle({ type: 'chat.move', chatId: id('D'), pinned: false, index: 2, group: work })
+      expect(places(t.core)).toEqual({ Work: ['B', 'C', 'D'], '': ['A', 'E'] })
+      pin(t, id('C'))
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ Work: ['B', 'C', 'D'], '': ['A', 'E'] })
+    })
+
+    it('goes next to the nearest neighbour left when its own was deleted', () => {
+      const { t, id } = five()
+      pin(t, id('C'))
+      t.handle({ type: 'chat.delete', chatId: id('B') })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['A', 'C', 'D', 'E'] })
+      // With every neighbour gone, it takes its old index.
+      pin(t, id('C'))
+      for (const name of ['A', 'D', 'E']) t.handle({ type: 'chat.delete', chatId: id(name) })
+      const f = createChat(t, { name: 'F' })
+      t.handle({ type: 'chat.move', chatId: f.id, pinned: false, index: 0 })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['F', 'C'] })
+    })
+
+    it('goes out of any group when its group was deleted while it was pinned', () => {
+      const { t, id } = five()
+      t.handle({ type: 'group.create', name: 'Work', chatId: id('B') })
+      const work = t.core.groups()[0]!.id
+      t.handle({ type: 'chat.move', chatId: id('C'), pinned: false, index: 1, group: work })
+      pin(t, id('C'))
+      t.handle({ type: 'group.delete', groupId: work })
+      expect(places(t.core)).toEqual({ '*': ['C'], '': ['A', 'D', 'E', 'B'] })
+      unpin(t, id('C'))
+      expect(places(t.core)).toEqual({ '': ['A', 'D', 'E', 'B', 'C'] })
+      expect(t.core.chats().find((x) => x.id === id('C'))).not.toHaveProperty('group')
+    })
+
+    it('keeps the spot across a restart, in chat.json', () => {
+      const { t, id } = five()
+      pin(t, id('D'))
+      expect(JSON.parse(readFileSync(chatFile(t, id('D')), 'utf8')).unpinTo).toEqual({
+        above: [id('C'), id('B'), id('A')],
+        below: [id('E')],
+        index: 3,
+      })
+      t.core.close()
+      const reopened = setup(textScript, t.garage)
+      unpin(reopened, id('D'))
+      expect(places(reopened.core)).toEqual({ '': ['A', 'B', 'C', 'D', 'E'] })
+      expect(JSON.parse(readFileSync(chatFile(reopened, id('D')), 'utf8'))).not.toHaveProperty('unpinTo')
+    })
+
+    it('puts a space pinned before spots were kept at the top, as before', () => {
+      const { t, id } = five()
+      pin(t, id('D'))
+      t.core.close()
+      const file = chatFile(t, id('D'))
+      const legacy = JSON.parse(readFileSync(file, 'utf8'))
+      delete legacy.unpinTo
+      writeFileSync(file, JSON.stringify(legacy))
+      const reopened = setup(textScript, t.garage)
+      unpin(reopened, id('D'))
+      expect(places(reopened.core)).toEqual({ '': ['D', 'A', 'B', 'C', 'E'] })
+    })
+
+    it('honours a drop out of Pinned at a place the user picks, and refuses a move with no place', () => {
+      const { t, id } = five()
+      pin(t, id('C'))
+      t.handle({ type: 'chat.move', chatId: id('C'), pinned: false, index: 4 })
+      expect(places(t.core)).toEqual({ '': ['A', 'B', 'D', 'E', 'C'] })
+      expect(t.core.chats().find((x) => x.id === id('C'))).not.toHaveProperty('unpinTo')
+      expect(() => t.handle({ type: 'chat.move', chatId: id('A'), pinned: false })).toThrow(/number/)
+      expect(() => t.handle({ type: 'chat.move', chatId: id('A'), pinned: true })).toThrow(/number/)
+    })
   })
 
   it('archives a chat, keeping its log, and refuses to run it until unarchived', async () => {
@@ -924,6 +1105,19 @@ describe('edits', () => {
     expect(t.calls[1]?.options.sandbox).toBeDefined()
   })
 
+  it('with Allow all on, runs a chat unsandboxed and approves edits anywhere, a key file too, without asking', async () => {
+    const garage = tempDir()
+    const outside = tempDir()
+    const t = setup(editScript(join(outside, 'a.ts'), join(outside, '.ssh', 'id_rsa')), garage)
+    t.handle({ type: 'chat.setPermission', chatId: 'main', name: 'allowAll', enabled: true })
+    expect(t.messages.at(-1)).toEqual({ type: 'chat.updated', chat: expect.objectContaining({ allowAll: true }) })
+    t.handle({ type: 'chat.send', chatId: 'main', text: 'edit' })
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    expect(t.calls[0]?.options).not.toHaveProperty('sandbox')
+    expect(resolved(t).map((e) => [e.allow, e.auto])).toEqual([[true, true], [true, true]])
+    expect(t.messages.some((m) => m.type === 'chat.status' && m.status === 'waiting')).toBe(false)
+  })
+
   it("runs a worker on its space's permission switches, live, unless it has its own; new spaces start without", async () => {
     const first = setup(textScript)
     const space = createChat(first, { name: 'Space' })
@@ -1097,6 +1291,25 @@ describe('commands', () => {
     t.handle({ type: 'permission.setDefault', name: 'autoNetworkCommands', enabled: true })
     expect(await turn(t)).toBe('idle')
     expect(resolved(t).map((e) => e.auto)).toEqual([true])
+  })
+
+  it('runs ssh to an allowed host without asking, from Settings or the chat, and saves both lists', async () => {
+    const t = setup(commandScript('ssh build.example.com make'))
+    expect(await turn(t)).toBe('waiting')
+    t.handle({ type: 'permission.setSshHosts', hosts: [{ host: ' build.example.com ' }] })
+    expect(t.core.workFolder()).toMatchObject({ sshHosts: [{ host: 'build.example.com' }] })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).sshHosts).toEqual([{ host: 'build.example.com' }])
+    expect(await turn(t)).toBe('idle')
+    expect(resolved(t).map((e) => e.auto)).toEqual([true])
+    // A chat's own list, even an empty one, stands over Settings'; none takes Settings' again.
+    t.handle({ type: 'chat.setSshHosts', chatId: 'main', hosts: [] })
+    expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8')).sshHosts).toEqual([])
+    expect(await turn(t)).toBe('waiting')
+    t.handle({ type: 'chat.setSshHosts', chatId: 'main' })
+    expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8'))).not.toHaveProperty('sshHosts')
+    expect(() => t.handle({ type: 'permission.setSshHosts', hosts: [{ host: 'not a host' }] })).toThrow(/isn't a host/)
+    t.handle({ type: 'permission.setSshHosts', hosts: [] })
+    expect(t.core.workFolder()).not.toHaveProperty('sshHosts')
   })
 
   it('asks before every command once the default is off, and saves the default in settings.json', async () => {

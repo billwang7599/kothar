@@ -5,12 +5,15 @@ import type { PermissionRequest, PermissionVerdict } from '@kothar/extension-api
 import { editableOf, placeOf, refusedEditWhy, type FolderPlace } from './folder-modes.ts'
 import { realPath } from './machine.ts'
 import { isReadOnlyCommand, isSecret, mentionsSecret, searchReachesSecret, secretPathsOf } from './read-only.ts'
-import { ASK_FIRST_COMMANDS, switchedOn, type PermissionSwitch, type PermissionSwitches } from './shared.ts'
+import { sshHostsOf, switchedOn, type PermissionSwitch, type PermissionSwitches } from './shared.ts'
+import { ASKS_FIRST, trustsSshHosts } from './ssh-hosts.ts'
 import { within } from './util.ts'
 
 export const OUTSIDE_EDIT_ADVICE =
   "Work there, or ask the user to add the folder in the chat's Context panel and set its mode to Edit in place."
-export const ASKS_FIRST = new RegExp(`\\b(?:${ASK_FIRST_COMMANDS.map((c) => c.replaceAll(' ', '\\s+')).join('|')})\\b`)
+export { ASKS_FIRST }
+// The rule of an answer for a command that reaches only allowed SSH hosts.
+export const SSH_HOSTS_RULE = 'Allowed SSH hosts'
 
 export type PermissionContext = {
   // Where the session runs: relative paths start here.
@@ -46,6 +49,7 @@ export const verdictOf = (request: PermissionRequest, context: PermissionContext
 
 // The switches as the Context panel names them.
 const SWITCH_NAMES: Record<PermissionSwitch, string> = {
+  allowAll: 'Allow all',
   editAnywhere: 'Edits anywhere',
   autoRead: 'Read anywhere without asking',
   autoFetch: 'Fetch web pages without asking',
@@ -53,6 +57,8 @@ const SWITCH_NAMES: Record<PermissionSwitch, string> = {
   autoNetworkCommands: 'Run network commands without asking',
   autoEnvCommands: 'Let commands use .env files without asking',
 }
+// The rule of an Allow all answer: it stands over extensions' policies too.
+export const ALLOW_ALL_RULE = 'Switch: Allow all'
 const switchRule = (...names: PermissionSwitch[]) => `Switch: ${names.map((name) => SWITCH_NAMES[name] ?? name).join(' + ')}`
 
 // verdictOf, with the rule behind each answer.
@@ -66,6 +72,12 @@ export const decide = (request: PermissionRequest, context: PermissionContext): 
     if (request.kind === 'shell' && (request.command === undefined || !isReadOnlyCommand(request.command, { cwd, home, secrets: [] }))) {
       return refused
     }
+  }
+  // Allow all approves everything, logins and keys included. Only a folder the user set to Read only stays read only.
+  if (switchedOn('allowAll', ...switches)) {
+    const target = request.kind === 'edit' && request.path !== undefined ? realPath(resolve(cwd, request.path)) : undefined
+    const place = target === undefined || within(target, workDir) ? undefined : placeOf(target, folders)
+    if (target === undefined || place?.mode !== 'readOnly') return { allow: true, rule: ALLOW_ALL_RULE }
   }
   if (request.kind === 'edit' && request.path !== undefined) {
     // Edits in the work folder need no asking; outside it the sandbox would fail them anyway.
@@ -99,6 +111,8 @@ export const decide = (request: PermissionRequest, context: PermissionContext): 
   if (request.kind !== 'shell' || request.command === undefined) return
   if (on('autoRead') && isReadOnlyCommand(request.command, reading)) return { allow: true, rule: `${switchRule('autoRead')} (a command that only reads)` }
   if (!sandboxed || !on('autoRunCommands')) return
+  // ssh, scp, sftp and rsync to allowed hosts, with their listed keys, run even while network commands ask.
+  if (trustsSshHosts(request.command, sshHostsOf(...switches), sandboxedReading)) return { allow: true, rule: SSH_HOSTS_RULE }
   if (!on('autoNetworkCommands') && ASKS_FIRST.test(request.command)) return
   if (mentionsSecret(request.command, sandboxedReading)) return
   return { allow: true, rule: envFiles && /\.env\b/.test(request.command) ? switchRule('autoRunCommands', 'autoEnvCommands') : switchRule('autoRunCommands') }

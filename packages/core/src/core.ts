@@ -5,6 +5,7 @@ import type { ChatDetail, Extension, ExtensionContext, SentTurn, SpaceDetail } f
 import { randomUUID } from 'node:crypto'
 import { openAccounts } from './accounts.ts'
 import { openChatSetups, openSetups } from './setups.ts'
+import { openGroupActions, openGroups } from './groups.ts'
 import { openChatLifecycle } from './chat-lifecycle.ts'
 import { openActivity } from './activity.ts'
 import { openKotharMcp, summaryOf } from './kothar-mcp.ts'
@@ -59,9 +60,10 @@ import { appendEntry, openSettings, saveChatFile } from './chat-store.ts'
 import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
+import { openMessageEdits } from './message-edits.ts'
 
 // Kept here too, for code that imports them from the core.
-export { CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
+export { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
 
 export const STOP_GRACE_MS = 60_000
 // A chat's own files, which extensions' chat storage can't touch.
@@ -218,6 +220,8 @@ function assembleCore(options: {
   const checkEnabled = (engine: string) => {
     if (!isEnabled(engine)) throw new Error(`Engine "${engine}" is off. Turn it on in Settings.`)
   }
+  // Sidebar groups of spaces (groups.json).
+  const spaceGroups = openGroups({ garage, broadcast })
   // Saved setups, read from their files each time so a hand edit applies on the next message too.
   const jobSetups = openSetups({
     garage,
@@ -250,7 +254,7 @@ function assembleCore(options: {
     !(chat && setupOf(chat)?.extensionsOff?.includes(extension.id) && !ownsChat(extension, chat))
   const chatsDir = join(garage, 'chats')
   mkdirSync(chatsDir, { recursive: true })
-  const { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setTerminal, setEditor } = openAppSettings({
+  const { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setSshHostsDefault, setTerminal, setEditor } = openAppSettings({
     garage,
     home,
     settings,
@@ -673,6 +677,9 @@ function assembleCore(options: {
     workerLimit: () => workers.limit(),
     engineToolsFor: (chat, engine) => engineTools.sessionFor(engine, providedFor(chat)),
     toolsListed: (engine, names) => engineTools.record(engine, names),
+    modesTaken: (chat) => {
+      if (shown(chat)) broadcast(extensionsOf(chat))
+    },
   })
 
   const { hostFor, contextOf, forgetHost, stopSpawned, toolsOf, dropProvided } = openExtensionHosts<Chat>({
@@ -778,8 +785,16 @@ function assembleCore(options: {
     stopSession,
     forgetChat,
     removeWorkDir: (chat) => removeWorkDir(chat),
+    hasGroup: spaceGroups.has,
   })
   loadAll()
+  const groupActions = openGroupActions({
+    groups: spaceGroups,
+    chats,
+    chatFor,
+    updateChat: (chat, change) => updateChat(chat, change),
+    moveChat,
+  })
 
   migrateExtensionSettings({ extensions, settings, saveSettings, chats: () => chats.values(), saveChat, settingsErrors, extensionError })
 
@@ -998,6 +1013,18 @@ function assembleCore(options: {
     for (const extension of watchers) callExtension(extension, () => extension.onTurnSent!(sent, contextOf(extension)))
   }
 
+  const { deleteMessage, editMessage, undoMessage } = openMessageEdits({
+    broadcast,
+    shownLog: (chat) => pageOf(chat.entries),
+    attachmentsDirOf,
+    removed: (chat, removed) => {
+      const detail = detailOf(chat)
+      callExtensions('onMessagesRemoved', (extension, context) => extension.onMessagesRemoved!({ chat: detail, ...removed }, context))
+    },
+    enqueue,
+    checkActive,
+  })
+
   const handle = openProtocol({
     broadcast,
     now,
@@ -1009,11 +1036,16 @@ function assembleCore(options: {
     renameChat,
     archiveChat,
     moveChat,
+    groups: spaceGroups,
+    groupActions,
     deleteChat,
     updateChat,
     checkActive,
     setModel,
     sendMessage,
+    deleteMessage,
+    editMessage,
+    undoMessage,
     setQueue,
     interrupt,
     respond,
@@ -1031,6 +1063,7 @@ function assembleCore(options: {
     setEngineEnabled,
     setWorkFolder,
     setPermissionDefault,
+    setSshHostsDefault,
     setTerminal,
     setMemory,
     workers,
@@ -1114,6 +1147,7 @@ function assembleCore(options: {
     ],
     modelLists: models.lists,
     setups: jobSetups.list,
+    groups: spaceGroups.list,
     memory: () => settings.memory ?? {},
     workers: workers.info,
     engineTools: engineTools.info,

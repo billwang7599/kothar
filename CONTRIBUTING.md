@@ -152,6 +152,66 @@ Why some things are the way they are. Add one when you make a choice the next co
   5. **Depend on capabilities, not ids.** Name a shared API for what it does (`search`, `research`), so a community
      extension can provide it instead of a built-in one.
 
+- **The browser is the user's own Chrome, and only that.** Agents browse through the Kothar Chrome extension, in a
+  blue tab group per space in the window the user last used, opened in the background so nothing takes focus. When a
+  site wants a sign-in, `ask_user_in_browser` brings the agent's tab forward and the user signs in there themselves.
+  Kothar used to run a Chrome of its own per space (its own profile, a headless browser, a plain window for signing
+  in, idle close), and before that copies of the user's profiles. Copies failed Google sign-in (Google signs out of a
+  copied profile), and a separate profile meant signing in to everything twice, in a browser that sites treat as
+  automated. The user's decision: "just use my chrome. if it needs sign in, i just sign in using my own chrome." So
+  that mode and its code (`chromium.ts`, `profiles.ts`, `space-browser.ts`, `endpoint.ts`, `cdp.ts`) are gone, and its
+  profile folders are deleted when the extension starts. Don't bring back a second browser mode. If the extension
+  isn't connected, the tools fail at once and say how to set it up.
+
+- **Allow all is a full bypass, and it folds the other switches rather than resetting them.** The user asked for
+  "approve everything": while `allowAll` is on, the chat runs with no sandbox (`editsAnywhere` counts it) and the core
+  approves every permission request (`ALLOW_ALL_RULE` in `permissions.ts`), logins, keys, `.env` files and Kothar's
+  saved accounts included, and extensions' policies can't overrule it. Two things still hold, because they aren't
+  questions the user is asked: a folder the user set to Read only, and a read-only turn. It layers like every switch
+  (chat, chats above, Settings → Work folder), so a chat can turn it off under a space that has it on. While it's on,
+  the Permissions tab and Settings show only it, with the others folded away: their picks stay saved and come back
+  unchanged when it's turned off, so turning it on is never a one-way door. The chat header shows an amber **Allow
+  all** chip, like Edits anywhere, so an unguarded chat is easy to spot.
+
+- **Allowed SSH hosts trust a server and one key, not ssh in general.** A user who copies files from the same server
+  all day shouldn't need Allow all or Run network commands without asking. `sshHosts` is a list, layered like a switch
+  (the nearest chat with a list of its own wins, an empty one included). `trustsSshHosts` (`ssh-hosts.ts`) approves a
+  sandboxed command only when every ssh, scp, sftp and rsync in it reaches a listed host, any `-i` key is the one listed
+  for it, and nothing else in it would ask (another network command, any other login or key). It reads the command with
+  `read-only.ts`'s parser, which now expands plain `$NAME`/`${NAME}` set earlier in the same command (`K=~/.ssh/k`,
+  `for f in a b; do ...`), because that's how agents write these commands. It fails closed: options that run programs or
+  reach other hosts (`-o ProxyCommand`, `-J`, `-S`, `-F` other than `~/.ssh/config`, forwarding), rsync daemons, `$(...)`,
+  unset or splitting variables and `FOO=bar ssh` all ask as before. Unsandboxed chats still ask for every command. The
+  macOS sandbox only limits writes, so a trusted ssh reaches the network and reads its key; it can't add a new host to
+  `~/.ssh/known_hosts` or open a ControlMaster socket there.
+
+- **Space groups are core sidebar code, not an extension.** Groups are visual folders of spaces in the left sidebar.
+  They live where spaces are ordered: a space's `group` sits in its chat.json beside `pinned` and `order`, `chat.move`
+  places it, and the groups themselves (names and order) are `<garage>/groups.json`. The public extension API can add
+  launchers, panels and message actions but can't add rows to the spaces list or reorder it, and spaces' order is
+  already core (`moveChat`), so an extension would need a private hook. A group changes nothing about its spaces'
+  context, folders, memory or work folder. Pinned spaces show in Pinned, not in their group, but keep their group, so
+  Unpin puts them back in it. Deleting a group never deletes a space: they go below the ungrouped ones. Which groups are
+  collapsed is a window preference (localStorage `kothar.collapsedGroups`), like folded workers; opening a space in a
+  collapsed group (search, a link) expands it, and ⌘↑/↓ and ⌘1–9 skip spaces hidden in collapsed groups.
+
+- **Deleting a message really deletes it, and leaves a marker where it was.** Users delete messages to take back
+  something they pasted by mistake, such as a secret, so hiding it isn't enough: `message-edits.ts` replaces each
+  removed entry with `{ type: 'entry.removed', at }` and writes `log.jsonl` again whole (a temp file renamed over it),
+  and deletes the attachments and tool pictures no other message uses. The log otherwise stays append-only.
+  - **Why a marker, not a shorter log:** an entry's index is the key extensions keep (`ExtensionMessage.entry`, a
+    pin), and the UI pages the log by index. With markers no index moves and none is ever used twice, so a pin can't
+    jump to another message. Edit and Undo cut the log back the same way, with markers from the message on.
+  - **Memory ids close up:** memory numbers only real messages (`messagesOf` skips markers), because the summary tree
+    needs ids with no gaps (blocks of 2^k from 0). So ids after a deleted message move down. The core tells extensions
+    with `onMessagesRemoved` (`firstMessage`, the first id that moved), and Memory drops every summary that reaches it,
+    in both modes' files, and writes them again. Summaries name their last message's time, so ones left from a delete
+    made while Memory was off are dropped when it next opens the chat. The Inspector forgets the prompts sent since
+    the deleted message, as they quoted it.
+  - **What stays:** files the agent changed (said in the UI), a worker's view of its lead frozen at its launch
+    (`parent-view.md`), and the turn's start and end markers of a deleted reply, so the chat doesn't read as quit
+    mid-turn. Only a stopped chat can be edited or undone; a delete can't touch the turn that runs.
+
 - **Every engine tool can be switched from Kothar.** Kothar wants to see and control as much of what an agent does as
   it can, so each engine's built-in tools are listed in Settings → Engines → Tools (`engine-tools.ts`), each with a
   switch, core ones included, under two master switches (**Engine tools** for every engine, and one per engine). A

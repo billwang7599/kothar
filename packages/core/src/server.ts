@@ -137,6 +137,7 @@ export async function startServer(options: {
       extensions: core.extensions(),
       modelLists: core.modelLists(),
       setups: core.setups(),
+      groups: core.groups(),
       memory: core.memory(),
       workers: core.workers(),
       engineTools: core.engineTools(),

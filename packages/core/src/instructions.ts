@@ -8,6 +8,12 @@ import { corePromptLink } from './core-prompts.ts'
 export const WRITE_RULES =
   'You can write files only in your work folder and in attached folders set to Edit in place. Every other folder ' +
   'is read-only to you: writes there fail.'
+// Kothar's sandbox keeps a Chrome an agent starts itself from saving to the login keychain; without these flags
+// macOS shows the user a keychain dialog (machine.ts, NO_DIALOG_RULES, now stops it, and this keeps agents off it).
+export const BROWSER_LAUNCH_RULES =
+  "To check a web page, use Kothar's browser tools when you have them. If you must start Chrome or Chromium " +
+  'yourself (Playwright, Puppeteer, `--headless --screenshot`), always pass `--use-mock-keychain ' +
+  '--password-store=basic`, so it never touches the macOS keychain.'
 export const FOLDER_RULES =
   "The user sets how you may write in each attached folder that isn't a git repo, as its mode in the chat's " +
   "Context panel. To write in one you can't, ask them to change its mode there:"
@@ -80,7 +86,7 @@ export const instructionSections = (parts: InstructionParts): InstructionSection
   const ids = parts.sources?.extensions ?? []
   return [
     ...(role ? [from(parts.sources?.role, 'Role of this chat', role)] : []),
-    ...(workDir !== undefined ? [core('Where you can write', `${WRITE_RULES}\nYour work folder: ${workDir}`)] : []),
+    ...(workDir !== undefined ? [core('Where you can write', `${WRITE_RULES}\nYour work folder: ${workDir}\n${BROWSER_LAUNCH_RULES}`)] : []),
     ...(checkouts.length
       ? [core('Git checkouts', [CHECKOUT_RULES, ...checkouts.map((c) => `- ${c.folder}: ${c.path} (branch ${c.branch})`)].join('\n'))]
       : []),

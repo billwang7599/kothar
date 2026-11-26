@@ -4,6 +4,7 @@ import type {
   RestartState,
   Answers,
   Attachment,
+  Upload,
   InstalledItem,
   MarketEntry,
   MarketKind,
@@ -24,6 +25,7 @@ import type {
   ModelLists,
   Run,
   Setup,
+  SpaceGroup,
   WorkersSettings,
   EngineToolsSettings,
   PromptInfo,
@@ -52,7 +54,8 @@ export type Permission = {
 // jumps to it; absent when the view can't tell.
 export type Item =
   | { kind: 'user'; text: string; attachments?: Attachment[]; midTurn?: true; entry?: number }
-  | { kind: 'report'; chatId: string; name: string; text: string; error?: string; entry?: number }
+  // from: an extension's report of its own background work (such as a research run), not a worker's.
+  | { kind: 'report'; chatId: string; name: string; text: string; error?: string; from?: string; entry?: number }
   | { kind: 'text'; text: string; entry?: number }
   | { kind: 'thinking'; text: string }
   | {
@@ -104,6 +107,8 @@ export type ChatView = ChatInfo & {
   draft: string
   queue: QueuedMessage[]
   waits?: ChatWait[]
+  // A message the user undid: its text and attachments go back to the composer (chat.tsx), once per nonce.
+  restored?: { text: string; attachments: Upload[]; nonce: number }
 }
 
 export type State = {
@@ -118,6 +123,8 @@ export type State = {
   extensions: ExtensionInfo[]
   modelLists: ModelLists
   setups: Setup[]
+  // The sidebar's groups of spaces, top to bottom.
+  groups: SpaceGroup[]
   // Settings → Workers; absent until the core's snapshot arrives.
   workers?: WorkersSettings
   // Settings → Engines → Tools; absent until the core's snapshot arrives.
@@ -191,6 +198,7 @@ export const initialState: State = {
   extensions: [],
   modelLists: NO_LISTS,
   setups: [],
+  groups: [],
   workFolder: { defaultPath: '', canSandbox: true },
   marketFailures: {},
   communityExtensions: false,
@@ -234,8 +242,8 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
       ]
     }
     case 'worker.report': {
-      const { chatId, name, text, error } = entry
-      return [...items, { kind: 'report', chatId, name, text, ...(error && { error }), ...at }]
+      const { chatId, name, text, error, from } = entry
+      return [...items, { kind: 'report', chatId, name, text, ...(error && { error }), ...(from !== undefined && { from }), ...at }]
     }
     case 'text.completed':
       return [...items, { kind: 'text', text: entry.text, ...at }]
@@ -329,6 +337,8 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
     // The turn's error or an extension's note says it.
     case 'limit.reached':
     case 'turn.started':
+    // A deleted message leaves nothing to show.
+    case 'entry.removed':
       return items
   }
 }
@@ -481,6 +491,7 @@ function reduceAll(state: State, action: Action): State {
         extensions: action.extensions,
         modelLists: action.modelLists,
         setups: action.setups ?? [],
+        groups: action.groups ?? [],
         workers: action.workers,
         ...(action.engineTools && { engineTools: action.engineTools }),
         corePrompts: action.corePrompts,
@@ -508,12 +519,18 @@ function reduceAll(state: State, action: Action): State {
         selectedId: action.chat.parentId ? state.selectedId : action.chat.id,
       }
     case 'chat.updated':
-      return updateChat(state, action.chat.id, (c) => ({
-        ...c,
-        model: undefined,
-        thinking: undefined,
-        run: undefined,
+      // The core sends the chat's whole info, and JSON drops a cleared field (pinned, model, thinking, run…), so the
+      // update replaces the info outright; only what the UI keeps of its own carries over.
+      return updateChat(state, action.chat.id, ({ status, items, entries, from, shift, draft, queue, waits }) => ({
         ...action.chat,
+        status,
+        items,
+        entries,
+        from,
+        shift,
+        draft,
+        queue,
+        waits,
       }))
     case 'chat.removed': {
       const chats = state.chats.filter((c) => c.id !== action.chatId)
@@ -532,6 +549,21 @@ function reduceAll(state: State, action: Action): State {
       }))
     case 'chat.history':
       return updateChat(state, action.chatId, (c) => withOlder(c, action))
+    // Messages were deleted: the latest page again, built anew, in place of every page loaded so far.
+    case 'chat.log':
+      return updateChat(state, action.chatId, (c) => ({
+        ...c,
+        entries: action.entries,
+        items: itemsOf(action.entries, action.from),
+        from: action.from,
+        shift: 0,
+      }))
+    // Kept for the composer, which takes it in once (chat.tsx).
+    case 'chat.undone':
+      return updateChat(state, action.chatId, (c) => ({
+        ...c,
+        restored: { text: action.text, attachments: action.attachments, nonce: (c.restored?.nonce ?? 0) + 1 },
+      }))
     case 'chat.delta':
       return updateChat(state, action.chatId, (c) => ({ ...c, draft: c.draft + action.text }))
     case 'chat.thinking':
@@ -605,6 +637,8 @@ function reduceAll(state: State, action: Action): State {
       return { ...state, modelLists: action.lists }
     case 'setups.updated':
       return { ...state, setups: action.setups }
+    case 'groups.updated':
+      return { ...state, groups: action.groups }
     case 'setup.saved':
     case 'setup.refused': {
       const answer = action.type === 'setup.saved' ? { id: action.setup.id } : { error: action.error }
@@ -679,7 +713,24 @@ const newestFirst = (a: ChatView, b: ChatView) => b.createdAt.localeCompare(a.cr
 
 export type TreeRow = { chat: ChatView; depth: number }
 
-export function chatTree(chats: ChatView[]) {
+/** The sidebar group a space sits in: its own group if that still exists. Pinned spaces show in Pinned instead. */
+export const groupOf = (chat: Pick<ChatView, 'group'>, groups: readonly SpaceGroup[]): SpaceGroup | undefined =>
+  chat.group === undefined ? undefined : groups.find((g) => g.id === chat.group)
+
+/**
+ * How active spaces sort, top to bottom as the sidebar lists them: pinned first, then each group's spaces in the
+ * groups' order, then the ungrouped ones; by their place within each.
+ */
+export function bySidebarPlace(groups: readonly SpaceGroup[]) {
+  const rank = (c: ChatView) => {
+    if (c.pinned) return -1
+    const group = groupOf(c, groups)
+    return group ? groups.indexOf(group) : groups.length
+  }
+  return (a: ChatView, b: ChatView) => rank(a) - rank(b) || bySpaceOrder(a, b)
+}
+
+export function chatTree(chats: ChatView[], groups: readonly SpaceGroup[] = []) {
   const below = (chat: ChatView, archived: boolean) =>
     chats
       .filter((c) => c.parentId === chat.id && c.archived === archived)
@@ -692,7 +743,7 @@ export function chatTree(chats: ChatView[]) {
   const archivedRoots = chats.filter((c) => c.archived && !chats.find((p) => p.id === c.parentId)?.archived)
   return {
     active: activeRoots
-      .sort((a, b) => Number(!!b.extension) - Number(!!a.extension) || bySpaceOrder(a, b))
+      .sort((a, b) => Number(!!b.extension) - Number(!!a.extension) || bySidebarPlace(groups)(a, b))
       .flatMap((c) => walk(c, 0, false)),
     archived: archivedRoots.sort(newestFirst).flatMap((c) => walk(c, 0, true)),
   }

@@ -143,7 +143,8 @@ export type ChatEntry = { at: string } & (
   // midTurn: sent while a turn ran, and taken in by it at this point (steering).
   | { type: 'user.message'; text: string; attachments?: Attachment[]; midTurn?: true }
   // quiet: a quiet child's report, logged for the user (NewChatSpec.showReport); it didn't start a turn.
-  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true }
+  // from: an extension's report (ExtensionHost.report), by that extension's id; chatId is then the extension's id too.
+  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true; from?: string }
   | { type: 'permission.resolved'; requestId: string; allow: boolean; auto?: true }
   | { type: 'question.resolved'; requestId: string; answers?: Answers }
   // panel: clicking the note opens that panel of the extension's, then sends it action. card: drawn as a card.
@@ -157,6 +158,9 @@ export type ChatEntry = { at: string } & (
       // A live card the extension draws (ExtensionNoteView); extension is set with it.
       view?: ExtensionNoteViewRef
     }
+  // What's left of an entry the user deleted (a message, or a reply with its tool calls and thinking): only when it was
+  // logged, so every later entry keeps its index and no index is used twice. Memory and the transcript skip it.
+  | { type: 'entry.removed' }
   | Exclude<EngineEvent, { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' }>
 )
 
@@ -167,9 +171,15 @@ export type ChatEntry = { at: string } & (
 export type MessageKind = 'user' | 'work' | 'talk' | 'tool' | 'echo' | 'note'
 export type MemoryMessage = { id: number; kind: MessageKind; at: string; text: string }
 
+// Messages the user deleted from a chat's log, now entry.removed. entries: their indexes in the log, oldest first.
+// firstMessage: the first MemoryMessage id that's gone or renumbered: memory numbers only what's left, so every message
+// from there on may have a new id, and anything kept by id from there on is out of date. since: when the oldest of them
+// was logged; anything kept since then (such as the prompts later turns were sent) may quote them.
+export type MessagesRemoved = { chat: ChatDetail; entries: number[]; firstMessage: number; since: string }
+
 // A message the transcript draws on its own: the user's (user), a worker's report (work) or the agent's reply (talk).
-// entry: where it is in the chat's log (host.read's index), which never changes, since the log only grows. text as
-// logged: a report without the line Kothar adds for the agent.
+// entry: where it is in the chat's log (host.read's index), which never changes: the log only grows, and an entry the
+// user deletes stays as an entry.removed (onMessagesRemoved). text as logged: a report without the line Kothar adds for the agent.
 export type ExtensionMessage = { entry: number; kind: 'user' | 'work' | 'talk'; at: string; text: string }
 
 // A small button on each message in the transcript, beside Copy: shown on hover or keyboard focus. A message marked()
@@ -209,20 +219,30 @@ export type ExtensionMessageDetail = {
   render(message: ExtensionMessage, chat: ChatDetail, context: ExtensionContext): ExtensionView | Promise<ExtensionView>
 }
 
-// A switch in a chat's composer, beside the message box, such as "Deep research": a chip the user turns on and off for
-// that chat. Each chat keeps its own state (saved with the chat, so it outlives a restart), starting at `default` (off
-// without it). Several extensions can each add theirs. The extension reads a chat's state with host.toggled and sets
-// it with host.setToggle; onChange runs when the user flips it, after the new state is saved. While the extension is
-// off, or left out of the chat by its setup, the chip isn't shown and the saved state waits for it to come back.
+// A mode in a chat's composer, such as "Deep research" or "Plan first": a choice in the composer's mode picker that
+// applies to the next message the user sends. Any extension can add modes, built in or installed, the same way; the
+// picker lists them all. Only one mode is picked at a time, across extensions: picking one turns any other off. It's
+// one-shot: the message the user sends next takes it, and the picker goes back to no mode. For the turn that message
+// starts (or is steered into), host.toggled is true, then off once the turn ends. Modes are told apart by extension
+// id and mode id together, so two extensions may use the same id. What a mode does to its message: `prefix` (text
+// put before it), and/or the extension's own hooks reading host.toggled (transformMessage, turnOptions, instructions,
+// a tool). The picked mode is saved with the chat until a message takes it (so it outlives a restart), starting at
+// `default` (none without it). onChange runs when the user picks or clears it, after the new state is saved. While
+// the extension is off, or left out of the chat by its setup, the mode isn't listed, and a picked one waits for it to
+// come back, not taken by messages sent meanwhile. (The name composerToggles predates the picker; it stays so
+// extensions keep working.)
 export type ExtensionComposerToggle = {
   id: string
-  // Short, such as "Deep research"; shown on the chip.
+  // Short, such as "Deep research"; shown in the picker.
   label: string
   icon?: 'search' | 'globe' | 'book' | 'sparkle' | 'bolt'
   // Explanations on hover, while it's off and while it's on; both default to label.
   hint?: string
   activeHint?: string
   default?: boolean
+  // Put before the message it's sent with, a blank line between, ahead of any extension's transformMessage. The
+  // log keeps what the user typed.
+  prefix?: string
   shown?(chat: ChatDetail, context: ExtensionContext): boolean
   onChange?(on: boolean, chat: ChatDetail, context: ExtensionContext): void | Promise<void>
 }
@@ -307,6 +327,9 @@ export type NewChatSpec = {
   showReport?: boolean
 }
 
+// A result of an extension's background work, for ExtensionHost.report.
+export type ExtensionReport = { name: string; text: string; error?: string }
+
 // Each extension gets a host of its own, so storage and notes know which extension they belong to.
 export type ExtensionHost = {
   // A new chat; send it its first message with send. Without parentId it's a space, with its own folders and files.
@@ -321,6 +344,12 @@ export type ExtensionHost = {
   createChat(spec: NewChatSpec): { id: string }
   // Sends a message as if the user typed it, queued behind a running turn.
   send(chatId: string, text: string): void
+  // Hands the chat's agent the result of background work it started, as a worker's final reply reaches its lead: shown in
+  // the transcript as a report under name, queued for the agent (after a running turn, or at once when the chat is idle)
+  // and waking it, so it can tell the user. text is what the agent reads; error, why the work ended early, if it did.
+  // For work an agent asked for and didn't wait on, such as a research run; not for chatter. Throws when the chat is
+  // gone or archived.
+  report(chatId: string, report: ExtensionReport): void
   // Every chat the user can see, spaces and workers.
   chats(): ChatDetail[]
   // The extension's spaceSettings for chatId's space (the chat itself, or the space a worker is in), defaults filled
@@ -1055,6 +1084,10 @@ export type Extension = {
   // The chat is gone from the core by now; its log and folder too.
   onChatRemoved?(chat: ChatDetail, context: ExtensionContext): void | Promise<void>
   onChatArchived?(chat: ChatDetail, archived: boolean, context: ExtensionContext): void | Promise<void>
+  // The user deleted messages from the chat, or cut it back to edit or undo one (MessagesRemoved). Whatever the
+  // extension kept that quotes them (summaries, copies of prompts) should go, since users delete what they pasted by
+  // mistake, such as a secret.
+  onMessagesRemoved?(removed: MessagesRemoved, context: ExtensionContext): void | Promise<void>
   // A space was deleted (after onChatRemoved for each of its chats): its work folder and checkouts as they were. Kothar
   // removes the work folder and the checkouts itself, since it made them; this is for an extension's own records of
   // them, such as cached pull requests of a checkout.
@@ -1131,7 +1164,7 @@ export type ExtensionUse =
   // transformMessage, transformOutput
   | 'transforms'
   // onEvent, onTurnStarted, onTurnCompleted, onStatusChanged, onSessionEnded, onChatCreated, onChatRemoved,
-  // onChatArchived, onSpaceRemoved, onLimitReached, onStart, onStop, onDependencyChanged
+  // onChatArchived, onMessagesRemoved, onSpaceRemoved, onLimitReached, onStart, onStop, onDependencyChanged
   | 'events'
   // panels, noteViews, processes, onProcessAction, onProcessesChanged, onWaitAction, and host.wait, endWait, processes,
   // processAction, processesChanged
@@ -1146,7 +1179,7 @@ export type ExtensionUse =
   | 'memory'
   // Host calls: chats, chat, read, space, messages, message, reaches, reachable; and onTurnSent.
   | 'readChats'
-  // send, createChat, retry, continue, interrupt, addContextFile
+  // send, report, createChat, retry, continue, interrupt, addContextFile
   | 'sendMessages'
   // accounts, useAccount
   | 'accounts'

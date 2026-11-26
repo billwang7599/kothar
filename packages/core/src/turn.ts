@@ -25,10 +25,10 @@ import { summaryOf } from './kothar-mcp.ts'
 import { instructionSections, type InstructionParts, type InstructionSection } from './instructions.ts'
 import { continuationParts, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
 import type { openModels } from './models.ts'
-import { decide, READ_ONLY_REASON, type RuledVerdict, type verdictOf } from './permissions.ts'
+import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
 import { runningChildren } from './workers.ts'
-import { isToggled } from './composer-toggles.ts'
+import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
 import {
   editsAnywhere,
   IMAGE_TYPES,
@@ -124,6 +124,8 @@ export type TurnDeps = {
   engineToolsFor?: (chat: Chat, engine: string) => Pick<SessionOptions, 'tools' | 'noTools'>
   // The engine said which built-in tools its session has.
   toolsListed?: (engine: string, names: string[]) => void
+  // The user's message took the chat's composer mode, which went back off: the picker redraws.
+  modesTaken?: (chat: Chat) => void
 }
 
 // What the core hands on of a turn as its session opens (kind 'turn'), or of a message steered into it ('steer'), for
@@ -314,6 +316,8 @@ export function openTurns(deps: TurnDeps) {
 
   const endTurn = (chat: Chat, ended: Extract<ChatEntry, { type: 'turn.completed' | 'session.ended' }>) => {
     const { limit, account, runModel } = chat
+    // The modes the turn was sent with end with it.
+    chat.modes = undefined
     chat.limit = undefined
     // Why it failed goes to extensions, not the log. A turn the core stopped for its limit shows the limit, not
     // "Interrupted".
@@ -453,8 +457,8 @@ export function openTurns(deps: TurnDeps) {
     const again = chat.entries.slice(start, end + 1).map((e): QueuedMessage => {
       const id = randomBytes(4).toString('hex')
       if (e.type === 'worker.report') {
-        const { chatId, name, error } = e
-        return { id, text: e.text, report: { chatId, name, ...(error !== undefined && { error }) } }
+        const { chatId, name, error, from } = e
+        return { id, text: e.text, report: { chatId, name, ...(error !== undefined && { error }), ...(from !== undefined && { from }) } }
       }
       const { text, attachments } = e as Extract<ChatEntry, { type: 'user.message' }>
       return { id, text, ...(attachments && { attachments }) }
@@ -495,12 +499,12 @@ export function openTurns(deps: TurnDeps) {
       }))
     }
     for (const extension of deps.extensions.filter((e) => e.composerToggles?.length && deps.isOnFor(e, chat))) {
-      const on = extension.composerToggles!.filter((toggle) => isToggled(chat.info, extension, toggle))
+      const on = extension.composerToggles!.filter((toggle) => isLive(chat, extension, toggle))
       if (!on.length) continue
       activity.emit(chat.info.id, () => ({
         kind: 'turn',
         by: extension,
-        title: `On for this turn: ${on.map((toggle) => toggle.label).join(', ')}`,
+        title: `Mode for this turn: ${on.map((toggle) => toggle.label).join(', ')}`,
       }))
     }
   }
@@ -538,6 +542,20 @@ export function openTurns(deps: TurnDeps) {
         ...(message ? [`Told the agent: ${message}`] : []),
       ].join('\n'),
     }))
+
+  // The prefixes of the modes the turn was sent with (ExtensionComposerToggle.prefix), before the message, in the
+  // order the extensions load.
+  const withModePrefixes = (chat: Chat, text: string) => {
+    if (!text || !chat.modes?.size) return text
+    const prefixes = deps.extensions.flatMap((extension) =>
+      deps.isOn(extension)
+        ? (extension.composerToggles ?? []).flatMap((toggle) =>
+            chat.modes!.has(modeKey(extension.id, toggle.id)) && typeof toggle.prefix === 'string' && toggle.prefix.trim() ? [toggle.prefix.trim()] : [],
+          )
+        : [],
+    )
+    return prefixes.length ? [...prefixes, text].join('\n\n') : text
+  }
 
   const transformed = (hook: 'transformMessage' | 'transformOutput', chat: Chat, text: string) =>
     watchersOf(hook, chat).reduce((current, extension) => {
@@ -712,7 +730,7 @@ export function openTurns(deps: TurnDeps) {
   // Logs the turn's input and makes the prompt that carries it with the chat's memory. The chat runs from here.
   const logTurn = (chat: Chat, adapter: Adapter, input: TurnInput) => {
     const { text, attachments, reports, continuation } = input
-    const rewrite = text ? transformed('transformMessage', chat, text) : text
+    const rewrite = text ? transformed('transformMessage', chat, withModePrefixes(chat, text)) : text
     const message = withAttachments(rewrite, attachments)
     const zoomable = takesMcp(adapter.id)
     const view = viewOf(chat, messagesOf(chat.entries), zoomable)
@@ -917,8 +935,8 @@ export function openTurns(deps: TurnDeps) {
         respondTo(ref.session, requestId, verdict)
       }
       const own = decide(event, permissionsOf())
-      // The core's denials stand; otherwise an extension's policy goes first.
-      if (own?.allow === false) return settle(own)
+      // The core's denials stand, and so does Allow all; otherwise an extension's policy goes first.
+      if (own?.allow === false || own?.rule === ALLOW_ALL_RULE) return settle(own)
       const fromExtensions = extensionVerdict(event, chat)
       if (!(fromExtensions instanceof Promise)) return settle(fromExtensions ?? own)
       // Pending, so the user can still answer it while an extension decides; whoever answers first wins.
@@ -962,7 +980,9 @@ export function openTurns(deps: TurnDeps) {
     const adapter = adapterFor(chat.info.engine)!
     const { text, attachments = [] } = message
     const id = randomBytes(4).toString('hex')
-    const sent = withAttachments(text ? transformed('transformMessage', chat, text) : text, attachments)
+    // A mode sent with it is on for the rest of the turn it joins.
+    for (const mode of message.modes ?? []) (chat.modes ??= new Set()).add(mode)
+    const sent = withAttachments(text ? transformed('transformMessage', chat, withModePrefixes(chat, text)) : text, attachments)
     const images = imagesFor(adapter, attachments)
     setQueue(chat, [...chat.queue, { id, ...message, steering: true }])
     session.steer!(id, sent, images)
@@ -997,10 +1017,14 @@ export function openTurns(deps: TurnDeps) {
     const parts = message ? [...queue, message] : queue
     const reports = parts.flatMap(({ text, report }) => (report ? [{ text, report }] : []))
     const typed = parts.filter((part) => !part.report)
+    // The turn is on in each mode its messages were sent with (composer-toggles.ts).
+    const modes = typed.flatMap((part) => part.modes ?? [])
+    chat.modes = modes.length ? new Set(modes) : undefined
     try {
       const text = typed.flatMap((part) => (part.text ? [part.text] : [])).join('\n\n')
       send(chat, text, typed.flatMap((part) => part.attachments ?? []), reports)
     } catch (error) {
+      chat.modes = undefined
       if (queue.length) setQueue(chat, queue)
       throw error
     }
@@ -1076,9 +1100,31 @@ export function openTurns(deps: TurnDeps) {
         }
       }
     })
+    // The mode picked in the composer goes with this message, and only this one: once it's taken, the composer is back
+    // to no mode. The extensions it's taken from are those on for the chat, so a mode left waiting while its extension
+    // is off stays picked.
+    const picked = pickedModes(
+      chat.info,
+      deps.extensions.filter((e) => e.composerToggles?.length && deps.isOn(e) && deps.isOnFor(e, chat)),
+    )
+    const modes = picked.map(({ extension, toggle }) => modeKey(extension.id, toggle.id))
+    // Taken before the turn starts, so the composer is already back to no mode while it runs; put back if the message
+    // couldn't be sent.
+    const before = chat.info.toggles
+    const setModes = (toggles: typeof before) => {
+      if (!picked.length) return
+      updateChat(chat, { toggles })
+      deps.modesTaken?.(chat)
+    }
+    const takeModes = () => {
+      let toggles = chat.info.toggles
+      for (const { extension, toggle } of picked) toggles = withToggle({ toggles }, extension, toggle, false)
+      setModes(toggles)
+    }
     try {
-      const message = { text, ...(attachments.length && { attachments }) }
+      const message = { text, ...(attachments.length && { attachments }), ...(modes.length && { modes }) }
       // A chat held after its turn queues the message first, so it runs once the extension lets go.
+      takeModes()
       if (chat.held) {
         enqueue(chat, message)
         for (const extensionId of [...chat.waits.keys()]) answerWait(chat, extensionId, { message: text })
@@ -1091,6 +1137,7 @@ export function openTurns(deps: TurnDeps) {
         steer(chat, message)
       } else enqueue(chat, message)
     } catch (error) {
+      setModes(before)
       for (const { path } of attachments) rmSync(path, { force: true })
       throw error
     }

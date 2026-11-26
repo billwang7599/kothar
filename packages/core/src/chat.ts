@@ -31,6 +31,8 @@ export type Chat = {
   limit?: { message: string; resetsAt?: string }
   // The engine wrote, thought or called a tool since the chat's last message; a continuation doesn't reset it.
   produced?: boolean
+  // The composer modes the running turn was sent with (modeKey), on for it until it ends (composer-toggles.ts).
+  modes?: Set<string>
   // What the running turn has done so far, for onTurnCompleted.
   turn?: { text: string; tools: TurnSummary['tools'] }
   // The run the UI last got for this chat (JSON), so a change in Settings or an engine resends only the chats it moves.

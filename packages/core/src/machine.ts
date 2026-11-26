@@ -46,6 +46,24 @@ const DEVICE_RULES = [
   '(regex #"^/dev/ttys")',
 ]
 
+// No sandboxed process may put up a macOS authorization dialog. The one users hit: a process (an agent's own Chrome
+// started without --use-mock-keychain) that can't open the login keychain, as the sandbox keeps it from writing
+// there, gets the Security framework's "Keychain Not Found ... Reset To Defaults" panel. The framework asks for that
+// panel through authd (AuthorizationCopyRights for the login-keychain creation right), and authd has SecurityAgent
+// draw it; with authd out of reach, the call fails and the process gets an error instead. "Reset To Defaults" would
+// move the user's login keychain aside, so this is never a dialog an agent should cause. Keychain reads and writes go
+// to securityd, not authd, so engines' own logins (Claude Code's keychain entry) keep working. The cost: anything
+// needing an admin password through a dialog (osascript "with administrator privileges", AuthorizationExecute...)
+// fails in a sandboxed session, which is what we want too.
+export const NO_DIALOG_SERVICES = [
+  'com.apple.authd',
+  'com.apple.security.authhost',
+  'com.apple.SecurityAgent',
+  'com.apple.security.agent',
+  'com.apple.security.agent.login',
+] as const
+export const NO_DIALOG_RULES = `(deny mach-lookup ${NO_DIALOG_SERVICES.map((name) => `(global-name "${name}")`).join(' ')})`
+
 // The sandbox matches real paths (/tmp is /private/tmp), and a writable path may not exist yet.
 export function realPath(path: string): string {
   try {
@@ -73,7 +91,7 @@ const tempEnv = (tmpDir: string): Record<string, string> => ({
   GOMODCACHE: join(tmpDir, 'cache', 'go-extension'),
 })
 
-function sandboxed(command: string, args: string[], sandbox: Sandbox, platform: NodeJS.Platform) {
+export function sandboxed(command: string, args: string[], sandbox: Sandbox, platform: NodeJS.Platform) {
   if (platform !== 'darwin') {
     throw new Error(`Kothar can't sandbox engines on ${platform} yet, so it won't start one that should be sandboxed`)
   }
@@ -92,7 +110,8 @@ function sandboxed(command: string, args: string[], sandbox: Sandbox, platform: 
   const profile =
     `(version 1)(allow default)(deny file-write* (subpath "/"))` +
     `(allow file-write* ${DEVICE_RULES.join(' ')} ${allowed.rules})` +
-    (kept.rules ? `(deny file-write* ${kept.rules})` : '')
+    (kept.rules ? `(deny file-write* ${kept.rules})` : '') +
+    NO_DIALOG_RULES
   const params = [...allowed.params, ...kept.params]
   const env = tmpDir ? tempEnv(tmpDir) : {}
   return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, ...params, command, ...args], env }

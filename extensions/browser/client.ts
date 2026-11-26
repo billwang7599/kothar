@@ -1,10 +1,9 @@
 // Kothar's own connection to a browser over the Chrome DevTools Protocol, for the browser tools (tools.ts): one
-// WebSocket to the browser target, calls and events, and the browser's tabs as sessions. The same code drives both
-// kinds of browser a space can have: Kothar's own Chrome (its DevTools endpoint, http://127.0.0.1:<port>) and the
-// user's Chrome through the Kothar extension (relay.cdpUrl, which answers /json/version the same way and speaks enough
-// of the protocol for this). So it only uses what both have: Target.setAutoAttach to learn the tabs (no
-// Target.getTargets or attachToTarget), Target.createTarget, closeTarget and activateTarget, and calls on a tab's
-// session.
+// WebSocket to the browser target, calls and events, and the browser's tabs as sessions. It drives the user's Chrome
+// through the Kothar extension (relay.cdpUrl, which answers /json/version as a browser's DevTools endpoint does and
+// speaks enough of the protocol for this), and works on any Chrome's own endpoint too (the tests and the browser bench
+// use one). So it only uses what the relay has: Target.setAutoAttach to learn the tabs (no Target.getTargets or
+// attachToTarget), Target.createTarget, closeTarget and activateTarget, and calls on a tab's session.
 
 export type TargetInfo = { targetId: string; type: string; url: string; title: string; [key: string]: unknown }
 type Listener = (params: any, sessionId: string | undefined) => void
@@ -178,7 +177,7 @@ export type Page = {
   prepared?: Promise<void>
 }
 
-// The browser's tabs, as sessions: auto-attached, so Kothar's own Chrome and the relay show them the same way.
+// The browser's tabs, as sessions: auto-attached, so the relay and a plain Chrome endpoint show them the same way.
 export class Pages {
   private readonly pages = new Map<string, Page>()
   private readonly offs: (() => void)[] = []

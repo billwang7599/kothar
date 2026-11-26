@@ -12,6 +12,7 @@ import type {
   ExtensionHost,
   ExtensionNoteCard,
   ExtensionPermissionAnswer,
+  ExtensionReport,
   ExtensionTool,
   ExtensionRun,
   ExtensionStorage,
@@ -23,12 +24,12 @@ import type {
   SpaceDetail,
 } from '@kothar/extension-api'
 import type { openAccounts } from './accounts.ts'
-import { isToggled, toggleOf, withToggle } from './composer-toggles.ts'
+import { isLive, modeKey, toggleOf, withOnly } from './composer-toggles.ts'
 import { guardHost } from './extensions.ts'
 import { summaryOf, workerName } from './kothar-mcp.ts'
 import { messagesOf } from './memory.ts'
 import { messageAt } from './message-actions.ts'
-import type { Machine, ChatEntry, ChatInfo, ChatStatus, CompletionRequest, CoreMessage } from './shared.ts'
+import type { Machine, ChatEntry, ChatInfo, ChatStatus, CompletionRequest, CoreMessage, WorkerReport } from './shared.ts'
 import { within } from './util.ts'
 
 // A note in the transcript (host.note) and its card, cut to what a line shows; its action is kept to what a click
@@ -74,7 +75,7 @@ const NOTIFY_TITLE_CHARS = 120
 const NOTIFY_BODY_CHARS = 400
 
 /** What a host needs of a chat. */
-export type HostChat = { info: ChatInfo; dir: string; entries: ChatEntry[]; status: ChatStatus; ending?: boolean }
+export type HostChat = { info: ChatInfo; dir: string; entries: ChatEntry[]; status: ChatStatus; ending?: boolean; modes?: Set<string> }
 
 type Accounts = ReturnType<typeof openAccounts>
 type CreateSpec = Parameters<ExtensionHost['createChat']>[0]
@@ -116,7 +117,7 @@ export type HostDeps<C extends HostChat> = {
   // name is checked by the core (a chat needs one).
   createChat: (spec: Pick<CreateSpec, 'folders' | 'files' | 'engine'> & { name: string }) => ChatInfo
   createChild: (parentId: string, spec: Omit<CreateSpec, 'parentId' | 'task' | 'name'> & { name: string }) => ChatInfo
-  enqueue: (chat: C, message: { text: string }) => void
+  enqueue: (chat: C, message: { text: string; report?: WorkerReport }) => void
   interrupt: (chat: C) => void
   retry: (chat: C) => void
   continueTurn: (chat: C, text: string) => void
@@ -271,6 +272,20 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
           by: extension,
           title: `Sent ${chat.info.name} a message`,
           sections: [{ label: 'The message', text: String(text) }],
+        }))
+      },
+      report(chatId, report) {
+        const chat = chatFor(chatId)
+        const { name, text, error } = (report ?? {}) as Partial<ExtensionReport>
+        if (typeof name !== 'string' || !name.trim()) throw new Error('A report needs a name')
+        if (typeof text !== 'string') throw new Error('A report needs its text')
+        const err = typeof error === 'string' && error ? error : undefined
+        deps.enqueue(chat, { text, report: { chatId: extension.id, name: name.trim(), from: extension.id, ...(err && { error: err }) } })
+        deps.activity.emit(chat.info.id, () => ({
+          kind: 'worker',
+          by: extension,
+          title: `Reported to the chat: ${name.trim()}`,
+          sections: [{ label: 'The report', text }],
         }))
       },
       chats: () => deps.shownChats().map(deps.detailOf),
@@ -496,7 +511,7 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
         if (!had) capabilityChanged(capability, extension)
       },
       use: <T,>(name: string) => providerOf(String(name))?.api as T | undefined,
-      toggled: (chatId, toggle) => isToggled(chatFor(String(chatId)).info, extension, toggleOf(extension, toggle)),
+      toggled: (chatId, toggle) => isLive(chatFor(String(chatId)), extension, toggleOf(extension, toggle)),
       prompt: (id) => deps.promptText(extension, String(id)),
       activity(input) {
         const checked = checkedActivity(input)
@@ -507,9 +522,15 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
         const chat = chatFor(String(chatId))
         const found = toggleOf(extension, toggle)
         if (typeof on !== 'boolean') throw new Error('A composer toggle is on or off')
-        if (isToggled(chat.info, extension, found) === on && chat.info.toggles?.[extension.id]?.[found.id] !== undefined) return
-        deps.updateChat(chat, { toggles: withToggle(chat.info, extension, found, on) })
-        if (deps.isOn(extension) && deps.shown(chat)) deps.refresh(extension, chat.info.id)
+        // Off also ends it for the running turn it was sent with.
+        if (!on) chat.modes?.delete(modeKey(extension.id, found.id))
+        if (chat.info.toggles?.[extension.id]?.[found.id] === on) return
+        // On turns any other mode off: only one is picked at a time.
+        const { toggles, others } = withOnly(chat.info, deps.extensions, extension, found, on)
+        deps.updateChat(chat, { toggles })
+        for (const changed of new Set([extension, ...others.map((o) => o.extension)])) {
+          if (deps.isOn(changed) && deps.shown(chat)) deps.refresh(changed, chat.info.id)
+        }
       },
       addContextFile: (chatId, path) => deps.addContextFile(chatFor(deps.spaceOf(chatFor(String(chatId))).id), String(path)),
     }

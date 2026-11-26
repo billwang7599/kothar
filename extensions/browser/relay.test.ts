@@ -5,8 +5,7 @@ import { afterAll, afterEach, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { until as waitUntil } from '@kothar/core/test-wait'
 import { createAgent, parseCode } from './chrome-extension/agent.js'
-import type { ChatDetail, ExtensionHost, ExtensionTool, ExtensionWait } from '@kothar/extension-api'
-import browser, { createBrowserExtension, HAND_OFF_TOOL, SHOW_TOOL, YOUR_CHROME } from './index.ts'
+import { fakeChrome, socketWith } from './test-chrome.ts'
 import { CdpClient, Pages } from './client.ts'
 import { extensionId, EXTENSION_DIR, NOT_CONNECTED, type Relay, startRelay } from './relay.ts'
 
@@ -21,90 +20,6 @@ afterAll(() => {
 const until = (check: () => boolean | Promise<boolean>, ms = 3000) => waitUntil(check, { tries: ms / 10, everyMs: 10 })
 
 const ORIGIN = `chrome-extension://${extensionId()}`
-
-// A fake Chrome: windows, tabs and tab groups in memory, and a debugger that answers a few calls and records the rest.
-function fakeChrome() {
-  type Tab = { id: number; url: string; title: string; groupId: number; windowId: number; active: boolean; openerTabId?: number }
-  const tabs = new Map<number, Tab>()
-  const groups = new Map<number, { id: number; windowId: number; title?: string; color?: string; collapsed?: boolean }>()
-  const attached = new Set<number>()
-  const sent: { tabId: number; sessionId?: string; method: string }[] = []
-  const focused: number[] = []
-  const store: Record<string, Record<string, unknown>> = { session: {}, local: {} }
-  let next = 100
-  let window = 1
-  const area = (name: string) => ({
-    get: async (key: string) => (key in store[name]! ? { [key]: store[name]![key] } : {}),
-    set: async (values: Record<string, unknown>) => void Object.assign(store[name]!, values),
-    remove: async (key: string) => void delete store[name]![key],
-  })
-  const addTab = (fields: Partial<Tab> = {}) => {
-    const tab: Tab = { id: next++, url: 'about:blank', title: '', groupId: -1, windowId: 1, active: false, ...fields }
-    tabs.set(tab.id, tab)
-    return tab
-  }
-  const chrome = {
-    storage: { session: area('session'), local: area('local') },
-    tabs: {
-      get: async (id: number) => {
-        const tab = tabs.get(id)
-        if (!tab) throw new Error('No tab with id')
-        return { ...tab }
-      },
-      query: async (q: { groupId?: number; windowId?: number }) =>
-        [...tabs.values()].filter((t) => (q.groupId === undefined || t.groupId === q.groupId) && (q.windowId === undefined || t.windowId === q.windowId)),
-      create: async (p: { windowId: number; url: string; active: boolean }) => addTab({ windowId: p.windowId, url: p.url, active: p.active }),
-      group: async (p: { groupId?: number; tabIds: number[]; createProperties?: { windowId: number } }) => {
-        let id = p.groupId
-        if (id === undefined) {
-          id = next++
-          groups.set(id, { id, windowId: p.createProperties!.windowId })
-        }
-        for (const tabId of p.tabIds) tabs.get(tabId)!.groupId = id
-        return id
-      },
-      remove: async (id: number) => void tabs.delete(id),
-      update: async (id: number, p: { active?: boolean }) => Object.assign(tabs.get(id)!, p),
-    },
-    tabGroups: {
-      get: async (id: number) => {
-        const group = groups.get(id)
-        if (!group) throw new Error('No group')
-        return { ...group }
-      },
-      update: async (id: number, p: object) => Object.assign(groups.get(id)!, p),
-    },
-    windows: {
-      create: async (p: { url: string }) => {
-        const id = ++window
-        return { id, tabs: [addTab({ windowId: id, url: p.url, active: true })] }
-      },
-      update: async (id: number) => void focused.push(id),
-    },
-    debugger: {
-      attach: async ({ tabId }: { tabId: number }) => void attached.add(tabId),
-      detach: async ({ tabId }: { tabId: number }) => void attached.delete(tabId),
-      sendCommand: async ({ tabId, sessionId }: { tabId: number; sessionId?: string }, method: string) => {
-        sent.push({ tabId, ...(sessionId && { sessionId }), method })
-        const tab = tabs.get(tabId)!
-        if (method === 'Target.getTargetInfo') return { targetInfo: { targetId: `T${tabId}`, type: 'page', url: tab.url, title: tab.title } }
-        if (method === 'Runtime.evaluate') return { result: { value: tab.url } }
-        return {}
-      },
-    },
-  }
-  return { chrome, tabs, groups, attached, sent, focused, addTab }
-}
-
-// The extension's own WebSocket, which Chrome opens with the extension's Origin.
-const socketWith = (origin: string) =>
-  class extends WebSocket {
-    constructor(url: string) {
-      super(url, { origin })
-      // A browser's WebSocket reports a refused connection by closing; ws would also throw it.
-      this.on('error', () => {})
-    }
-  }
 
 async function setup(options: { origin?: string } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kothar-relay-')))
@@ -207,7 +122,7 @@ it('the pairing token and port are kept for the next start', async () => {
   expect(again.code.split(':')[2]).toBe(saved.token)
 })
 
-it("a space's group is made on its first tab: blue, named for the space, in a window of its own", async () => {
+it("a space's group is made on its first tab: blue, named for the space, in the user's window, in the background", async () => {
   const { relay, fake } = await paired()
   const userTab = fake.addTab({ url: 'https://mail.example', active: true })
   const cdp = await cdpClient(relay, 'sales')
@@ -217,18 +132,49 @@ it("a space's group is made on its first tab: blue, named for the space, in a wi
   const groups = [...fake.groups.values()]
   expect(groups).toHaveLength(1)
   expect(groups[0]).toMatchObject({ title: 'Kothar · Sales', color: 'blue' })
-  expect(groups[0]!.windowId).not.toBe(userTab.windowId)
+  // In the window the user is in, not one of its own, and nothing took focus or switched the user's tab.
+  expect(groups[0]!.windowId).toBe(userTab.windowId)
+  expect(fake.created).toEqual([])
+  expect(fake.focused).toEqual([])
+  expect(fake.tabs.get(userTab.id)!.active).toBe(true)
+  const tab = [...fake.tabs.values()].find((t) => t.groupId === groups[0]!.id)!
+  expect(tab.active).toBe(false)
   const attached = cdp.events.find((e) => e.method === 'Target.attachedToTarget')!
   expect(attached.params.targetInfo).toMatchObject({ targetId, type: 'page', attached: true })
   const { result } = await cdp.send('Runtime.evaluate', { expression: 'location.href' }, attached.params.sessionId)
   expect(result.value).toBe('https://example.com')
 
-  // A second tab joins the same group, and the user's own tab was never touched.
+  // A second tab joins the same group, also in the background, and the user's own tab was never touched.
   await cdp.send('Target.createTarget', { url: 'https://example.org' })
   expect(fake.groups.size).toBe(1)
-  expect([...fake.tabs.values()].filter((t) => t.groupId === groups[0]!.id)).toHaveLength(2)
+  const ours = [...fake.tabs.values()].filter((t) => t.groupId === groups[0]!.id)
+  expect(ours).toHaveLength(2)
+  expect(ours.every((t) => !t.active)).toBe(true)
+  expect(fake.tabs.get(userTab.id)!.active).toBe(true)
   expect(fake.attached.has(userTab.id)).toBe(false)
   expect(fake.sent.some((s) => s.tabId === userTab.id)).toBe(false)
+})
+
+it("a new group skips incognito and popup windows, and with no window open it opens one unfocused", async () => {
+  const { relay, fake } = await paired()
+  // The last window used is incognito, then a popup; the user's normal window is further back.
+  fake.windows.unshift({ id: 7, type: 'popup', incognito: false }, { id: 8, type: 'normal', incognito: true })
+  fake.windows.unshift(fake.windows.splice(1, 1)[0]!)
+  const sales = await cdpClient(relay, 'sales')
+  await sales.send('Target.setAutoAttach', { autoAttach: true, flatten: true })
+  await sales.send('Target.createTarget', { url: 'https://example.com' })
+  expect([...fake.groups.values()][0]!.windowId).toBe(1)
+  expect(fake.created).toEqual([])
+
+  // No normal window at all: one opens, unfocused, with the space's tab grouped in it.
+  fake.windows.splice(0)
+  const web = await cdpClient(relay, 'web')
+  await web.send('Target.setAutoAttach', { autoAttach: true, flatten: true })
+  await web.send('Target.createTarget', { url: 'https://example.org' })
+  expect(fake.created).toEqual([{ focused: false }])
+  const group = [...fake.groups.values()].find((g) => g.title === 'Kothar · Website')!
+  expect(group.windowId).not.toBe(1)
+  expect(fake.focused).toEqual([])
 })
 
 it("agents can't reach tabs outside their space's group, nor another space's", async () => {
@@ -337,6 +283,7 @@ it("refuses browser-wide calls that would read or change the user's own browser"
 
 it('focus brings the space’s group to the front, and says so when there is none', async () => {
   const { relay, fake } = await paired()
+  fake.addTab({ url: 'https://mail.example', active: true })
   expect(await relay.focus('sales')).toBe(false)
   const cdp = await cdpClient(relay, 'sales')
   await cdp.send('Target.setAutoAttach', { autoAttach: true, flatten: true })
@@ -346,6 +293,13 @@ it('focus brings the space’s group to the front, and says so when there is non
   expect(fake.focused).toEqual([group.windowId])
   expect(group.collapsed).toBe(false)
   expect(await relay.tabs('sales')).toEqual([{ url: 'https://example.com', title: '', active: true }])
+
+  // Given a tab, that one comes to the front, not just the group's first.
+  const { targetId } = await cdp.send('Target.createTarget', { url: 'https://example.org' })
+  const second = [...fake.tabs.values()].find((t) => t.url === 'https://example.org')!
+  expect(second.active).toBe(false)
+  expect(await relay.focus('sales', targetId)).toBe(true)
+  expect(second.active).toBe(true)
 })
 
 it('when the extension disconnects, agents’ connections close and their next call says why', async () => {
@@ -367,118 +321,3 @@ it("the agents' endpoint refuses a wrong token and requests from web pages", asy
   expect((await fetch(`${url}/json/version`)).status).toBe(200)
 })
 
-
-// The Browser extension with "Your Chrome (Kothar extension)" picked: no browser of its own ever launches.
-async function yourChrome() {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kothar-your-chrome-')))
-  dirs.push(dir)
-  const defaults = Object.fromEntries(browser.settings!.map((setting) => [setting.key, setting.default]))
-  const values = { ...defaults, profile: YOUR_CHROME }
-  const launches: unknown[] = []
-  const { extension, cdpUrl } = createBrowserExtension({
-    launch: () => async (given) => {
-      launches.push(given)
-      throw new Error('launched')
-    },
-    relay: { port: 0, origin: ORIGIN },
-  })
-  const chats: ChatDetail[] = []
-  const waits = new Map<string, ExtensionWait>()
-  const host = {
-    chats: () => chats,
-    space: (chatId: string) => (chats.some((c) => c.id === chatId) ? { id: chatId, name: 'Sales', folders: [], checkouts: [] } : undefined),
-    wait: (chatId: string, wait: ExtensionWait) => void waits.set(chatId, wait),
-    endWait: (chatId: string) => void waits.delete(chatId),
-    processesChanged: () => {},
-    storage: { dir },
-  } as unknown as ExtensionHost
-  const space: ChatDetail = { id: 'sales', name: 'Sales', engine: 'fake', status: 'running', archived: false, keepsContext: true, folders: [], files: [], createdAt: '' } as ChatDetail
-  chats.push(space)
-  await extension.onStart!({ values, host })
-  cleanups.push(() => extension.onStop!({ values, host }))
-  const fake = fakeChrome()
-  const agent = createAgent({ chrome: fake.chrome, WebSocket: socketWith(ORIGIN), setTimer: () => 0 })
-  cleanups.push(() => agent.unpair())
-  const view = () => JSON.stringify(extension.settingsView!.render({ values, host }))
-  const endpoint = () => cdpUrl('sales')
-  const tool = (name: string) => extension.tools!.find((t) => t.name === name) as ExtensionTool
-  return { extension, values, host, space, waits, fake, agent, view, endpoint, tool, launches }
-}
-
-it('Your Chrome: Settings shows the setup steps and code, and pairing turns it Connected', async () => {
-  const { view, agent } = await yourChrome()
-  expect(view()).toContain('Not connected')
-  expect(view()).toContain('Load unpacked')
-  expect(view()).toContain(EXTENSION_DIR.replaceAll('\\', '\\\\'))
-  const code = /KOTHAR:\d+:[\w-]+/.exec(view())![0]
-  await agent.pair(code)
-  await until(() => view().includes('"Connected"'))
-  expect(view()).not.toContain('Load unpacked')
-})
-
-it("Your Chrome: the browser tools get the space's endpoint on the relay, and no browser is launched", async () => {
-  const { endpoint, agent, view, launches, fake, tool, space, values, host } = await yourChrome()
-  await agent.pair(/KOTHAR:\d+:[\w-]+/.exec(view())![0])
-  await until(() => view().includes('"Connected"'))
-  const url = await endpoint()
-  const port = /KOTHAR:(\d+):/.exec(view())![1]
-  expect(url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/[\\w-]+/sales$`))
-  const version = await (await fetch(`${url}/json/version/`)).json()
-  const ws = new WebSocket(version.webSocketDebuggerUrl)
-  await new Promise((resolve) => ws.once('open', resolve))
-  const answer = new Promise<any>((resolve) => ws.once('message', (d) => resolve(JSON.parse(String(d)))))
-  ws.send(JSON.stringify({ id: 1, method: 'Target.createTarget', params: { url: 'https://example.com' } }))
-  expect((await answer).result.targetId).toMatch(/^T\d+$/)
-  ws.close()
-  expect([...fake.groups.values()][0]).toMatchObject({ title: 'Kothar · Sales', color: 'blue' })
-  // The agent's browser_tabs reaches the same tab through the relay.
-  expect(String(await tool('browser_tabs').run({ action: 'list' }, { caller: space, values, host }))).toBe('0: https://example.com')
-  expect(launches).toEqual([])
-})
-
-it("Your Chrome: show_browser focuses the space's group and waits for Done, which closes the bar at once", async () => {
-  const { agent, view, tool, space, host, values, waits, fake, extension, endpoint } = await yourChrome()
-  await agent.pair(/KOTHAR:\d+:[\w-]+/.exec(view())![0])
-  await until(() => view().includes('"Connected"'))
-  // No tabs yet: the agent hears to open the page first.
-  await expect(tool(SHOW_TOOL).run({ reason: 'Look' }, { caller: space, values, host })).rejects.toThrow(/no tabs/)
-  const version = await (await fetch(`${await endpoint()}/json/version/`)).json()
-  const ws = new WebSocket(version.webSocketDebuggerUrl)
-  await new Promise((resolve) => ws.once('open', resolve))
-  const made = new Promise((resolve) => ws.once('message', resolve))
-  ws.send(JSON.stringify({ id: 1, method: 'Target.createTarget', params: { url: 'https://example.com' } }))
-  await made
-  ws.close()
-
-  let returned: string | undefined
-  void Promise.resolve(tool(SHOW_TOOL).run({ reason: 'The chart is empty' }, { caller: space, values, host })).then((t) => (returned = String(t)))
-  await until(() => waits.has('sales'))
-  const group = [...fake.groups.values()][0]!
-  expect(fake.focused).toEqual([group.windowId])
-  expect(waits.get('sales')!.buttons.find((b) => b.id === 'done')).toMatchObject({ closes: true })
-  await extension.onWaitAction!(space, { button: 'done' }, { values, host })
-  await until(() => returned !== undefined)
-  expect(returned).toContain('The user is done.')
-  expect(returned).toContain("Kothar tab group in the user's Chrome")
-  expect(returned).toContain('https://example.com')
-  expect(waits.has('sales')).toBe(false)
-})
-
-it("Your Chrome: with the extension disconnected, the agent's tools say so and nothing launches", async () => {
-  const { tool, space, values, host, launches, agent, view } = await yourChrome()
-  await expect(tool(HAND_OFF_TOOL).run({ reason: 'Log in' }, { caller: space, values, host })).rejects.toThrow(NOT_CONNECTED)
-  await agent.pair(/KOTHAR:\d+:[\w-]+/.exec(view())![0])
-  await until(() => view().includes('"Connected"'))
-  await agent.unpair()
-  await until(() => view().includes('Not connected'))
-  await expect(tool(SHOW_TOOL).run({ reason: 'Look' }, { caller: space, values, host })).rejects.toThrow(NOT_CONNECTED)
-  expect(launches).toEqual([])
-})
-
-it('Your Chrome: picking another profile closes the relay', async () => {
-  const { extension, host, values, view } = await yourChrome()
-  const port = Number(/KOTHAR:(\d+):/.exec(view())![1])
-  const own = { ...values, profile: 'kothar' }
-  await extension.onSettingsChanged!({ key: 'profile', value: 'kothar', previous: YOUR_CHROME }, { values: own, host })
-  await until(async () => (await fetch(`http://127.0.0.1:${port}/x`).then(() => false, () => true)))
-})

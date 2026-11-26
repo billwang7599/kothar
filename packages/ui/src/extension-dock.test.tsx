@@ -104,6 +104,65 @@ test('it widens to fill the chat pane and back, Esc narrows it, and × closes it
   expect(dock()).toBeNull()
 })
 
+test('filling the pane, it sits under the chat header on a solid surface', () => {
+  render()
+  act(() => openDock('extension:artifacts/artifacts'))
+  expect(dock()!.classList.contains('surface-over')).toBe(false)
+  act(() => button('Widen Artifacts').click())
+  const classes = dock()!.classList
+  // Below the header (h-44), so the chat's title and the dock's never share a row, and its toggles stay in reach.
+  expect(classes.contains('top-44')).toBe(true)
+  expect(classes.contains('inset-y-0')).toBe(false)
+  expect(classes.contains('surface-over')).toBe(true)
+  expect(classes.contains('bg-panel')).toBe(true)
+  // One title in the dock, cut short with an ellipsis when long.
+  const titles = dock()!.querySelectorAll('h2')
+  expect(titles).toHaveLength(1)
+  expect(titles[0]!.classList.contains('truncate')).toBe(true)
+})
+
+test('opened in a wide window, then shown again after the window narrowed (another chat in between), it fills under the header on a solid surface', () => {
+  // jsdom has no layout: the pane's width comes from clientWidth, read when the dock mounts and on each resize.
+  let paneWidth = 900
+  const observers: (() => void)[] = []
+  const restore = { RO: globalThis.ResizeObserver, width: Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')! }
+  globalThis.ResizeObserver = class {
+    fire: () => void
+    constructor(fire: () => void) {
+      this.fire = fire
+    }
+    observe() {
+      observers.push(this.fire)
+    }
+    disconnect() {}
+    unobserve() {}
+  } as unknown as typeof ResizeObserver
+  Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => paneWidth })
+  try {
+    // Chat A, wide: the dock sits beside the transcript.
+    act(() => openDock('extension:artifacts/artifacts', 'space'))
+    render()
+    expect(dock()!.dataset.wide).toBeUndefined()
+    expect(dock()!.classList.contains('relative')).toBe(true)
+    // Chat B shows (A's dock unmounts), the window narrows, then A shows again: its dock mounts into a narrow pane.
+    act(() => root.render(<></>))
+    paneWidth = 420
+    render()
+    expect(dock()!.dataset.wide).toBe('true')
+    expect(dock()!.classList.contains('surface-over')).toBe(true)
+    expect(dock()!.classList.contains('top-44')).toBe(true)
+    expect(dock()!.querySelectorAll('h2')).toHaveLength(1)
+    // And back: widening puts it beside the chat again, with no solid fill or header offset left over.
+    paneWidth = 1200
+    act(() => observers.forEach((fire) => fire()))
+    expect(dock()!.dataset.wide).toBeUndefined()
+    expect(dock()!.classList.contains('surface-over')).toBe(false)
+  } finally {
+    globalThis.ResizeObserver = restore.RO
+    Object.defineProperty(Element.prototype, 'clientWidth', restore.width)
+  }
+})
+
 test('closing or opening another narrows it again; only a dock panel of the chat shows', () => {
   render(undefined, [changes])
   act(() => openDock('extension:artifacts/artifacts'))
