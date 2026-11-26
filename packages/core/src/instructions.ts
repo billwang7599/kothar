@@ -26,8 +26,9 @@ export const NO_COMMITS_RULES =
   'say. Each is checked out in your work folder from the first message after its first commit:'
 
 export const IMAGE_RULES =
-  'To show the user an image, such as a chart, screenshot or render you made, write ![caption](/absolute/path.png) ' +
-  'in your reply: Kothar shows it in the chat. It must be a file in your folders.'
+  'To show the user an image, such as a chart, screenshot or render you made, write ![caption](</absolute/path.png>) ' +
+  'in your reply, with the path in angle brackets so spaces in it work: Kothar shows it in the chat. It must be a ' +
+  'file in your folders.'
 
 export type InstructionCheckout = { folder: string; path: string; branch: string }
 

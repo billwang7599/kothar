@@ -104,7 +104,8 @@ What works today:
   work folder or attachments (an absolute path, `~/…`, `file://…` or relative), served by the core only from there.
   PNG, JPEG, GIF, WebP, SVG, AVIF and BMP up to 25 MB; a missing or too-big file says so inline. A click opens it full
   size, with Open and Show in Finder. Pictures on the web don't load until you click Load image. Agents are told they
-  can show images this way. Pictures a tool returns (a browser screenshot, an image the agent read) show as
+  can show images this way, with the path in angle brackets (`![caption](</path with spaces.png>)`); a local path
+  with spaces written without them still shows, since the chat adds the brackets before reading the reply. Pictures a tool returns (a browser screenshot, an image the agent read) show as
   thumbnails under its row, saved in the chat's folder (`tool-images/`) so the log keeps only their paths.
 - **Math:** replies and extension Markdown render LaTeX with KaTeX, bundled so nothing loads from the web: `$$…$$` and
   `\[…\]` as blocks, `$…$` and `\(…\)` inline. Dollar amounts ("$5 and $10") stay text, a block still streaming stays
