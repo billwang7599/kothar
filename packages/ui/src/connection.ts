@@ -8,12 +8,11 @@ const MAX_RETRY_MS = 10_000
 const TOKEN_KEY = 'kothar.token'
 
 export function coreUrl(
-  env: { DEV: boolean; VITE_KOTHAR_CORE_URL?: string; VITE_HOTROD_CORE_URL?: string },
+  env: { DEV: boolean; VITE_KOTHAR_CORE_URL?: string },
   page: { protocol: string; host: string },
   token: string,
 ) {
-  // VITE_HOTROD_CORE_URL is its name from when Kothar was Hotrod.
-  const set = env.VITE_KOTHAR_CORE_URL || env.VITE_HOTROD_CORE_URL
+  const set = env.VITE_KOTHAR_CORE_URL
   const base = set || (env.DEV ? DEV_CORE_URL : `${page.protocol === 'https:' ? 'wss' : 'ws'}://${page.host}`)
   const url = new URL(base)
   url.searchParams.set('token', token)

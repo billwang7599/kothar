@@ -6,7 +6,6 @@
 // the next call starts it again, after a pause that doubles with each crash in a row (1 s up to 30 s); after
 // MAX_CRASHES in a row it stays stopped until the user restarts it. Each start, stop, crash and restart is recorded
 // in the Activity.
-import { homedir } from 'node:os'
 import type { ActivityInput, McpToolResult } from '@kothar/extension-api'
 import { Client, SSEClientTransport, StreamableHTTPClientTransport, UnauthorizedError } from '@modelcontextprotocol/client'
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/client/stdio'
@@ -22,6 +21,8 @@ export type Status = { state: State; error?: string; since?: number; crashes: nu
 
 export type ClientsDeps = {
   store: Store
+  // The user's home folder (host.home): where stdio servers start.
+  home: string
   now: () => number
   // An Activity record (host.activity); the manager masks secrets before it calls this.
   record: (event: ActivityInput) => void
@@ -97,7 +98,7 @@ export function openClients(deps: ClientsDeps) {
       const [command, args] = deps.shell
         ? [deps.shell, ['-lc', 'exec "$@"', 'mcp-server', server.command!, ...(server.args ?? [])]]
         : [server.command!, server.args ?? []]
-      return new StdioClientTransport({ command, args, env, stderr: 'pipe', cwd: homedir() })
+      return new StdioClientTransport({ command, args, env, stderr: 'pipe', cwd: deps.home })
     }
     const headers = { ...server.headers, ...secrets.headers }
     const authProvider = deps.authProvider?.(server)

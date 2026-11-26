@@ -110,8 +110,6 @@ export type ChatDetail = ChatSummary & {
   // and their workers; false for an extension's own chat, such as Home. Check this, not extension, before offering
   // anything that needs a space.
   keepsContext: boolean
-  /** @deprecated The same as `extension`, for extensions written when they were called mods. */
-  mod?: string
   folders: string[]
   files: string[]
   createdAt: string
@@ -1229,65 +1227,3 @@ export type ExtensionUse =
   | 'network'
   // host.home; and Node's own APIs: node:fs, for anything outside host.storage
   | 'files'
-
-// Extensions were called mods. These old names stay, so an extension written against them still type-checks.
-/** @deprecated Use ExtensionSetting. */
-export type ModSetting = ExtensionSetting
-/** @deprecated Use ExtensionValues. */
-export type ModValues = ExtensionValues
-/** @deprecated Use ExtensionChat. */
-export type ModChat = ExtensionChat
-/** @deprecated Use ExtensionAccount. */
-export type ModAccount = ExtensionAccount
-/** @deprecated Use ExtensionAccounts. */
-export type ModAccounts = ExtensionAccounts
-/** @deprecated Use ExtensionRun. */
-export type ModRun = ExtensionRun
-/** @deprecated Use ExtensionProcess. */
-export type ModProcess = ExtensionProcess
-/** @deprecated Use ExtensionSpawnOptions. */
-export type ModSpawnOptions = ExtensionSpawnOptions
-/** @deprecated Use ExtensionStorage. */
-export type ModStorage = ExtensionStorage
-/** @deprecated Use ExtensionHost. */
-export type ModHost = ExtensionHost
-/** @deprecated Use ExtensionWait. */
-export type ModWait = ExtensionWait
-/** @deprecated Use ExtensionWaitAnswer. */
-export type ModWaitAnswer = ExtensionWaitAnswer
-/** @deprecated Use ExtensionProcessRow. */
-export type ModProcessRow = ExtensionProcessRow
-/** @deprecated Use ExtensionContext. */
-export type ModContext = ExtensionContext
-/** @deprecated Use ExtensionTool. */
-export type ModTool = ExtensionTool
-/** @deprecated Use ExtensionMemoryRequest. */
-export type ModMemoryRequest = ExtensionMemoryRequest
-/** @deprecated Use ExtensionMemory. */
-export type ModMemory = ExtensionMemory
-/** @deprecated Use ExtensionSession. */
-export type ModSession = ExtensionSession
-/** @deprecated Use ExtensionInstructionsFor. */
-export type ModInstructionsFor = ExtensionInstructionsFor
-/** @deprecated Use ExtensionSetup. */
-export type ModSetup = ExtensionSetup
-/** @deprecated Use ExtensionTone. */
-export type ModTone = ExtensionTone
-/** @deprecated Use ExtensionAction. */
-export type ModAction = ExtensionAction
-/** @deprecated Use ExtensionJson. */
-export type ModJson = ExtensionJson
-/** @deprecated Use ExtensionListItem. */
-export type ModListItem = ExtensionListItem
-/** @deprecated Use ExtensionView. */
-export type ModView = ExtensionView
-/** @deprecated Use ExtensionPanel. */
-export type ModPanel = ExtensionPanel
-/** @deprecated Use ExtensionCommand. */
-export type ModCommand = ExtensionCommand
-/** @deprecated Use Extension. */
-export type Mod = Extension
-/** @deprecated Use ExtensionManifest. */
-export type ModManifest = ExtensionManifest
-/** @deprecated Use ExtensionUse. */
-export type ModUse = ExtensionUse

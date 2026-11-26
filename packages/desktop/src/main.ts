@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { envVar, startCore } from '@kothar/core/main'
 import { fixPath } from './shell-path.ts'
-import { userDataDir } from './user-data.ts'
 
 // The packaged app is one bundled main.mjs with the UI, preload, icon and built-in extensions beside it (see
 // scripts/stage.mjs); from the repo, each sits where the source tree has it.
@@ -27,9 +27,10 @@ const MENU_DEFAULTS: Record<string, string | null> = {
   lastChat: 'Ctrl+Tab',
 }
 
-// Chromium's caches would otherwise land in the garage, which shares the app's name.
+// Electron's own folder (Chromium's caches and the window's localStorage, where UI preferences live) would otherwise
+// land in the garage, which shares the app's name.
 // KOTHAR_USER_DATA moves it, with the single-instance lock, so a test copy runs beside the user's own Kothar.
-app.setPath('userData', envVar(process.env, 'USER_DATA') ?? userDataDir(app.getPath('appData')))
+app.setPath('userData', envVar(process.env, 'USER_DATA') ?? join(app.getPath('appData'), 'Kothar Desktop'))
 if (!app.requestSingleInstanceLock()) app.quit()
 else
   start().catch(async (error: unknown) => {

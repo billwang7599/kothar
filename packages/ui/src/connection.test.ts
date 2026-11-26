@@ -18,12 +18,6 @@ test('VITE_KOTHAR_CORE_URL wins in dev and in a build', () => {
   expect(coreUrl({ ...env, DEV: false }, page, 't')).toBe('ws://127.0.0.1:4461/?token=t')
 })
 
-test('VITE_HOTROD_CORE_URL, its name from before the rename, still works', () => {
-  const old = { DEV: true, VITE_HOTROD_CORE_URL: 'ws://127.0.0.1:4462' }
-  expect(coreUrl(old, page, 't')).toBe('ws://127.0.0.1:4462/?token=t')
-  expect(coreUrl({ ...old, VITE_KOTHAR_CORE_URL: 'ws://127.0.0.1:4461' }, page, 't')).toBe('ws://127.0.0.1:4461/?token=t')
-})
-
 test('the token is escaped in the URL', () => {
   expect(coreUrl({ DEV: false }, page, 'a+b/c=')).toBe('ws://127.0.0.1:5000/?token=a%2Bb%2Fc%3D')
 })

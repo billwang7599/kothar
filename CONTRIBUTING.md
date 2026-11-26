@@ -26,9 +26,9 @@ The desktop app uses the same core port, so quit Kothar first, or move the dev c
 WebSocket address, read by the UI).
 
 Other variables the core reads (`packages/core/src/main.ts`): `KOTHAR_PORT` (core port, default 4317),
-`KOTHAR_UI_ORIGIN`, `KOTHAR_TOKEN`, `KOTHAR_ENGINE`, `KOTHAR_MARKETPLACE_URL` and `KOTHAR_GITHUB_TOKEN`. The UI's Vite
-port is `KOTHAR_UI_PORT` (default 4318). Each has an older `HOTROD_` name that still works (see
-[Old names](#old-names-and-why-they-still-work)).
+`KOTHAR_UI_ORIGIN`, `KOTHAR_TOKEN`, `KOTHAR_ENGINE`, `KOTHAR_MARKETPLACE_URL`, `KOTHAR_GITHUB_TOKEN` and `KOTHAR_DEV`.
+The UI's Vite port is `KOTHAR_UI_PORT` (default 4318). The fake engine (scripted replies, no model) is offered only when
+`KOTHAR_DEV` is set, which `npm run dev` does, or `KOTHAR_ENGINE=fake`; the desktop app never lists it.
 
 To build the Mac app, see [Building the Mac app](README.md#building-the-mac-app).
 
@@ -118,6 +118,12 @@ A **tool** is something an agent calls (run a command, edit a file, an MCP tool)
 ## Decisions
 
 Why some things are the way they are. Add one when you make a choice the next contributor would otherwise undo.
+
+- **No Hotrod-rename migrations.** Kothar never shipped as Hotrod, and the one garage from then has moved, so the
+  rename's migration code (garage and Electron folder moves, `HOTROD_` fallbacks, `hotrod.*` keys, old settings and
+  chat keys, `Mod*` aliases and `ChatDetail.mod`) was deleted rather than kept forever. Don't add it back.
+- **Fresh installs start lean.** Deep Research and Pins are off by default; a switch saved in `settings.json` wins, so
+  only installs that never touched them change. The fake engine is for development and tests (`KOTHAR_DEV`), not the app.
 
 - **Home is part of Kothar, but still an extension.** The main chat and spaces are what Kothar is, so Home is always on:
   it has no switch, isn't listed under Built-in extensions, and its page (its editable role prompt) sits under
@@ -365,22 +371,17 @@ Community extensions and themes don't live in this repo; see
 
 ## Old names and why they still work
 
-Kothar was called Hotrod; extensions were called mods (community ones "aftermarket" mods), and workers were
-subagents. Installs, saved files and published extensions from then must keep working, so a few places still accept
-the old names. Don't remove these, and don't use the old names in new code:
+Extensions were called mods (community ones "aftermarket" mods), and workers were subagents. Saved files and published
+extensions from then must keep working, so a few places still accept the old names. Don't remove these, and don't use
+the old names in new code. (Kothar was also called Hotrod. That rename's migrations, of the garage, `HOTROD_` variables,
+`hotrod.*` UI preferences, old settings keys and the deprecated `Mod*` type aliases, were removed before the first
+release, once the only garage from then had moved.)
 
 | Where | What it keeps working |
 |---|---|
-| `packages/core/src/main.ts` (`envVar`, `defaultGarage`) | Every `KOTHAR_` variable falls back to its `HOTROD_` name; an old Hotrod garage moves to Kothar's folder on first launch. |
-| `packages/core/src/garage-move.ts` | That one-time garage move, repointing stored paths. |
-| `packages/core/src/vocab-move.ts` | Settings, chats and garage folders saved under the old words (mod, subagent, aftermarket, `askNetworkCommands`) are read under the new ones. |
-| `packages/core/src/machine.ts` (`HOTROD_TOKEN`) | The old token variable is stripped from agents' environments too. |
-| `packages/core/src/core.ts` (`mod:` beside `extension:` in chat summaries) and `packages/extension-api/index.ts` (deprecated `mod` field) | Extensions written when they were called mods. |
+| `packages/core/src/chat-store.ts` (`renameEntry`) | Old log entries (`subagent.report`, `mod.note`) read under today's types. Logs are append-only history, so these stay. |
 | `packages/core/src/catalog-check.ts` (catalog `kind: 'mod'`) | Marketplace catalogs written when extensions were mods. |
 | `packages/core/src/memory.ts`, `packages/ui/src/state.ts` (`[subagent "…"]`) | Worker reports in old chat logs. |
-| `packages/ui/src/connection.ts` (`VITE_HOTROD_CORE_URL`), `packages/ui/vite.config.ts` (`HOTROD_UI_PORT`) | Old UI environment variables. |
-| `packages/ui/src/renamed-storage.ts` | UI preferences saved under `hotrod.*` keys move to `kothar.*`. |
-| `packages/ui/src/panel-tab.ts` | Panel tabs saved as `mod:<id>`. |
 | `packages/core/src/workers.ts` (`moveWorkersSettings`), `packages/core/src/setups.ts` (`extensionsOff: ['workers']`) | Settings and setups saved while workers were an extension. |
 
 ## Releasing

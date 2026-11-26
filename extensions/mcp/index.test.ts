@@ -94,6 +94,7 @@ describe('clients', () => {
     const slept: number[] = []
     const clients = openClients({
       store,
+      home: tmpdir(),
       now: () => Date.now(),
       record: (event) => events.push(event),
       idleMs: () => idleMs,
@@ -370,7 +371,7 @@ describe('remote servers', () => {
     const { url, seen } = await remote()
     const store = openStore(tempDir('kothar-mcp-remote-'))
     const events: ActivityInput[] = []
-    const clients = openClients({ store, now: () => Date.now(), record: (e) => events.push(e), idleMs: () => 60_000 })
+    const clients = openClients({ store, home: tmpdir(), now: () => Date.now(), record: (e) => events.push(e), idleMs: () => 60_000 })
     cleanups.push(() => clients.stopAll())
     const server = remoteServer(url)
     store.put(server)

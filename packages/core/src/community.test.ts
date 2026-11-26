@@ -415,19 +415,6 @@ describe('the core', () => {
     expect(t.core.extensions().find((m) => m.id === 'local-one')!.enabled).toBe(false)
   })
 
-  it('runs a community extension turned on under the old mods settings', async () => {
-    const garage = tempGarage()
-    install(garage, 'counter')
-    writeFileSync(join(garage, 'settings.json'), JSON.stringify({ communityMods: true, mods: { counter: { enabled: true } } }))
-    expect(savedOn(garage, 'counter')).toBe(true)
-    const t = start({ garage, community: await loadCommunityExtensions(garage, (id) => savedOn(garage, id)) })
-    expect(t.core.communityExtensions()).toBe(true)
-    expect(t.core.extensions().find((m) => m.id === 'counter')).toMatchObject({ enabled: true, community: { running: '1.0.0' } })
-    const settings = JSON.parse(readFileSync(join(garage, 'settings.json'), 'utf8'))
-    expect(settings).toMatchObject({ communityExtensions: true, extensions: { counter: { enabled: true } } })
-    expect(settings).not.toHaveProperty('mods')
-  })
-
   it('keeps every community extension off while the master switch is off, which it is by default', async () => {
     const garage = tempGarage()
     install(garage, 'counter')

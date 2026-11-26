@@ -376,43 +376,6 @@ describe('chats', () => {
     expect(JSON.parse(readFileSync(chatFile(t, 'aaaa0001'), 'utf8'))).not.toHaveProperty('parentId')
   })
 
-  it('reads what an older Kothar saved about subagents as workers, and saves it back under the new names', () => {
-    const garage = tempDir()
-    const save = (info: { id: string } & Record<string, unknown>, log: object[] = []) => {
-      mkdirSync(join(garage, 'chats', info.id), { recursive: true })
-      writeFileSync(join(garage, 'chats', info.id, 'chat.json'), JSON.stringify(info))
-      writeFileSync(join(garage, 'chats', info.id, 'log.jsonl'), log.map((e) => JSON.stringify(e) + '\n').join(''))
-    }
-    const base = { engine: 'fake', archived: false, createdAt: at }
-    const report = { at, type: 'subagent.report', chatId: 'aaaa0003', name: 'Sub', text: 'Done' }
-    save({ id: 'aaaa0001', name: 'Space', ...base }, [{ at, type: 'user.message', text: 'go' }, report])
-    save({ id: 'aaaa0003', name: 'Sub', parentId: 'aaaa0001', subagent: true, role: 'subagents', ...base })
-    const lists = { chat: [], planning: [], searching: [], subagents: [{ engine: 'fake', model: FAKE_DEFAULTS.defaultModel }] }
-    writeFileSync(
-      join(garage, 'settings.json'),
-      JSON.stringify({ mods: { subagents: { enabled: false, limit: 2 } }, models: lists }),
-    )
-    // Extensions were mods too, and kept their own files in <garage>/mods/.
-    mkdirSync(join(garage, 'mods', 'git'), { recursive: true })
-    writeFileSync(join(garage, 'mods', 'git', 'state.json'), '{}')
-    const t = setup(textScript, garage)
-    expect(existsSync(join(garage, 'mods'))).toBe(false)
-    expect(readFileSync(join(garage, 'extensions', 'git', 'state.json'), 'utf8')).toBe('{}')
-    expect(chatOf(t.core, 'aaaa0003')).toMatchObject({ parentId: 'aaaa0001', worker: true, role: 'workers' })
-    expect(chatOf(t.core, 'aaaa0003')).not.toHaveProperty('subagent')
-    expect(t.core.modelLists().workers).toMatchObject([{ engine: 'fake', model: FAKE_DEFAULTS.defaultModel }])
-    // The Subagents switch became the Workers extension's, which is Settings → Workers now: off lets no agent start one.
-    expect(t.core.workers()).toMatchObject({ start: false, limit: 2 })
-    const settings = JSON.parse(readFileSync(join(garage, 'settings.json'), 'utf8'))
-    expect(settings.extensions).toEqual({})
-    expect(settings.workers).toEqual({ start: false, limit: 2 })
-    expect(settings).not.toHaveProperty('mods')
-    expect(settings.models).not.toHaveProperty('subagents')
-    const lead = chatOf(t.core, 'aaaa0001')!
-    expect(JSON.stringify(lead)).not.toContain('subagent.report')
-    expect(JSON.stringify(lead)).toContain('Done')
-  })
-
   describe('workers left over from before a restart', () => {
     // A space, and workers below it saved as a quit or crash left them.
     const leftOver = (workers: { id: string; log?: object[]; quiet?: boolean }[], leadLog: object[] = []) => {
@@ -1623,25 +1586,6 @@ describe('commands', () => {
     t.handle({ type: 'permission.setDefault', name: 'autoNetworkCommands', enabled: true })
     t.handle({ type: 'chat.setPermission', chatId: 'main', name: 'autoNetworkCommands', enabled: false })
     expect(await turn(t)).toBe('waiting')
-  })
-
-  it('reads an old saved ask-before-network-commands default and chat pick flipped, and saves them under the new name', async () => {
-    const first = setup(textScript)
-    const space = createChat(first, { name: 'Space' })
-    first.core.close()
-    const settingsFile = join(first.garage, 'settings.json')
-    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), askNetworkCommands: false }))
-    const saved = JSON.parse(readFileSync(chatFile(first, space.id), 'utf8'))
-    writeFileSync(chatFile(first, space.id), JSON.stringify({ ...saved, askNetworkCommands: true }))
-    const t = setup(commandScript(`${ASK_FIRST_COMMANDS[0]} origin`), first.garage)
-    expect(t.core.workFolder()).toMatchObject({ autoNetworkCommands: true })
-    expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).toMatchObject({ autoNetworkCommands: true })
-    expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).not.toHaveProperty('askNetworkCommands')
-    const chat = JSON.parse(readFileSync(chatFile(t, space.id), 'utf8'))
-    expect(chat).toMatchObject({ autoNetworkCommands: false })
-    expect(chat).not.toHaveProperty('askNetworkCommands')
-    expect(await turn(t, 'main')).toBe('idle')
-    expect(await turn(t, space.id)).toBe('waiting')
   })
 
   const fetchScript: FakeStep[] = [

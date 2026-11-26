@@ -77,6 +77,7 @@ async function core() {
   const handle = (m: ClientMessage) => kothar.core.handle(m, (r) => messages.push(r))
   handle({ type: 'engine.setEnabled', engine: 'fake', enabled: true })
   handle({ type: 'workFolder.set', path: join(garage, 'work') })
+  handle({ type: 'extension.setEnabled', extensionId: 'pins', enabled: true })
   const chat = (id: string) => kothar.core.chats().find((c) => c.id === id)!
   const create = (name = 'Space') => {
     handle({ type: 'chat.create', name })

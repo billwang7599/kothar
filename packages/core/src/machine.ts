@@ -14,8 +14,6 @@ export const STRIPPED_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',
   'OPENAI_API_KEY',
   'KOTHAR_TOKEN',
-  // Its name from when Kothar was Hotrod.
-  'HOTROD_TOKEN',
 ] as const
 
 const liveGroups = new Set<number>()

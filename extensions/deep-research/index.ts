@@ -645,7 +645,8 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
     id: 'deep-research',
     name: 'Deep Research',
     description: 'Long, multi-source research that ends in a cited report. Workers search and read the web; every claim in the report is backed by a quote Kothar found on its page.',
-    enabledByDefault: true,
+    // Off until turned on: not everyone wants it. A switch already saved in settings.json stays as it is.
+    enabledByDefault: false,
     // Its own model list in Settings → Models, which research workers run on unless Workers use says another. The id
     // predates declared roles: users' saved Searching lists are under it.
     modelRoles: [{ id: 'searching', label: 'Searching', description: 'Research workers, and workers started to search.' }],

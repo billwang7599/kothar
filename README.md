@@ -116,7 +116,8 @@ What works today:
   text until it closes, and a formula KaTeX can't read shows its source in red. Notes' editor draws math the same way,
   showing a formula's source while the cursor is in it.
 - **Setups, themes, the marketplace,** and the built-in extensions in `extensions/`: Artifacts, Browser, Git,
-  Inspector, MCP servers, Memory, Notes, Pins, Plan, Processes, Reconnect, Skills, Deep Research and Account rotation. MCP servers connects
+  Inspector, MCP servers, Memory, Notes, Pins, Plan, Processes, Reconnect, Skills, Deep Research and Account rotation
+  (Browser, Git, Pins, Deep Research and Account rotation start off; turn them on in Settings). MCP servers connects
   GitHub, Linear, Notion and other MCP servers to every engine through Kothar, which is their only client, so keys stay in Kothar
   and each call is asked for and recorded. Browser lets agents browse in your own Chrome, with your logins, through
   the Kothar Chrome extension: a tab group per space in your current window, and when a site asks you to sign in, you

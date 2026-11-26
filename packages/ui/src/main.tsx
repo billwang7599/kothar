@@ -1,5 +1,4 @@
 // First, so preferences saved before the rename move to their new keys before any module reads them.
-import './renamed-storage.ts'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SettingsLinkContext } from './extension-view.tsx'

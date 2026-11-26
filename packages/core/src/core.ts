@@ -38,7 +38,6 @@ import {
 } from './shared.ts'
 import { followModels as followChatModels, nameModels, openModels } from './models.ts'
 import { openModelRoles } from './model-roles.ts'
-import { moveExtensionsDir } from './vocab-move.ts'
 import { openProtocol } from './protocol.ts'
 import { openExtensionSwitches } from './extension-switches.ts'
 import { migrateExtensionSettings, openExtensionSettings } from './extension-settings.ts'
@@ -161,7 +160,6 @@ function assembleCore(options: {
     fetch: options.fetch,
   })
   const { settings, save: saveSettings } = openSettings(garage)
-  moveExtensionsDir(garage)
   // What the user turned on, per community extension (approvals.ts). One whose files aren't those didn't start; its
   // switch goes off, so turning it on again is the user reviewing the new files.
   const savedApprovals = readApprovals(garage) ?? {}
@@ -532,7 +530,7 @@ function assembleCore(options: {
       ...(run && run.engine === chat.info.engine && { model: run.model }),
       status: chat.status,
       archived: chat.info.archived,
-      ...(chat.info.extension && { extension: chat.info.extension, mod: chat.info.extension }),
+      ...(chat.info.extension && { extension: chat.info.extension }),
       keepsContext: !chainOf(chat)[0]!.info.extension,
       folders: chat.info.folders,
       files: chat.info.files,

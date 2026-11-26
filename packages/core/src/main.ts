@@ -11,28 +11,27 @@ import { opencode } from './adapters/opencode.ts'
 import { pi } from './adapters/pi.ts'
 import { openCore } from './core.ts'
 import { loadCommunityExtensions, loadExtensions } from './extensions.ts'
-import { moveGarage, portInUse } from './garage-move.ts'
 import { localMachine } from './machine.ts'
 import { startServer } from './server.ts'
 import type { Adapter, Machine } from './shared.ts'
-import { renameSettings } from './vocab-move.ts'
 
-const registered: Adapter[] = [claudeCode, pi, codex, opencode, createFakeAdapter(undefined, undefined, { steering: true })]
+const ENGINES: Adapter[] = [claudeCode, pi, codex, opencode]
 const STOCK_EXTENSIONS_DIR = fileURLToPath(new URL('../../../extensions/', import.meta.url))
 
-// Kothar was called Hotrod; installs from then keep working, so every KOTHAR_ variable falls back to its HOTROD_ name.
 export function envVar(env: Record<string, string | undefined>, name: string): string | undefined {
-  return env[`KOTHAR_${name}`] ?? env[`HOTROD_${name}`]
+  return env[`KOTHAR_${name}`]
 }
 
-// Kothar's garage. One from when Kothar was Hotrod moves here on the first launch after the rename (see
-// garage-move.ts); it stays in use where it is only if the move can't happen yet.
-export function defaultGarage(
-  options: { home?: string; machine?: Machine; inUse?: () => Promise<boolean>; log?: (message: string) => void } = {},
-) {
-  const { home = homedir(), machine = localMachine, inUse = async () => false, log } = options
-  const support = join(home, 'Library', 'Application Support')
-  return moveGarage({ from: join(support, 'Hotrod'), to: join(support, 'Kothar'), machine, inUse, log })
+/** Kothar's garage: `~/Library/Application Support/Kothar`. */
+export const defaultGarage = (home = homedir()) => join(home, 'Library', 'Application Support', 'Kothar')
+
+/**
+ * The engines Kothar offers. The fake engine (scripted replies, no model) is for development and tests only: it's
+ * registered when KOTHAR_DEV is set (npm run dev sets it) or KOTHAR_ENGINE names it, never in the packaged app.
+ */
+export function registeredAdapters(env: Record<string, string | undefined>): Adapter[] {
+  const fake = envVar(env, 'DEV') || envVar(env, 'ENGINE') === 'fake'
+  return fake ? [...ENGINES, createFakeAdapter(undefined, undefined, { steering: true })] : ENGINES
 }
 
 export async function startCore(
@@ -54,11 +53,12 @@ export async function startCore(
     reveal?: (path: string) => Promise<void>
   } = {},
 ) {
-  const { env = process.env, home, uiDir, adapters = registered, machine = localMachine } = options
+  const { env = process.env, home, uiDir, machine = localMachine } = options
+  const adapters = options.adapters ?? registeredAdapters(env)
   const extensionsDir = options.extensionsDir ?? STOCK_EXTENSIONS_DIR
   const { extensions, brokenExtensions } = options.extensions ? { extensions: options.extensions, brokenExtensions: [] } : await loadExtensions(extensionsDir)
   const port = Number(envVar(env, 'PORT') ?? 4317)
-  const garage = envVar(env, 'GARAGE') ?? (await defaultGarage({ home, machine, inUse: () => portInUse(port) }))
+  const garage = envVar(env, 'GARAGE') ?? defaultGarage(home)
   const uiUrl = uiDir ? `http://127.0.0.1:${port}` : (envVar(env, 'UI_ORIGIN') ?? 'http://localhost:4318')
   const token = envVar(env, 'TOKEN') || randomBytes(32).toString('base64url')
 
@@ -107,7 +107,7 @@ export async function startCore(
 }
 
 // Whether settings.json has community extensions on and this one turned on, read before the core opens so only
-// extensions that are on get imported. Settings saved when extensions were mods are read under the new names.
+// extensions that are on get imported.
 export function savedOn(garage: string, id: string) {
   return savedSettings(garage)?.communityExtensions === true && savedSwitch(garage, id)
 }
@@ -119,9 +119,7 @@ export function savedSwitch(garage: string, id: string) {
 
 function savedSettings(garage: string) {
   try {
-    const settings = JSON.parse(readFileSync(join(garage, 'settings.json'), 'utf8'))
-    renameSettings(settings)
-    return settings
+    return JSON.parse(readFileSync(join(garage, 'settings.json'), 'utf8'))
   } catch {
     return undefined
   }

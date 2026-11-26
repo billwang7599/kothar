@@ -78,11 +78,11 @@ changes** before you update. An update stays off until you turn it on again.
 
 ## My extension was written when extensions were called mods
 
-It still loads and type-checks. Nothing an extension does at runtime changed: the default export has the same fields,
-`manifest.json` the same keys, and `ChatDetail` still carries the owning extension under `mod` as well as `extension`.
-The API package is now `@kothar/extension-api` (it was `@kothar/mod-api`), and its types are named `Extension`,
-`ExtensionHost`, `ExtensionContext` and so on. Every old name (`Mod`, `ModHost`, `ModContext`, …) is still exported as a
-deprecated alias for the new one. The API is types only, so a built `main.mjs` never imports either package.
+It still loads: the default export has the same fields and `manifest.json` the same keys. Two things changed. The API
+package is now `@kothar/extension-api` (it was `@kothar/mod-api`), and its types are named `Extension`, `ExtensionHost`,
+`ExtensionContext` and so on; the old names (`Mod`, `ModHost`, `ModContext`, …) are gone, so rename them to type-check
+against the new package. And `ChatDetail` carries the owning extension under `extension` only, no longer `mod`. The API
+is types only, so a built `main.mjs` never imports either package.
 
 Marketplace catalogs may still give an extension's `kind` as `"mod"`; Kothar reads it as `"extension"`. Settings, data
-and installs saved under the old names move over on Kothar's first start.
+and installs saved under the old names were moved over by Kothar before its first release.

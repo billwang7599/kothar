@@ -81,7 +81,7 @@ describe('Settings page', () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'kothar-mcp-page-')))
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
     const store = openStore(dir)
-    const clients = openClients({ store, now: () => Date.now(), record: () => {}, idleMs: () => 60_000 })
+    const clients = openClients({ store, home: tmpdir(), now: () => Date.now(), record: () => {}, idleMs: () => 60_000 })
     cleanups.push(() => clients.stopAll())
     let refreshed = 0
     const host = {

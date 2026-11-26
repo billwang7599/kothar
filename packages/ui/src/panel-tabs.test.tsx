@@ -144,12 +144,6 @@ test('the open tab stays in the row even when later tabs fold away', () => {
   expect(tab('Changes').getAttribute('aria-selected')).toBe('true')
 })
 
-test('a tab saved when extensions were mods opens as the same tab', () => {
-  localStorage.setItem('kothar.panelTab', 'mod:git/changes')
-  render()
-  expect(tab('Changes').getAttribute('aria-selected')).toBe('true')
-})
-
 test('choosing a tab from More opens it and brings it into the row', () => {
   room = 200
   render()

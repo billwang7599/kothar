@@ -103,6 +103,7 @@ async function core(settings: Record<string, string | number | boolean> = {}, ot
   const handle = (m: ClientMessage) => kothar.core.handle(m, (r) => messages.push(r)) as unknown as Promise<void> | undefined
   handle({ type: 'engine.setEnabled', engine: 'fake', enabled: true })
   handle({ type: 'workFolder.set', path: join(garage, 'work') })
+  handle({ type: 'extension.setEnabled', extensionId: 'deep-research', enabled: true })
   for (const [key, value] of Object.entries(settings)) handle({ type: 'extension.setValue', extensionId: 'deep-research', key, value })
   await until(() => host !== undefined)
   const chats = () => kothar.core.chats()

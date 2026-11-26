@@ -87,7 +87,8 @@ export function createPinsExtension(): Extension {
     description:
       'Pin messages in a chat, yours or the agent’s, and find them again in the Pinned tab. Clicking a pin scrolls ' +
       'the chat back to it. Agents don’t see your pins.',
-    enabledByDefault: true,
+    // Off until turned on: not everyone wants it. A switch already saved in settings.json stays as it is.
+    enabledByDefault: false,
     messageActions: [
       {
         id: 'pin',

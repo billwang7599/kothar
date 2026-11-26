@@ -5,7 +5,6 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 import { join } from 'node:path'
 import type { ModelSettings } from './models.ts'
 import type { ChatEntry, ChatInfo, ContextSection, PermissionSwitches } from './shared.ts'
-import { renameChatFile, renameEntry, renameSettings } from './vocab-move.ts'
 import type { SavedEngineTools } from './engine-tools.ts'
 import { moveWorkersSettings, type SavedWorkers } from './workers.ts'
 
@@ -34,13 +33,12 @@ export type Settings = PermissionSwitches &
     engineTools?: SavedEngineTools
   }
 
-/** The garage's settings.json, read once; save writes the same object back. Older names are renamed and saved. */
+/** The garage's settings.json, read once; save writes the same object back. Older settings are moved and saved. */
 export function openSettings(garage: string) {
   const file = join(garage, 'settings.json')
   const settings: Settings = { engines: {}, ...readJson(file) }
   const save = () => writeFileSync(file, JSON.stringify(settings, null, 2) + '\n')
-  const renamed = renameSettings(settings)
-  if (moveWorkersSettings(settings) || renamed) save()
+  if (moveWorkersSettings(settings)) save()
   return { settings, save }
 }
 
@@ -79,7 +77,7 @@ export const readChat = (dir: string, fallback: ChatInfo, declared?: { name: str
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'chat.json')
   const raw = readJson(file)
-  const { context = {}, title, parentId, extension, ...saved } = renameChatFile(raw)
+  const { context = {}, title, parentId, extension, ...saved } = raw
   const info: ChatInfo = {
     ...fallback,
     ...(title !== undefined && { name: title }),
@@ -94,9 +92,20 @@ export const readChat = (dir: string, fallback: ChatInfo, declared?: { name: str
     .split('\n')
     .filter(Boolean)
     .map((line) => renameEntry(JSON.parse(line)))
-  const flipped = 'askNetworkCommands' in raw
-  const resave = !existsSync(file) || !!declared || flipped || (parentId !== undefined && !info.parentId)
+  const resave = !existsSync(file) || !!declared || (parentId !== undefined && !info.parentId)
   return { info, context: context as Record<string, boolean>, entries, resave }
+}
+
+/**
+ * A logged entry under today's type. Logs are append-only history, so entries written before workers and extensions
+ * got their names keep the old types: `subagent.report` is `worker.report`, and `mod.note` (with `mod`)
+ * `extension.note`.
+ */
+export function renameEntry<T extends { type: string }>(entry: T): T {
+  if (entry.type === 'subagent.report') return { ...entry, type: 'worker.report' }
+  if (entry.type !== 'mod.note') return entry
+  const { mod, ...rest } = entry as T & { mod?: string }
+  return { ...rest, type: 'extension.note', ...(mod !== undefined && { extension: mod }) } as unknown as T
 }
 
 /** Whether a chat's log ends inside a turn, as when Kothar quit while it ran. */
