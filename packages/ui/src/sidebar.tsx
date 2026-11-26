@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { AnimatePresence, m } from 'motion/react'
-import { Dialog, DropdownMenu } from 'radix-ui'
+import { Dialog, DropdownMenu, HoverCard } from 'radix-ui'
 import type { ChatStatus, ClientMessage, SpaceGroup } from '@kothar/core/shared'
 import { collapsedGroups, collapseGroup, useCollapsedGroups } from './collapsed-groups.ts'
 import { Button, CHAT_NOUN, Chevron, confirm, Hint, MOTION, NAV_LABEL, useReturnFocus, useSettled } from './controls.tsx'
@@ -33,6 +33,10 @@ const LABEL_ACTION =
   'focus-visible:pointer-events-auto focus-visible:opacity-100'
 // After a keyboard move, the row is focused again for this long, while the core's updates reorder the list.
 const REFOCUS_MS = 1000
+// A folded group's spaces pop out beside it on hover. The delays let the pointer cross from the row into the popup
+// (Radix HoverCard keeps it open while the pointer is over either), and keep it from flashing as the pointer passes.
+const PEEK_OPEN_MS = 200
+const PEEK_CLOSE_MS = 150
 
 type MenuItem = { label: string; run?: () => void; danger?: boolean; disabledReason?: string; items?: MenuItem[] }
 
@@ -69,9 +73,17 @@ function MenuItems({ items }: { items: MenuItem[] }) {
   )
 }
 
-function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
+function RowMenu({
+  label,
+  items,
+  onOpenChange,
+}: {
+  label: string
+  items: MenuItem[]
+  onOpenChange?: (open: boolean) => void
+}) {
   return (
-    <DropdownMenu.Root modal={false}>
+    <DropdownMenu.Root modal={false} onOpenChange={onOpenChange}>
       <div className={`mr-2 shrink-0 ${ROW_ACTION}`} data-row-action>
         <DropdownMenu.Trigger asChild>
           <Button variant="ghost" size="icon" aria-label={`More for ${label}`}>
@@ -257,7 +269,12 @@ export function ChatNav({
   // Only when the open chat changes, so the user can still collapse the group the open space is in.
   const selected = chats.find((c) => c.id === selectedId)
   const selectedPlace = selected && !selected.archived ? placeOf(rootOf(selected)) : 'pinned'
+  // A space opened from a folded group's popup: its group stays folded.
+  const keepFolded = useRef<string | null>(null)
   useEffect(() => {
+    const kept = keepFolded.current === selectedId
+    keepFolded.current = null
+    if (kept) return
     if (selectedPlace !== 'pinned' && selectedPlace !== '' && collapsedGroups().has(selectedPlace)) {
       collapseGroup(selectedPlace, false)
     }
@@ -479,6 +496,29 @@ export function ChatNav({
       },
     ]
     const renaming = naming?.kind === 'rename' && naming.groupId === group.id
+    // What the folded group's popup lists: its spaces, each showing the busiest status among it and its workers.
+    const peek: Peek = {
+      spaces: rows
+        .filter((r) => r.depth === 0)
+        .map((r) => {
+          const below = rows.filter((w) => w.depth > 0 && rootOf(w.chat).id === r.chat.id).map((w) => w.chat.status)
+          const own = !r.chat.worker && workerRequests(chats, r.chat.id).length > 0 ? 'waiting' : r.chat.status
+          return {
+            chat: r.chat,
+            title: `${r.chat.name}: ${folderOf(chats, r.chat) ?? 'Not tied to a folder'}`,
+            status: BUSIEST.find((s) => [own, ...below].includes(s))!,
+            unread: showsUnread(r.chat, looking && r.chat.id === selectedId),
+            selected: r.chat.id === selectedId,
+          }
+        }),
+      blocked: !!drag,
+      showEngine: mixedEngines,
+      select: (chatId) => {
+        // Picked from the popup, the group stays folded: the user chose to keep it that way.
+        keepFolded.current = chatId
+        select(chatId)
+      },
+    }
     return (
       <div key={`group:${group.id}`} role="group" aria-label={group.name} className="flex flex-col gap-1">
         <GroupRow
@@ -493,6 +533,7 @@ export function ChatNav({
           renaming={renaming}
           rename={nameGroup}
           cancelRename={() => setNaming(null)}
+          peek={peek}
           dragging={drag?.id === group.id}
           into={!!into}
           drop={between && drag?.id !== group.id ? (between.after ? 'after' : 'before') : undefined}
@@ -633,6 +674,15 @@ export function ChatNav({
 
 type GroupDrag = Omit<Reorder, 'dragging' | 'drop'>
 
+type PeekSpace = { chat: ChatView; title: string; status: ChatStatus; unread: boolean; selected: boolean }
+/** A folded group's popup: its spaces, whether something (a drag) keeps it shut, and what picking one does. */
+type Peek = {
+  spaces: PeekSpace[]
+  blocked: boolean
+  showEngine: boolean
+  select: (chatId: string) => void
+}
+
 type GroupRowProps = {
   group: SpaceGroup
   animate: boolean
@@ -650,56 +700,130 @@ type GroupRowProps = {
   into: boolean
   drop?: 'before' | 'after'
   drag?: GroupDrag
+  peek?: Peek
 }
 
 /** A group's row: its chevron and name; collapsed, how many spaces it holds and a dot when one is busy or unread. */
 function GroupRow(props: GroupRowProps) {
-  const { group, animate, collapsed, count, status, unread, toggle, menu, renaming, dragging, into, drop, drag } = props
+  const { group, animate, collapsed, count, status, unread, toggle, menu, renaming, dragging, into, drop, drag, peek } =
+    props
   // Collapsed, a busy space inside shows its status here; unread with nothing busy shows a plain dot.
   const dot = collapsed && status !== 'idle' ? DOTS[status] : collapsed && unread ? 'bg-text' : undefined
+  const [peeking, setPeeking] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  // The whole row (⋯ included) is what's hovered, so the pointer can cross the ⋯ on its way to the popup; the popup
+  // opens just past the sidebar's edge rather than over it.
+  const [gap, setGap] = useState(6)
+  const button = useRef<HTMLButtonElement>(null)
+  const measure = () => {
+    const row = button.current?.parentElement
+    const edge = row?.closest('nav')?.getBoundingClientRect().right
+    if (row && edge !== undefined) setGap(Math.max(6, Math.round(edge - row.getBoundingClientRect().right) + 6))
+  }
+  // Only a folded group pops out (unfolded, its spaces are already in the sidebar), and never mid-drag, with its ⋯
+  // menu open or while it's being renamed.
+  const canPeek = !!peek && collapsed && !peek.blocked && !menuOpen && !renaming
+  // Shut when something blocks it, so it doesn't pop back once the drag or menu is over.
+  if (peeking && !canPeek) setPeeking(false)
   if (renaming) {
     return <GroupNameInput label="Group name" initial={group.name} done={props.rename} cancel={props.cancelRename} />
   }
   return (
-    <m.div
-      className={`group/row relative flex shrink-0 items-center rounded text-muted transition-colors hover:bg-raised hover:text-text has-data-[state=open]:bg-raised ${dragging ? 'opacity-50' : ''} ${into ? 'bg-accent/15 text-text ring-1 ring-accent' : ''}`}
-      {...MOTION.collapse}
-      initial={animate && MOTION.collapse.initial}
+    <HoverCard.Root
+      open={peeking && canPeek}
+      onOpenChange={(open) => {
+        if (open) measure()
+        setPeeking(open && canPeek)
+      }}
+      openDelay={PEEK_OPEN_MS}
+      closeDelay={PEEK_CLOSE_MS}
     >
-      <button
-        className="group flex h-control min-w-0 flex-1 items-center gap-8 pr-8 pl-6 text-left whitespace-nowrap"
-        aria-expanded={!collapsed}
-        data-open={collapsed ? undefined : ''}
-        data-group-id={group.id}
-        title={group.name}
-        onClick={toggle}
-        draggable={drag ? true : undefined}
-        onDragStart={drag?.start}
-        onDragOver={drag?.over}
-        onDrop={drag?.land}
-        onDragEnd={drag?.end}
-        onKeyDown={drag?.key}
-      >
-        <Chevron />
-        <span className={`min-w-0 flex-1 truncate ${unread && collapsed ? 'font-semibold text-text' : ''}`}>
-          {group.name}
-        </span>
-        {collapsed && (
-          <span className="text-xs text-faint tabular-nums" data-count>
-            {count}
-          </span>
-        )}
-        {dot && <span className={`size-7 shrink-0 rounded-full ${dot}`} data-status={status} data-group-dot />}
-      </button>
-      <RowMenu label={group.name} items={menu} />
-      {drop && (
-        <span
-          aria-hidden
-          data-drop={drop}
-          className={`pointer-events-none absolute inset-x-4 h-2 rounded-full bg-accent ${drop === 'before' ? '-top-2' : '-bottom-2'}`}
-        />
+      <HoverCard.Trigger asChild>
+        <m.div
+          className={`group/row relative flex shrink-0 items-center rounded text-muted transition-colors hover:bg-raised hover:text-text has-data-[state=open]:bg-raised ${dragging ? 'opacity-50' : ''} ${into ? 'bg-accent/15 text-text ring-1 ring-accent' : ''}`}
+          {...MOTION.collapse}
+          initial={animate && MOTION.collapse.initial}
+        >
+          <button
+            ref={button}
+            className="group flex h-control min-w-0 flex-1 items-center gap-8 pr-8 pl-6 text-left whitespace-nowrap"
+            aria-expanded={!collapsed}
+            data-open={collapsed ? undefined : ''}
+            data-group-id={group.id}
+            title={group.name}
+            onClick={toggle}
+            draggable={drag ? true : undefined}
+            onDragStart={drag?.start}
+            onDragOver={drag?.over}
+            onDrop={drag?.land}
+            onDragEnd={drag?.end}
+            onKeyDown={drag?.key}
+          >
+            <Chevron />
+            <span className={`min-w-0 flex-1 truncate ${unread && collapsed ? 'font-semibold text-text' : ''}`}>
+              {group.name}
+            </span>
+            {collapsed && (
+              <span className="text-xs text-faint tabular-nums" data-count>
+                {count}
+              </span>
+            )}
+            {dot && <span className={`size-7 shrink-0 rounded-full ${dot}`} data-status={status} data-group-dot />}
+          </button>
+          <RowMenu
+            label={group.name}
+            items={menu}
+            onOpenChange={(open) => {
+              setMenuOpen(open)
+              if (open) setPeeking(false)
+            }}
+          />
+          {drop && (
+            <span
+              aria-hidden
+              data-drop={drop}
+              className={`pointer-events-none absolute inset-x-4 h-2 rounded-full bg-accent ${drop === 'before' ? '-top-2' : '-bottom-2'}`}
+            />
+          )}
+        </m.div>
+      </HoverCard.Trigger>
+      {peek && (
+        <HoverCard.Portal>
+          <HoverCard.Content asChild side="right" align="start" sideOffset={gap} collisionPadding={8} alignOffset={-4}>
+            <m.div
+              role="group"
+              aria-label={`${group.name}: its ${CHAT_NOUN.many}`}
+              data-group-peek={group.id}
+              className={`${MENU_PANEL} max-h-[min(60vh,var(--radix-hover-card-content-available-height))] w-max max-w-[min(280px,calc(100vw-16px))] gap-1 overflow-y-auto`}
+              initial={MOTION.menu.initial}
+              animate={MOTION.menu.animate}
+              transition={MOTION.menu.transition}
+            >
+              {peek.spaces.length === 0 ? (
+                <p className="px-8 py-4 text-sm text-faint">No {CHAT_NOUN.many}.</p>
+              ) : (
+                peek.spaces.map((space) => (
+                  <ChatRow
+                    key={space.chat.id}
+                    row={{ chat: space.chat, depth: 0 }}
+                    animate={false}
+                    title={space.title}
+                    selected={space.selected}
+                    status={space.status}
+                    unread={space.unread}
+                    showEngine={peek.showEngine}
+                    select={() => {
+                      setPeeking(false)
+                      peek.select(space.chat.id)
+                    }}
+                  />
+                ))
+              )}
+            </m.div>
+          </HoverCard.Content>
+        </HoverCard.Portal>
       )}
-    </m.div>
+    </HoverCard.Root>
   )
 }
 

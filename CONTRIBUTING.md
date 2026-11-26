@@ -191,6 +191,11 @@ Why some things are the way they are. Add one when you make a choice the next co
   unset or splitting variables and `FOO=bar ssh` all ask as before. Unsandboxed chats still ask for every command. The
   macOS sandbox only limits writes, so a trusted ssh reaches the network and reads its key; it can't add a new host to
   `~/.ssh/known_hosts` or open a ControlMaster socket there.
+- **A folded group's spaces pop out on hover; an unfolded one shows nothing.** Unfolded, its spaces are already in
+  the sidebar, so a popup would only repeat them. The whole group row, ⋯ included, is the hover target, so the pointer
+  can cross the ⋯ to the popup, which opens just past the sidebar's edge (Radix HoverCard, 200 ms in, 150 ms out). A
+  space picked there leaves its group folded, since folding it was the user's choice; opening a hidden space any other
+  way (search, a shortcut, a link) still unfolds its group. No popup mid-drag, with the ⋯ menu open or while renaming.
 
 - **Space groups are core sidebar code, not an extension.** Groups are visual folders of spaces in the left sidebar.
   They live where spaces are ordered: a space's `group` sits in its chat.json beside `pinned` and `order`, `chat.move`
