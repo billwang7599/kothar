@@ -1312,6 +1312,129 @@ describe('commands', () => {
     expect(t.core.workFolder()).not.toHaveProperty('sshHosts')
   })
 
+  describe('Always allow on an SSH card', () => {
+    const HOST = 'linux.student.cs.uwaterloo.ca'
+    const COPY = `scp -i ~/.ssh/keys/uwstudent notes.txt ${HOST}:a5/`
+    const ENTRY = { host: HOST, key: '~/.ssh/keys/uwstudent' }
+    // Starts a turn and leaves it waiting on the card: the request as logged.
+    const ask = async (t: ReturnType<typeof setup>, chatId: string) => {
+      t.handle({ type: 'chat.send', chatId, text: 'run' })
+      await until(() => statusOf(t.core, chatId) !== 'running')
+      expect(statusOf(t.core, chatId)).toBe('waiting')
+      const request = entriesOf(t.core, chatId).findLast((e) => e.type === 'permission.requested')
+      if (request?.type !== 'permission.requested') throw new Error('no request')
+      return request
+    }
+    const trust = async (t: ReturnType<typeof setup>, chatId: string, trustHost: 'space' | 'global') => {
+      const request = await ask(t, chatId)
+      expect(request.sshHost).toEqual(ENTRY)
+      t.handle({ type: 'permission.respond', chatId, requestId: request.requestId, allow: true, trustHost })
+      await until(() => settled(t.core, chatId))
+      expect(resolved(t, chatId).at(-1)).toMatchObject({ allow: true })
+      expect(resolved(t, chatId).at(-1)).not.toHaveProperty('auto')
+    }
+    const settingsHosts = (t: { garage: string }) => JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).sshHosts
+
+    it('offers the one host a copy reaches, and nothing for one it cannot pin down', async () => {
+      for (const command of [`scp a.txt one.example.com:x two.example.com:y`, 'ssh $(cat host) ls', `ssh -J jump.example.com ${HOST}`]) {
+        const t = setup(commandScript(command))
+        const request = await ask(t, 'main')
+        expect(request.sshHost, command).toBeUndefined()
+        t.handle({ type: 'chat.interrupt', chatId: 'main', force: true })
+        await until(() => settled(t.core, 'main'))
+      }
+      for (const command of [`ssh ${HOST} make`, `rsync -a out/ me@${HOST}:out/`]) {
+        const t = setup(commandScript(command))
+        expect((await ask(t, 'main')).sshHost, command).toEqual({ host: HOST })
+        t.handle({ type: 'chat.interrupt', chatId: 'main', force: true })
+        await until(() => settled(t.core, 'main'))
+      }
+    })
+
+    it("This space adds the host to the space's list only; All spaces to Settings'; removing it asks again", async () => {
+      const t = setup(commandScript(COPY))
+      const a = createChat(t, { name: 'A' })
+      const b = createChat(t, { name: 'B' })
+      await trust(t, a.id, 'space')
+      expect(JSON.parse(readFileSync(chatFile(t, a.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      expect(settingsHosts(t)).toBeUndefined()
+      // The next copy in A runs without asking; B still asks.
+      expect(await turn(t, a.id)).toBe('idle')
+      expect(resolved(t, a.id).at(-1)).toMatchObject({ allow: true, auto: true })
+      expect(await turn(t, b.id)).toBe('waiting')
+      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8'))).not.toHaveProperty('sshHosts')
+
+      await trust(t, b.id, 'global')
+      expect(settingsHosts(t)).toEqual([ENTRY])
+      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8'))).not.toHaveProperty('sshHosts')
+      expect(await turn(t, b.id)).toBe('idle')
+      expect(await turn(t, 'main')).toBe('idle')
+
+      // Removed in Settings and in A's Permissions tab, it asks again.
+      t.handle({ type: 'permission.setSshHosts', hosts: [] })
+      t.handle({ type: 'chat.setSshHosts', chatId: a.id })
+      expect(await turn(t, a.id)).toBe('waiting')
+      expect(await turn(t, b.id)).toBe('waiting')
+    })
+
+    it("This space keeps what the space took from Settings; All spaces also reaches a space with a list of its own", async () => {
+      const t = setup(commandScript(COPY))
+      t.handle({ type: 'permission.setSshHosts', hosts: [{ host: 'build.example.com' }] })
+      const a = createChat(t, { name: 'A' })
+      await trust(t, a.id, 'space')
+      expect(JSON.parse(readFileSync(chatFile(t, a.id), 'utf8')).sshHosts).toEqual([{ host: 'build.example.com' }, ENTRY])
+
+      const b = createChat(t, { name: 'B' })
+      t.handle({ type: 'chat.setSshHosts', chatId: b.id, hosts: [] })
+      await trust(t, b.id, 'global')
+      expect(settingsHosts(t)).toEqual([{ host: 'build.example.com' }, ENTRY])
+      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      expect(await turn(t, b.id)).toBe('idle')
+    })
+
+    it("a worker's This space lands on its space", async () => {
+      const first = setup(textScript)
+      const space = createChat(first, { name: 'Space' })
+      first.core.close()
+      mkdirSync(join(first.garage, 'chats', 'sub'), { recursive: true })
+      const saved = { id: 'sub', name: 'Sub', parentId: space.id, worker: true, engine: 'fake', createdAt: at }
+      writeFileSync(join(first.garage, 'chats', 'sub', 'chat.json'), JSON.stringify(saved))
+      const t = setup(commandScript(COPY), first.garage)
+      const request = await ask(t, 'sub')
+      expect(request.sshHost).toEqual(ENTRY)
+      t.handle({ type: 'permission.respond', chatId: 'sub', requestId: request.requestId, allow: true, trustHost: 'space' })
+      await until(() => settled(t.core, 'sub'))
+      // A worker is removed once its turn ends: its answer as the window got it.
+      const sent = t.messages.flatMap((m) => (m.type === 'chat.entry' && m.chatId === 'sub' ? [m.entry] : []))
+      expect(sent.findLast((e) => e.type === 'permission.resolved')).toMatchObject({ allow: true })
+      expect(sent.findLast((e) => e.type === 'tool.completed')).toMatchObject({ output: 'ran' })
+      expect(JSON.parse(readFileSync(chatFile(t, space.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      expect(settingsHosts(t)).toBeUndefined()
+    })
+
+    it('refuses Always allow with Deny, an unknown scope, or a request with no host', async () => {
+      const t = setup(commandScript(COPY))
+      const request = await ask(t, 'main')
+      const respond = (allow: boolean, trustHost: unknown) => () =>
+        t.handle({ type: 'permission.respond', chatId: 'main', requestId: request.requestId, allow, trustHost } as never)
+      expect(respond(false, 'space')).toThrow(/approves/)
+      expect(respond(true, 'everywhere')).toThrow(/"space" or "global"/)
+      expect(statusOf(t.core, 'main')).toBe('waiting')
+      const other = setup(commandScript('curl example.com'))
+      const plain = await ask(other, 'main')
+      expect(plain.sshHost).toBeUndefined()
+      expect(() =>
+        other.handle({ type: 'permission.respond', chatId: 'main', requestId: plain.requestId, allow: true, trustHost: 'space' }),
+      ).toThrow(/no SSH host/)
+    })
+
+    it('offers nothing where Allowed SSH hosts would not count: commands asking, or unsandboxed', async () => {
+      const t = setup(commandScript(COPY))
+      t.handle({ type: 'permission.setDefault', name: 'autoRunCommands', enabled: false })
+      expect((await ask(t, 'main')).sshHost).toBeUndefined()
+    })
+  })
+
   it('asks before every command once the default is off, and saves the default in settings.json', async () => {
     const t = setup(commandScript('npm test'))
     t.handle({ type: 'permission.setDefault', name: 'autoRunCommands', enabled: false })

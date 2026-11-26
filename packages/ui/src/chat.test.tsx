@@ -1105,6 +1105,36 @@ test("a wait's closing button hides the bar on the click, before the core ends t
   expect(bar()!.textContent).toContain('Browser: Look at the chart')
 })
 
+test('an SSH card offers Always allow for its host, in this space or all spaces; other cards do not', async () => {
+  const card = (sshHost?: { host: string; key?: string }): Item => ({
+    kind: 'permission',
+    requestId: 'r1',
+    name: 'Bash',
+    toolKind: 'shell',
+    summary: 'scp',
+    input: {},
+    outcome: 'pending',
+    ...(sshHost && { sshHost }),
+  })
+  const sent: ClientMessage[] = []
+  const host = 'linux.student.cs.uwaterloo.ca'
+  render({ status: 'waiting', items: [USER, card({ host, key: '~/.ssh/keys/uwstudent' })] }, (m) => sent.push(m))
+  const trigger = container.querySelector<HTMLButtonElement>(`[data-always-allow="${host}"]`)!
+  expect(trigger.textContent).toContain(`Always allow ${host}`)
+  expect(await hintOf(trigger)).toContain(`${host} with the key ~/.ssh/keys/uwstudent`)
+  for (const [label, trustHost] of [['This space', 'space'], ['All spaces', 'global']] as const) {
+    act(() => void trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    expect(items.map((i) => i.textContent)).toEqual(['This space', 'All spaces'])
+    act(() => items.find((i) => i.textContent === label)!.click())
+    expect(sent.at(-1)).toEqual({ type: 'permission.respond', chatId: 'c1', requestId: 'r1', allow: true, trustHost })
+  }
+
+  render({ status: 'waiting', items: [USER, card()] })
+  expect(container.querySelector('[data-always-allow]')).toBeNull()
+  expect(container.textContent).toContain('Approve')
+})
+
 test("a worker's own view shows where its request waits, with a way to the space instead of Approve", () => {
   const select = vi.fn()
   render(worker(), () => {}, { chats: [SPACE], select })

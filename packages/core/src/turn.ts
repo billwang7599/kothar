@@ -25,7 +25,7 @@ import { summaryOf } from './kothar-mcp.ts'
 import { instructionSections, type InstructionParts, type InstructionSection } from './instructions.ts'
 import { continuationParts, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
 import type { openModels } from './models.ts'
-import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, type RuledVerdict, type verdictOf } from './permissions.ts'
+import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, trustableSshHost, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
 import { runningChildren } from './workers.ts'
 import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
@@ -50,6 +50,7 @@ import {
   type Session,
   type SessionOptions,
   type Upload,
+  type SshHost,
 } from './shared.ts'
 import { saveToolImages } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
@@ -511,6 +512,8 @@ export function openTurns(deps: TurnDeps) {
 
   // Requests left to the user, by id, so their answer is recorded with what was asked.
   const asked = new Map<string, PermissionRequest>()
+  // The SSH server each request left to the user could be always allowed by (trustableSshHost), by id.
+  const sshHostsAsked = new Map<string, SshHost>()
   // Permission requests an extension raised (host.requestPermission), by id: answered here, not by the engine.
   const extensionAsks = new Map<string, { chat: Chat; resolve: (verdict: RuledVerdict) => void }>()
   // Each chat's live session events, for an extension's request to go through as an engine's does.
@@ -904,7 +907,12 @@ export function openTurns(deps: TurnDeps) {
         chat.unsavedText = ''
         return completeText(chat, at, event.text)
       }
-      append(chat, { at, ...event })
+      if (event.type === 'permission.requested') {
+        // The server the card may offer to always allow; kept with the request, so respond can save it.
+        const sshHost = trustableSshHost(event, permissionsOf())
+        append(chat, { at, ...event, ...(sshHost && { sshHost }) })
+        if (sshHost) sshHostsAsked.set(event.requestId, sshHost)
+      } else append(chat, { at, ...event })
       if (event.type === 'limit.reached') {
         const { message, resetsAt } = event
         chat.limit ??= { message, ...(resetsAt && { resetsAt }) }
@@ -929,6 +937,7 @@ export function openTurns(deps: TurnDeps) {
           return setStatus(chat, 'waiting')
         }
         chat.pendingRequests.delete(requestId)
+        sshHostsAsked.delete(requestId)
         const resolvedAt = now().toISOString()
         append(chat, { at: resolvedAt, type: 'permission.resolved', requestId, allow: verdict.allow, auto: true })
         recordPermission(chat, event, verdict.allow, verdict.rule, verdict.message)
@@ -1171,6 +1180,7 @@ export function openTurns(deps: TurnDeps) {
     respondTo(settle(chat, entry), requestId, { allow, rule: 'You' })
     const request = asked.get(requestId)
     asked.delete(requestId)
+    sshHostsAsked.delete(requestId)
     if (request) recordPermission(chat, request, allow, 'You')
   }
 
@@ -1199,6 +1209,9 @@ export function openTurns(deps: TurnDeps) {
   }
 
   return {
+    // The SSH server a pending request's card offers to always allow, if any.
+    sshHostAsked: (chat: Chat, requestId: string) =>
+      chat.pendingRequests.get(requestId) === 'permission' ? sshHostsAsked.get(requestId) : undefined,
     requestPermission,
     startWaitingWorkers,
     send,

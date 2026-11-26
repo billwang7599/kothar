@@ -687,7 +687,9 @@ export type ClientMessage =
   // Removes the user's message at entry and everything after it; replies with chat.undone, for the composer.
   | { type: 'chat.undoMessage'; chatId: string; entry: number }
   | { type: 'chat.interrupt'; chatId: string; force?: boolean }
-  | { type: 'permission.respond'; chatId: string; requestId: string; allow: boolean }
+  // trustHost: also add the SSH server the card offered (the entry's sshHost) to the space's Allowed SSH hosts, or
+  // Settings' (global). Only with allow.
+  | { type: 'permission.respond'; chatId: string; requestId: string; allow: boolean; trustHost?: 'space' | 'global' }
   | { type: 'question.respond'; chatId: string; requestId: string; answers?: Answers }
   // Replies with chat.context and chat.extensions.
   | { type: 'context.get'; chatId: string }

@@ -5,8 +5,8 @@ import type { PermissionRequest, PermissionVerdict } from '@kothar/extension-api
 import { editableOf, placeOf, refusedEditWhy, type FolderPlace } from './folder-modes.ts'
 import { realPath } from './machine.ts'
 import { isReadOnlyCommand, isSecret, mentionsSecret, searchReachesSecret, secretPathsOf } from './read-only.ts'
-import { sshHostsOf, switchedOn, type PermissionSwitch, type PermissionSwitches } from './shared.ts'
-import { ASKS_FIRST, trustsSshHosts } from './ssh-hosts.ts'
+import { sshHostsOf, switchedOn, type PermissionSwitch, type PermissionSwitches, type SshHost } from './shared.ts'
+import { ASKS_FIRST, sshHostOf, trustsSshHosts } from './ssh-hosts.ts'
 import { within } from './util.ts'
 
 export const OUTSIDE_EDIT_ADVICE =
@@ -116,4 +116,16 @@ export const decide = (request: PermissionRequest, context: PermissionContext): 
   if (!on('autoNetworkCommands') && ASKS_FIRST.test(request.command)) return
   if (mentionsSecret(request.command, sandboxedReading)) return
   return { allow: true, rule: envFiles && /\.env\b/.test(request.command) ? switchRule('autoRunCommands', 'autoEnvCommands') : switchRule('autoRunCommands') }
+}
+
+// The SSH server a shell request could be trusted by, for the card's "Always allow" (sshHostOf): only where Allowed SSH
+// hosts count at all (a sandboxed chat running commands without asking, in a turn that isn't read only) and only when
+// the command isn't already approved by its hosts.
+export const trustableSshHost = (request: PermissionRequest, context: PermissionContext): SshHost | undefined => {
+  const { cwd, sandboxed, switches, home, garage, readOnly } = context
+  if (request.kind !== 'shell' || request.command === undefined || readOnly || !sandboxed) return
+  if (!switchedOn('autoRunCommands', ...switches) || switchedOn('allowAll', ...switches)) return
+  const reading = { cwd, home, secrets: secretPathsOf(home, garage), envFiles: switchedOn('autoEnvCommands', ...switches) }
+  if (trustsSshHosts(request.command, sshHostsOf(...switches), reading)) return
+  return sshHostOf(request.command, reading)
 }

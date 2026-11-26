@@ -197,6 +197,16 @@ Why some things are the way they are. Add one when you make a choice the next co
   unset or splitting variables and `FOO=bar ssh` all ask as before. Unsandboxed chats still ask for every command. The
   macOS sandbox only limits writes, so a trusted ssh reaches the network and reads its key; it can't add a new host to
   `~/.ssh/known_hosts` or open a ControlMaster socket there.
+- **A permission card can add its SSH server to Allowed SSH hosts, for the space or for all spaces.** Both scopes were
+  there already (Settings' list and a chat's own), so no new one was added. The core works out the server when the
+  request comes in (`trustableSshHost`, `sshHostOf` in `ssh-hosts.ts`) and logs it on the request as `sshHost`, so the
+  card needs no shell parsing and survives a restart. It is offered only when listing that one server (with its one
+  `-i` key, written from `~/`, and no user, so any login on it) is exactly what the command needs: it re-runs
+  `trustsSshHosts` with only that entry, and offers nothing where the list wouldn't count (unsandboxed, commands
+  asking, a read-only turn, Allow all). Since the nearest list wins, **This space** copies what the space took from
+  Settings into its own list before adding, and **All spaces** also adds the server to any list of its own between
+  Settings and the asking chat, so the next command in that chat runs either way. A worker's card writes to its space.
+  Other spaces with a list of their own aren't changed by All spaces.
 - **A folded group's spaces pop out on hover; an unfolded one shows nothing.** Unfolded, its spaces are already in
   the sidebar, so a popup would only repeat them. The whole group row, ⋯ included, is the hover target, so the pointer
   can cross the ⋯ to the popup, which opens just past the sidebar's edge (Radix HoverCard, 200 ms in, 150 ms out). A

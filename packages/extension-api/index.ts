@@ -161,7 +161,13 @@ export type ChatEntry = { at: string } & (
   // What's left of an entry the user deleted (a message, or a reply with its tool calls and thinking): only when it was
   // logged, so every later entry keeps its index and no index is used twice. Memory and the transcript skip it.
   | { type: 'entry.removed' }
-  | Exclude<EngineEvent, { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' }>
+  // sshHost: set by the core when the request is a command that reaches one SSH server, and listing that server (with
+  // its key) would let it run without asking. The card offers to add it to the space's or Settings' Allowed SSH hosts.
+  | (PermissionRequest & { sshHost?: { host: string; key?: string } })
+  | Exclude<
+      EngineEvent,
+      { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' | 'permission.requested' }
+    >
 )
 
 // A chat's log as memory reads it: the entries a conversation is made of, numbered from 0 in log order. user is the

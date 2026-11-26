@@ -83,6 +83,9 @@ What works today:
   keeps agents out. A folder holding Kothar's own data is always read only. Each session's instructions list every
   folder with its mode, and a refused edit names the setting that would allow it.
 - **Permissions:** switches decide what runs without asking.
+  **Allowed SSH hosts** let ssh, scp and rsync to servers you trust (with their key) run without asking, set in
+  Settings for all spaces or in a space's Permissions tab. A card for a command that reaches one such server offers
+  **Always allow <host>**, for this space or all spaces: it approves the command and adds the server to that list.
 - **Engine tools:** Settings → Engines lists every built-in tool of Claude Code, pi and OpenCode, each with a switch,
   core ones included. Tools Kothar has its own version of (subagents, background shells, skills, plan modes) and
   tools that act out of Kothar's sight (schedules, notifications, publishing) are off by default; commands, edits,

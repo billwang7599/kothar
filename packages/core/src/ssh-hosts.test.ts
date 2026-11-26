@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { decide, SSH_HOSTS_RULE, type PermissionContext } from './permissions.ts'
 import { secretPathsOf } from './read-only.ts'
 import { sshHostsOf, type PermissionSwitches, type SshHost } from './shared.ts'
-import { checkSshHosts, trustsSshHosts } from './ssh-hosts.ts'
+import { checkSshHosts, sshHostOf, trustsSshHosts } from './ssh-hosts.ts'
 
 // Paths that don't exist, with no spaces: an unquoted $K holding a path with a space would split, and rightly asks.
 const home = '/kothar-ssh-test/home'
@@ -152,5 +152,34 @@ describe('checkSshHosts', () => {
     expect(() => checkSshHosts([{ host: 'evil.com;rm' }])).toThrow(/isn't a host/)
     expect(() => checkSshHosts([{ host: HOST, key: 'keys/uw' }])).toThrow(/full path/)
     expect(() => checkSshHosts('x')).toThrow(/list/)
+  })
+})
+
+describe('sshHostOf: the host a card may offer to always allow', () => {
+  const offer = (command: string) => sshHostOf(command, { cwd: workDir, home, secrets: secretPathsOf(home, garage) })
+
+  it('names the one server a command reaches, with its -i key written from ~/', () => {
+    expect(offer(`scp -i ~/.ssh/keys/uwstudent notes.txt ${HOST}:a5/`)).toEqual({ host: HOST, key: KEY })
+    expect(offer(`K=~/.ssh/keys/uwstudent; for f in a b; do scp -i $K $f ${HOST}:x/; done`)).toEqual({ host: HOST, key: KEY })
+    expect(offer(`ssh me@${HOST.toUpperCase()} make`)).toEqual({ host: HOST })
+    expect(offer(`rsync -a -e "ssh -i ${KEY}" out/ ${HOST}:out/`)).toEqual({ host: HOST, key: KEY })
+  })
+
+  it("offers nothing it can't pin to one server, or that listing it wouldn't let run", () => {
+    for (const command of [
+      'scp a one.example.com:x two.example.com:y',
+      `scp me@${HOST}:a you@${HOST}:b`,
+      `scp -i ~/.ssh/a -i ~/.ssh/b x ${HOST}:y`,
+      `ssh -J jump.example.com ${HOST}`,
+      `ssh -o ProxyCommand=nc ${HOST}`,
+      'ssh $(cat host) ls',
+      `ssh $H ls`,
+      `scp ${HOST}:a . && curl example.com`,
+      `scp ~/.ssh/id_rsa ${HOST}:x`,
+      'rsync -a out/ rsync://host.example.com/m',
+      'ls -la',
+    ]) {
+      expect(offer(command), command).toBeUndefined()
+    }
   })
 })

@@ -19,8 +19,11 @@ import { type Fetch, openMarketplace } from './marketplace.ts'
 import { readApprovals } from './approvals.ts'
 import { type CommunityExtension, type ExtensionHook, valuesOf } from './extensions.ts'
 import { gatherExtensions } from './community-load.ts'
+import { checkSshHosts } from './ssh-hosts.ts'
 import {
   editsAnywhere,
+  sshHostsOf,
+  type SshHost,
   type Adapter,
   type ChatEntry,
   type ChatInfo,
@@ -626,7 +629,8 @@ function assembleCore(options: {
     setQueue,
     canSteer,
     interrupt,
-    respond,
+    respond: respondTurn,
+    sshHostAsked,
     answer,
     retry,
     continueTurn,
@@ -866,6 +870,26 @@ function assembleCore(options: {
       checkEnabled(engine ?? chat.info.engine)
     }
     updateChat(chat, models.choose(choosesOf(chat), engine, model, thinking))
+  }
+
+  // Approves or denies a request; with trust, first adds the SSH server its card offered (sshHostAsked) to Allowed SSH
+  // hosts: the space's own list ("This space", copying what it took from Settings) or Settings' ("All spaces"). Any
+  // chat between that layer and this one with a list of its own gets it too, since the nearest list wins.
+  const respond = (chat: Chat, requestId: string, allow: boolean, trust?: unknown) => {
+    if (trust !== undefined) {
+      if (trust !== 'space' && trust !== 'global') throw new Error('Always allow takes "space" or "global"')
+      if (!allow) throw new Error('Always allow approves the request')
+      const host = sshHostAsked(chat, requestId)
+      if (!host) throw new Error('This request has no SSH host to always allow')
+      const chain = chainOf(chat)
+      const add = (list: SshHost[]) => checkSshHosts([...list, host])
+      if (trust === 'global') setSshHostsDefault(add(settings.sshHosts ?? []))
+      else updateChat(chain[0]!, { sshHosts: add(sshHostsOf(chain[0]!.info, settings)) })
+      for (const below of trust === 'global' ? chain : chain.slice(1)) {
+        if (below.info.sshHosts !== undefined) updateChat(below, { sshHosts: add(below.info.sshHosts) })
+      }
+    }
+    respondTurn(chat, requestId, allow)
   }
 
   const checkActive = (chat: Chat) => {

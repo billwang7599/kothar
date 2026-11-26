@@ -67,7 +67,7 @@ export type ProtocolDeps = {
   undoMessage: (chat: Chat, entry: unknown) => CoreMessage
   setQueue: (chat: Chat, queue: QueuedMessage[]) => void
   interrupt: (chat: Chat, force: boolean) => void
-  respond: (chat: Chat, requestId: string, allow: boolean) => void
+  respond: (chat: Chat, requestId: string, allow: boolean, trust?: unknown) => void
   answer: (chat: Chat, requestId: string, answers: unknown) => void
 
   // Context
@@ -214,7 +214,8 @@ export function openProtocol(deps: ProtocolDeps) {
     'chat.editMessage': (message) => deps.editMessage(chatFor(message.chatId), message.entry, message.text),
     'chat.undoMessage': (message, reply) => reply(deps.undoMessage(chatFor(message.chatId), message.entry)),
     'chat.interrupt': (message) => deps.interrupt(chatFor(message.chatId), message.force === true),
-    'permission.respond': (message) => deps.respond(chatFor(message.chatId), message.requestId, message.allow === true),
+    'permission.respond': (message) =>
+      deps.respond(chatFor(message.chatId), message.requestId, message.allow === true, message.trustHost),
     'question.respond': (message) => deps.answer(chatFor(message.chatId), message.requestId, message.answers),
 
     // Context

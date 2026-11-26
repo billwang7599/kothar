@@ -48,6 +48,8 @@ export type Permission = {
   input: unknown
   outcome: 'pending' | 'allowed' | 'denied' | 'cancelled'
   auto?: true
+  // The SSH server the card offers to always allow (the core's sshHost on the request).
+  sshHost?: { host: string; key?: string }
 }
 
 // entry: where a message (the user's, a report or a reply) is in the chat's log, for extensions' message actions and
@@ -273,8 +275,8 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
           : i,
       )
     case 'permission.requested': {
-      const { requestId, name, kind: toolKind, summary, input, toolId } = entry
-      const permission: Permission = { requestId, name, toolKind, summary, input, outcome: 'pending' }
+      const { requestId, name, kind: toolKind, summary, input, toolId, sshHost } = entry
+      const permission: Permission = { requestId, name, toolKind, summary, input, outcome: 'pending', ...(sshHost && { sshHost }) }
       const own = (i: Item) => i.kind === 'tool' && i.toolId === toolId
       if (!items.some(own)) return [...items, { kind: 'permission', ...permission }]
       return items.map((i) =>
