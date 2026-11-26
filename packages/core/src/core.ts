@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ChatDetail, Extension, ExtensionContext, SentTurn, SpaceDetail } from '@kothar/extension-api'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { openAccounts } from './accounts.ts'
 import { openChatSetups, openSetups } from './setups.ts'
 import { openGroupActions, openGroups } from './groups.ts'
@@ -55,7 +55,16 @@ import { recordingMachine, stopLeftovers } from './process-records.ts'
 import { openFolderAccess, realOr } from './folder-access.ts'
 import { openFileLinks } from './file-links.ts'
 import { openCheckouts, type Checkout } from './checkouts.ts'
-import { changesText, hasChanges, openWorkerCheckouts, workerWorkDirOf } from './worker-checkouts.ts'
+import {
+  changesText,
+  hasChanges,
+  openWorkerCheckouts,
+  reviewText,
+  totalsOf,
+  workerWorkDirOf,
+  type MergeResult,
+  type ReviewAction,
+} from './worker-checkouts.ts'
 import { openFolderCopies } from './folder-copies.ts'
 import { placeAccess, placesOf } from './folder-modes.ts'
 import { extensionPicture, extensionStorageDir } from './extension-files.ts'
@@ -573,7 +582,10 @@ function assembleCore(options: {
   }
 
   const spaceOf = (chat: Chat): SpaceDetail => {
-    const { id, name, workDir, folders, worktrees = {} } = chainOf(chat)[0]!.info
+    const { id, name, workDir, folders, worktrees = {}, workerBranches = {} } = chainOf(chat)[0]!.info
+    const workerCheckouts = Object.entries(workerBranches).flatMap(([worker, entry]) =>
+      entry.repos.map(({ folder, path, branch, into }) => ({ folder, path, branch, from: into, worker, name: entry.name, state: entry.state })),
+    )
     return {
       id,
       name,
@@ -585,6 +597,7 @@ function assembleCore(options: {
         branch,
         ...(from && { from }),
       })),
+      ...(workerCheckouts.length && { workerCheckouts }),
     }
   }
 
@@ -1051,6 +1064,56 @@ function assembleCore(options: {
     return workerCheckouts.summarize(space, chat.info.id).then((entry) => (entry && hasChanges(entry.changes) ? changesText(entry) : undefined))
   }
 
+  // Review of a worker's changes once it's gone: Merge or Squash into the space's branches, Discard, or Keep. The note
+  // in the space's chat says what happened; the text is returned too, for the lead's tool. One at a time per worker.
+  const reviewing = new Set<string>()
+  const reviewWorker = async (space: Chat, workerId: string, action: ReviewAction) => {
+    const entry = space.info.workerBranches?.[workerId]
+    if (!entry) throw new Error('That worker has no changes waiting for review')
+    if (reviewing.has(workerId)) throw new Error(`Worker "${entry.name}"'s changes are already being reviewed`)
+    reviewing.add(workerId)
+    try {
+      const into = entry.repos.map((r) => r.into)
+      let result: MergeResult | undefined
+      if (action === 'merge' || action === 'squash') result = await workerCheckouts.merge(space, workerId, action)
+      else if (action === 'discard') await workerCheckouts.discard(space, workerId)
+      else workerCheckouts.keep(space, workerId)
+      const text = reviewText(entry.name, action, into, result)
+      append(space, { at: now().toISOString(), type: 'extension.note', text })
+      return text
+    } finally {
+      reviewing.delete(workerId)
+    }
+  }
+
+  // The lead's review_worker: Keep at once, anything else once the user says so on a card only they can answer.
+  const reviewWorkerFor = async (caller: Chat, workerId: string, action: ReviewAction) => {
+    const space = chainOf(caller)[0]!
+    const entry = space.info.workerBranches?.[workerId]
+    if (!entry) throw new Error(`No worker "${workerId}" has changes waiting for review in this space`)
+    if (entry.state === 'working') throw new Error(`Worker "${entry.name}" is still running`)
+    if (action !== 'keep') {
+      const verb = { merge: 'Merge', squash: 'Squash', discard: 'Discard' }[action]
+      const { uncommitted } = totalsOf(entry.changes)
+      const lines = changesText(entry)
+      if (action === 'discard' && uncommitted) lines.push(`Its ${uncommitted} uncommitted change${uncommitted === 1 ? '' : 's'} go too.`)
+      const { allow } = await requestPermission(
+        caller,
+        {
+          name: `${verb} worker "${entry.name}"'s changes`,
+          summary: lines.join('\n'),
+          kind: 'other',
+          input: { workerId, action },
+          buttons: { allow: verb, deny: 'Cancel' },
+        },
+        true,
+        { userOnly: true, requestId: `review-${randomBytes(6).toString('hex')}` },
+      )
+      if (!allow) return `The user said no: worker "${entry.name}"'s changes stay as they are, waiting for review.`
+    }
+    return reviewWorker(space, workerId, action)
+  }
+
   // Workers whose branches were still `working` when Kothar last stopped (loadAll has run) are gone now, or will be:
   // their changes wait for review.
   for (const space of [...chats.values()]) {
@@ -1104,6 +1167,7 @@ function assembleCore(options: {
     stop: (chatId) => interrupt(chatFor(chatId), false),
     roles: (chatId) => modelRoles.for((extension) => isOnFor(extension, chats.get(chatId))),
     forget: (chatId, ids) => forget(chatFor(chatId), ids),
+    reviewWorker: (chatId, workerId, action) => reviewWorkerFor(chatFor(chatId), workerId, action),
     workers: (chatId: string) => {
       const chat = chats.get(chatId)
       return { enabled: !!chat && agentStartsWorkers(chat, workers, setupOf(chat)), limit: workers.limit() }
@@ -1133,7 +1197,7 @@ function assembleCore(options: {
       groups.push({
         name: 'Workers',
         about: 'hand a whole task to a new chat below this one, which works while you talk and reports back.',
-        tools: ['spawn_worker', ...(own.includes('stop_chat') ? ['stop_chat'] : [])],
+        tools: ['spawn_worker', ...['review_worker', 'stop_chat'].filter((name) => own.includes(name))],
       })
     }
     const reach = ['list_chats', 'read_chat', 'send_message', ...(starts ? [] : ['stop_chat'])].filter((name) => own.includes(name))
@@ -1212,6 +1276,7 @@ function assembleCore(options: {
     setFolderMode,
     copyChanges,
     copyBack,
+    reviewWorker,
     writeContext,
     writeInstructions,
     setContextDefault,

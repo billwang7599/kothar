@@ -24,6 +24,8 @@ type Hub = {
   stop(chatId: string): void
   // The forget tool: asks the user, then removes the messages from the chat (message-edits.ts forget).
   forget(chatId: string, ids: unknown): Promise<string>
+  // review_worker: Keep, or Merge, Squash or Discard on the user's say (core.ts reviewWorkerFor).
+  reviewWorker(chatId: string, workerId: string, action: 'merge' | 'squash' | 'discard' | 'keep'): Promise<string>
   // Whether that chat's agent may start workers (Settings → Workers, and its setup), and how many of its children may
   // run at once (-1: no limit).
   workers(chatId: string): { enabled: boolean; limit: number }
@@ -61,7 +63,8 @@ type Context = { hub: Hub; caller: ChatState; reachable: (chatId: string) => Cha
 
 type Tool = {
   // all: every chat, its own chat being what it acts on.
-  for: 'reach' | 'workers' | 'all'
+  // review: as workers, but not for an extension's own chat (Home), whose workers never get checkouts of their own.
+  for: 'reach' | 'workers' | 'review' | 'all'
   description: string
   // Or made for each chat, as its session lists the tools, from what's on for it.
   input: z.ZodObject | ((hub: Hub, caller: ChatState) => z.ZodObject)
@@ -130,6 +133,18 @@ const TOOLS: Record<string, Tool> = {
       return `Stopping chat "${chatId}"`
     },
   },
+  review_worker: {
+    for: 'review',
+    description:
+      "Act on a finished worker's changes, which wait on its own branch after its report: merge or squash them into " +
+      "your space's branch, discard them (worktree and branch removed), or keep them for later. Merge, squash and " +
+      'discard ask the user first; a merge that conflicts is undone and reported, its branch left waiting. Give the ' +
+      "worker's id from its report.",
+    input: z.object({ workerId: z.string(), action: z.enum(['merge', 'squash', 'discard', 'keep']) }),
+    run({ hub, caller }: Context, { workerId, action }: { workerId: string; action: 'merge' | 'squash' | 'discard' | 'keep' }) {
+      return hub.reviewWorker(caller.id, workerId, action)
+    },
+  },
   spawn_worker: {
     for: 'workers',
     description:
@@ -138,8 +153,8 @@ const TOOLS: Record<string, Tool> = {
         "don't poll it. Give a role, if any are listed, to run it on that role's models instead. It uses this chat's setup and gets the same " +
       'tools as this chat (deep research, notes, MCP servers and the rest), so it can run any of them for you. Returns ' +
       'its id. In a space with git folders it works on a branch and worktree of its own by default, and its changes ' +
-      'wait in its report for review; give checkout "shared" for a task that only reads, so it works in your checkout ' +
-      'instead.',
+      'wait in its report for review (review_worker); give checkout "shared" for a task that only reads, so it works in ' +
+      'your checkout instead.',
     // The roles are the ones extensions on for this chat declare (Plan's planning, Deep Research's searching); with
     // none, there's no role to give.
     input: (hub, caller) => {
@@ -199,6 +214,7 @@ export function openKotharMcp(hub: Hub) {
     const spawns = !caller.worker && hub.workers(caller.id).enabled
     if (tool.for === 'all') return true
     if (tool.for === 'workers') return spawns
+    if (tool.for === 'review') return spawns && !caller.extension
     return spawns || hub.seesAll(caller.id)
   }
   const extensionToolsFor = (caller: ChatState) => hub.extensionTools(caller.id).filter(({ tool }) => tool.offered(summaryOf(caller)))

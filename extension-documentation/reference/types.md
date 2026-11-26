@@ -46,6 +46,7 @@ A **space** is a chat with no `parentId` and no `extension`.
 | `workDir` | The folder its agents work in. Absent until the space's first message picks one. |
 | `folders` | `{ path, git }[]`: its folders, and whether each is a git repository. |
 | `checkouts` | `{ folder, path, branch, from? }[]`: each git folder's checkout in the work folder. `path` and `branch` are the checkout's; `from` is the branch the folder was on when Kothar checked it out. |
+| `workerCheckouts?` | `{ folder, path, branch, from, worker, name, state }[]`: workers' own checkouts (Settings → Workers → Own worktree per worker). `from` is the space's branch the worker's branch merges into; `worker` and `name` are the worker's id and name; `state` is `working`, or `review` / `kept` once it reported and its changes wait. Kothar makes and removes them; leave them out of any cleanup. |
 
 ## Log entries
 

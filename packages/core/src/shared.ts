@@ -736,6 +736,8 @@ export type ClientMessage =
   | { type: 'chat.setPermission'; chatId: string; name: PermissionSwitch; enabled?: boolean }
   // The chat's own allowed SSH hosts, or none to take its space's or Settings' again.
   | { type: 'chat.setSshHosts'; chatId: string; hosts?: SshHost[] }
+  // A worker's changes waiting on its space (ChatInfo.workerBranches): chatId is the space, workerId the worker's.
+  | { type: 'worker.review'; chatId: string; workerId: string; action: 'merge' | 'squash' | 'discard' | 'keep' }
   // A space's setup script for its workers' own worktrees; empty or absent: none.
   | { type: 'chat.setSetupScript'; chatId: string; script?: string }
   // steer: hand it to the running turn if its engine can steer; otherwise, or without it, it waits for the turn to end.

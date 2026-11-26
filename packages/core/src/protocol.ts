@@ -26,6 +26,7 @@ import {
   type QueuedMessage,
   type Setup,
 } from './shared.ts'
+import { isReviewAction, type ReviewAction } from './worker-checkouts.ts'
 import { checkSwitch } from './settings.ts'
 import { checkSshHosts } from './ssh-hosts.ts'
 import { messageOf } from './util.ts'
@@ -79,6 +80,8 @@ export type ProtocolDeps = {
   setFolderMode: (chat: Chat, path: unknown, mode: unknown) => void
   copyChanges: (chat: Chat, path: unknown) => Promise<CopyChange[]>
   copyBack: (chat: Chat, path: unknown, files: unknown, overwrite: boolean) => Promise<number>
+  // A worker's changes, waiting on its space: Merge, Squash, Discard or Keep (worker-checkouts.ts).
+  reviewWorker: (space: Chat, workerId: string, action: ReviewAction) => Promise<string>
   writeContext: (chat: Chat, text: string) => void
   writeInstructions: (text: string) => void
   setContextDefault: (section: ContextSection, enabled: boolean) => void
@@ -191,6 +194,15 @@ export function openProtocol(deps: ProtocolDeps) {
       const hosts = message.hosts === undefined ? undefined : checkSshHosts(message.hosts)
       deps.checkActive(chat)
       return deps.updateChat(chat, { sshHosts: hosts })
+    },
+    'worker.review': (message, reply) => {
+      const chat = chatFor(message.chatId)
+      if (typeof message.workerId !== 'string') throw new Error('Which worker?')
+      if (!isReviewAction(message.action)) throw new Error('Merge, squash, discard or keep')
+      deps.checkActive(chat)
+      return void deps.reviewWorker(chat, message.workerId, message.action).catch((error) =>
+        reply({ type: 'error', message: messageOf(error) }),
+      )
     },
     'chat.setSetupScript': (message) => {
       const chat = chatFor(message.chatId)

@@ -122,14 +122,21 @@ export type ChatDetail = ChatSummary & {
 // the branch the folder was on when Kothar checked it out (absent for checkouts made before Kothar recorded it).
 export type Checkout = { folder: string; path: string; branch: string; from?: string }
 
+// A worker's own checkout of a git folder (Settings → Workers → Own worktree per worker): its worktree and branch, and
+// the space's branch it merges into as `from`. worker: the worker's id (gone once it reported), with its name and
+// whether it still runs ('working') or its changes wait for review ('review', or 'kept' by the user).
+export type WorkerCheckoutDetail = Checkout & { worker: string; name: string; state: 'working' | 'review' | 'kept' }
+
 // The space a chat belongs to: its work folder (absent until its first message picks one), its folders (git: has a
-// .git) and its checkouts.
+// .git) and its checkouts, then its workers' own checkouts. Kothar makes and removes those; an extension's cleanup
+// leaves them alone.
 export type SpaceDetail = {
   id: string
   name: string
   workDir?: string
   folders: { path: string; git: boolean }[]
   checkouts: Checkout[]
+  workerCheckouts?: WorkerCheckoutDetail[]
 }
 
 // A picture in a tool's result. An adapter sends it as data (base64); the core saves it in the chat's folder

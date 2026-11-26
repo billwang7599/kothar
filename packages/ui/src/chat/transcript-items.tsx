@@ -4,6 +4,7 @@ import { Fragment, useContext, useState, type ReactNode } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import type { ClientMessage, ContextItem, MessageActionInfo, MessageDetailInfo, NoteViewInfo } from '@kothar/core/shared'
 import { NoteView } from './note-view.tsx'
+import { WorkerReview } from './worker-review.tsx'
 import { Chevron, CopyBlock, CopyButton, ErrorText, MOTION } from '../controls.tsx'
 import { LinkedText, NoFileLinks } from '../file-links.tsx'
 import { Markdown } from '../markdown.tsx'
@@ -102,9 +103,10 @@ function NoteCard({ card, text, open }: { card: ExtensionNoteCard; text: string;
 type Report = Extract<Item, { kind: 'report' }>
 
 /** A worker's report: unfolded or folded by the chat's setting until the user opens or closes it. */
-type ReportProps = { item: Report; chatId: string; at?: number; open?: () => void; actions?: ReactNode }
+// review: a worker's changes waiting on its own branch (WorkerReview), shown folded or not.
+type ReportProps = { item: Report; chatId: string; at?: number; open?: () => void; actions?: ReactNode; review?: ReactNode }
 
-function ReportCard({ item, chatId, at, open, actions }: ReportProps) {
+function ReportCard({ item, chatId, at, open, actions, review }: ReportProps) {
   const opens = useContext(ReportsOpen)
   const key = at === undefined ? undefined : reportCardKey(chatId, at)
   const chosen = useReportCardChoice(key ?? '')
@@ -144,6 +146,7 @@ function ReportCard({ item, chatId, at, open, actions }: ReportProps) {
           </button>
         )}
       </div>
+      {review}
       <AnimatePresence initial={false}>
         {shown && (
           <m.div {...MOTION.collapse}>
@@ -250,7 +253,8 @@ export function ItemView(props: ItemProps) {
     ) : null
   }
   switch (item.kind) {
-    case 'report':
+    case 'report': {
+      const branch = item.from === undefined ? chat.workerBranches?.[item.chatId] : undefined
       return (
         <>
           <ReportCard
@@ -258,6 +262,7 @@ export function ItemView(props: ItemProps) {
             chatId={chat.id}
             at={props.at}
             open={openChat?.(item.chatId)}
+            review={branch && <WorkerReview spaceId={chat.id} workerId={item.chatId} branch={branch} connected={connected} send={send} />}
             actions={
               <>
                 {actions('work', item.entry)}
@@ -268,6 +273,7 @@ export function ItemView(props: ItemProps) {
           {details('work', item.entry)}
         </>
       )
+    }
     case 'user':
       return (
         <UserItem

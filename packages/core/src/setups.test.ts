@@ -289,7 +289,7 @@ describe('setups', () => {
     await until(() => t.sessions.length > 0)
     const lead = t.sessions.at(-1)!
     expect(lead.instructions).toContain('They work together: when a task needs more than one, combine them on your own')
-    expect(lead.instructions).toContain('- Workers (spawn_worker, stop_chat): hand a whole task')
+    expect(lead.instructions).toContain('- Workers (spawn_worker, review_worker, stop_chat): hand a whole task')
     expect(lead.instructions).toContain('- Test extension (test_tool)')
     const { chatId } = await t.call(lead, 'spawn_worker', { task: 'Use the test tool' })
     await until(() => t.sessions.length > 1)

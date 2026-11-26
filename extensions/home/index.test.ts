@@ -109,6 +109,7 @@ it('runs Home in the scratch folder with its instructions, and makes top-level s
     'forget',
     'list_chats',
     'read_chat',
+    'review_worker',
     'send_message',
     'spawn_worker',
     'stop_chat',

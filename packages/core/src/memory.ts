@@ -14,7 +14,7 @@ export type Report = { text: string; report: WorkerReport }
 // How a worker's report reads to its lead, in memory and in the prompt that delivers it.
 export const CHANGES_WAITING =
   "Its changes are on its own branch, not yet in the space's. They wait for review: the user can merge, squash, " +
-  'discard or keep them from the report.'
+  'discard or keep them from the report, and you can with review_worker (the user approves merges and discards).'
 
 export function reportText({ text, report: { chatId, name, error, from, changes } }: Report) {
   if (from !== undefined) {

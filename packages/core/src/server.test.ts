@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -1054,4 +1055,46 @@ it('records a message steered into a running turn against that turn', async () =
   await waitUntil(() => sent.length === 2)
   expect(sent[1]).toMatchObject({ kind: 'steer', turn: sent[0]!.turn, sections: [{ source: 'you', text: 'and this' }] })
   session.end('ok')
+})
+
+it("lets a lead review a worker's changes with review_worker, but merges only once the user says so on a card", async () => {
+  const { core, garage, json, tool, send, sessionOf } = await startHeld()
+  workersOn(core, -1)
+  const repo = join(garage, 'repo')
+  mkdirSync(repo, { recursive: true })
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8' }).trim()
+  git('init', '-q', '-b', 'main')
+  writeFileSync(join(repo, 'README.md'), 'hi\n')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'first')
+  core.handle({ type: 'chat.create', name: 'App', folders: [repo] }, () => {})
+  const spaceId = core.chats().find((c) => c.name === 'App')!.id
+
+  // The lead's session starts once its checkout is made.
+  send(spaceId, 'Fix it')
+  await until(() => !!sessionOf(spaceId))
+  const token = sessionOf(spaceId).options.kotharMcp!.token
+  const { chatId } = await json(token, 'spawn_worker', { task: 'Fix the bug' })
+  await until(() => !!sessionOf(chatId))
+  const worker = sessionOf(chatId)
+  expect(worker.options.cwd).toContain(join('workers', chatId))
+  writeFileSync(join(worker.options.cwd, 'fix.txt'), 'fixed\n')
+  worker.end('Fixed')
+  await until(() => chatIn(core, spaceId).workerBranches?.[chatId]?.state === 'review')
+  expect(chatIn(core, spaceId).queue).toMatchObject([{ report: { chatId, changes: [expect.stringContaining('1 file changed')] } }])
+
+  // Keep needs no card; Merge waits for the user's answer.
+  expect(await tool(token, 'review_worker', { workerId: chatId, action: 'keep' })).toMatchObject({ isError: false })
+  const merging = tool(token, 'review_worker', { workerId: chatId, action: 'merge' })
+  await until(() => chatIn(core, spaceId).entries.some((e) => e.type === 'permission.requested'))
+  const card = chatIn(core, spaceId).entries.findLast((e) => e.type === 'permission.requested')!
+  expect(card).toMatchObject({ name: `Merge worker "Fix the bug"'s changes`, buttons: { allow: 'Merge', deny: 'Cancel' } })
+  if (card.type !== 'permission.requested') throw new Error('no card')
+  core.handle({ type: 'permission.respond', chatId: spaceId, requestId: card.requestId, allow: true }, () => {})
+  expect((await merging).text).toMatch(/^Merged worker "Fix the bug"'s changes into kothar\/app/)
+  const checkout = chatIn(core, spaceId).worktrees![repo]!.path
+  expect(readFileSync(join(checkout, 'fix.txt'), 'utf8')).toBe('fixed\n')
+  expect(chatIn(core, spaceId).workerBranches).toBeUndefined()
+  sessionOf(spaceId).end('Done')
 })

@@ -76,6 +76,10 @@ async function start(workers = { enabled: false, limit: 4 }) {
       const status = chats.find((c) => c.id === chatId)!.status
       return status === 'idle' ? 'sent' : status === 'running' ? 'steered' : 'queued'
     },
+    async reviewWorker(chatId, workerId, action) {
+      calls.push(['reviewWorker', chatId, workerId, action])
+      return `Merged worker "${workerId}"`
+    },
     async forget(chatId, ids) {
       calls.push(['forget', chatId, ids])
       return 'Forgot 1 message.'
@@ -336,11 +340,18 @@ describe('Kothar MCP server', () => {
 
       const { names, chats } = await on()
       expect(await names('main')).toContain('spawn_worker')
-      const tools = ['forget', 'list_chats', 'read_chat', 'send_message', 'spawn_worker', 'stop_chat']
+      const tools = ['forget', 'list_chats', 'read_chat', 'review_worker', 'send_message', 'spawn_worker', 'stop_chat']
       expect(await names('aaaa0001')).toEqual(tools)
       expect(await names('bbbb0001')).toEqual(tools)
       chats.push(chat('eeee0001', { parentId: 'bbbb0001', worker: true }))
       expect(await names('eeee0001')).toEqual(['forget'])
+    })
+
+    it("passes review_worker to the core, which asks the user", async () => {
+      const { calls, tool, grant } = await on()
+      const token = grant('aaaa0001')
+      expect(await tool(token, 'review_worker', { workerId: 'w1', action: 'merge' })).toEqual({ isError: false, text: 'Merged worker "w1"' })
+      expect(calls).toEqual([['reviewWorker', 'aaaa0001', 'w1', 'merge']])
     })
 
     it('refuses to spawn once the extension is turned off mid-session', async () => {

@@ -26,7 +26,8 @@ const FALLBACK_IDENTITY = ['-c', 'user.name=Kothar', '-c', 'user.email=kothar@lo
 
 export type MergeHow = 'merge' | 'squash'
 export type ReviewAction = MergeHow | 'discard' | 'keep'
-export const REVIEW_ACTIONS: ReviewAction[] = ['merge', 'squash', 'discard', 'keep']
+export const REVIEW_ACTIONS = ['merge', 'squash', 'discard', 'keep'] as const satisfies readonly ReviewAction[]
+export const isReviewAction = (value: unknown): value is ReviewAction => REVIEW_ACTIONS.includes(value as ReviewAction)
 
 /** What the worker checkouts need of a space: its saved info, kept with updateSpace. */
 type Space = { info: ChatInfo }
@@ -293,6 +294,25 @@ export function openWorkerCheckouts<S extends Space>(deps: {
 }
 
 export type WorkerCheckouts = ReturnType<typeof openWorkerCheckouts>
+
+const ACTION_DONE: Record<ReviewAction, string> = { merge: 'Merged', squash: 'Squashed', discard: 'Discarded', keep: 'Kept' }
+
+/** What a review did, as the space's note and the lead's tool result say it. */
+export function reviewText(name: string, action: ReviewAction, into: string[], result?: MergeResult) {
+  if (action === 'discard') return `Discarded worker "${name}"'s changes, with its worktrees and branches.`
+  if (action === 'keep') return `Kept worker "${name}"'s branches as they are, for later.`
+  const lines: string[] = []
+  // Folders by name: their paths are in the Changes tab, and a note is read at a glance.
+  const names = (folders: string[]) => folders.map((f) => basename(f)).join(', ')
+  if (result?.merged.length) {
+    lines.push(`${ACTION_DONE[action]} worker "${name}"'s changes into ${[...new Set(into)].join(', ')} (${names(result.merged)}).`)
+  }
+  if (result?.unchanged.length) lines.push(`Nothing new to merge in ${names(result.unchanged)}.`)
+  for (const { folder, files } of result?.conflicts ?? []) {
+    lines.push(`${basename(folder)} conflicts, so it was left as it was (the merge undone), its branch waiting: ${files.join(', ')}.`)
+  }
+  return lines.join('\n') || `Nothing to merge from worker "${name}".`
+}
 
 /** A worker's own folder in its space's work folder, where its worktrees go. */
 export const workerWorkDirOf = (spaceWorkDir: string, workerId: string) => join(spaceWorkDir, WORKERS_DIR, workerId)

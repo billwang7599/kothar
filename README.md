@@ -77,7 +77,10 @@ What works today:
   from the space's checkout, so workers running side by side never edit the same files. A space's **Worker setup
   script** (its General tab) runs in each new worktree first, such as `npm ci`; if it fails, the worker stops and its
   lead is told. When the worker reports, its changes (files, lines, commits, uncommitted) come with the report and wait
-  for review; one that changed nothing leaves no branch behind. An agent can pass `checkout: "shared"` for a task that
+  for review under the report: **Merge**, **Squash**, **Keep** or **Discard…** (which asks first). Merge commits what
+  the worker left uncommitted, and a conflict is undone and reported, the branch left waiting. The lead can do the
+  same with `review_worker`, but Merge, Squash and Discard wait for you to approve them on a card. The Changes tab
+  lists each worker's checkout beside the space's. One that changed nothing leaves no branch behind. An agent can pass `checkout: "shared"` for a task that
   only reads, and **Own worktree per worker** in Settings → Workers turns it off for every new worker.
 - **Extensions that work together:** each session is told what it can use (Kothar's tools and every extension's, one
   line each, made from their names and descriptions) and to combine them on its own, such as handing a deep research

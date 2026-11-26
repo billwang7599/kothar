@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ChatDetail, ExtensionContext, ExtensionView } from '@kothar/extension-api'
+import type { ChatDetail, ExtensionContext, ExtensionHost, ExtensionView, SpaceDetail } from '@kothar/extension-api'
 import { createFakeAdapter, type FakeStep } from '@kothar/core/fake'
 import { startCore } from '@kothar/core/main'
 import type { ClientMessage, CoreMessage, Machine, SessionOptions } from '@kothar/core/shared'
@@ -18,6 +18,7 @@ import {
   PR_TTL_MS,
   repoState,
   repoView,
+  targetsOf,
   type RepoState,
 } from './index.ts'
 
@@ -381,5 +382,31 @@ describe('reading git', () => {
       { branch: 'other', files: 0 },
       { branch: 'feat/y', files: 2 },
     ])).toBe('3 files changed on feat/x, 2 on feat/y')
+  })
+})
+
+describe("workers' own checkouts", () => {
+  it('lists them after the space’s, labelled, and shows a worker only its own', () => {
+    const [mine, theirs, space] = [tempDir(), tempDir(), tempDir()]
+    const detail: SpaceDetail = {
+      id: 's1',
+      name: 'App',
+      folders: [{ path: '/repo', git: true }],
+      checkouts: [{ folder: '/repo', path: space, branch: 'kothar/app' }],
+      workerCheckouts: [
+        { folder: '/repo', path: mine, branch: 'kothar-worker/app/w1-a', from: 'kothar/app', worker: 'w1', name: 'A', state: 'working' },
+        { folder: '/repo', path: theirs, branch: 'kothar-worker/app/w2-b', from: 'kothar/app', worker: 'w2', name: 'B', state: 'review' },
+        { folder: '/repo', path: join(theirs, 'gone'), branch: 'x', from: 'kothar/app', worker: 'w3', name: 'C', state: 'kept' },
+      ],
+    }
+    const host = { space: () => detail } as unknown as ExtensionHost
+    expect(targetsOf(host, 's1').map((t) => [t.path, t.label])).toEqual([
+      [space, undefined],
+      [mine, 'repo · worker A'],
+      [theirs, 'repo · worker B (to review)'],
+    ])
+    expect(targetsOf(host, 'w1')).toEqual([
+      { folder: '/repo', path: mine, checkout: { folder: '/repo', path: mine, branch: 'kothar-worker/app/w1-a', from: 'kothar/app' }, label: 'repo · worker A' },
+    ])
   })
 })

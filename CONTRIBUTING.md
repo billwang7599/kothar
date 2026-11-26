@@ -166,7 +166,12 @@ Why some things are the way they are. Add one when you make a choice the next co
   silently: merging commits what's left first, discarding is only ever the user's (or a lead's, on the user's
   approval) call, and deleting the space commits each worker's leftovers and keeps every branch with commits of its
   own. A quiet child (an extension's own work, such as research) shares the space's checkout unless it asks, since it
-  rarely edits a repo and a worktree per search would be waste. `workers.ts` only gains the switch
+  rarely edits a repo and a worktree per search would be waste. Review lives on the worker's report in its lead's chat
+  (the only place left once the worker's gone): Merge, Squash, Keep, Discard, each saying what it did in a note. The
+  lead's `review_worker` asks the user on a card only they can answer (as `forget` does) for anything but Keep, since
+  a merge changes the space's branch and a discard deletes work. A merge refuses a space checkout with uncommitted
+  changes, and a conflict runs `merge --abort` (`reset --merge` for squash), so the space is never left half-merged.
+  `workers.ts` only gains the switch
   (`checkout: 'shared'` when off); the rest is `worker-checkouts.ts`.
 - **One limit counts every worker.** Max running per chat counts every running child of a chat, `spawn_worker`'s and
   extensions' (quiet ones too), so an extension can't run past the user's limit. Over it, `spawn_worker` fails, so the

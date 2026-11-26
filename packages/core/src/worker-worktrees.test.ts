@@ -170,3 +170,49 @@ describe("workers' own worktrees", () => {
     await until(() => git(repo, 'show', `${branch}:fix.txt`) === 'fixed')
   })
 })
+
+describe("reviewing a worker's changes", () => {
+  it('merges them into the space’s branch from the report’s Merge, with a note saying so', async () => {
+    const t = start({ file: 'fix.txt', text: 'fixed\n' })
+    const repo = gitRepo()
+    const spaceId = t.space([repo])
+    const { id } = await t.work(spaceId)
+    await until(() => t.chat(spaceId)!.workerBranches?.[id]?.state === 'review')
+    const { branch, path } = t.chat(spaceId)!.workerBranches![id]!.repos[0]!
+    const space = t.chat(spaceId)!.worktrees![repo]!
+
+    t.handle({ type: 'worker.review', chatId: spaceId, workerId: id, action: 'squash' })
+    await until(() => !t.chat(spaceId)!.workerBranches)
+    expect(readFileSync(join(space.path, 'fix.txt'), 'utf8')).toBe('fixed\n')
+    expect(git(space.path, 'log', '-1', '--format=%s')).toBe('Fix the bug')
+    expect(existsSync(path)).toBe(false)
+    expect(branchesOf(repo)).not.toContain(branch)
+    expect(t.chat(spaceId)!.entries.at(-1)).toMatchObject({
+      type: 'extension.note',
+      text: `Squashed worker "Fix the bug"'s changes into ${space.branch} (${basename(repo)}).`,
+    })
+  })
+
+  it('keeps them, then discards them on the user’s word, and refuses a worker with nothing waiting', async () => {
+    const t = start({ file: 'fix.txt', text: 'fixed\n' })
+    const repo = gitRepo()
+    const spaceId = t.space([repo])
+    const { id } = await t.work(spaceId)
+    await until(() => t.chat(spaceId)!.workerBranches?.[id]?.state === 'review')
+    const { branch } = t.chat(spaceId)!.workerBranches![id]!.repos[0]!
+
+    t.handle({ type: 'worker.review', chatId: spaceId, workerId: id, action: 'keep' })
+    await until(() => t.chat(spaceId)!.workerBranches?.[id]?.state === 'kept')
+    t.handle({ type: 'worker.review', chatId: spaceId, workerId: id, action: 'discard' })
+    await until(() => !t.chat(spaceId)!.workerBranches)
+    expect(branchesOf(repo)).not.toContain(branch)
+
+    const errors: CoreMessage[] = []
+    t.core.handle({ type: 'worker.review', chatId: spaceId, workerId: id, action: 'merge' }, (m) => errors.push(m))
+    await until(() => errors.length > 0)
+    expect(errors).toEqual([{ type: 'error', message: 'That worker has no changes waiting for review' }])
+    expect(() => t.handle({ type: 'worker.review', chatId: spaceId, workerId: id, action: 'rebase' as 'merge' })).toThrow(
+      'Merge, squash, discard or keep',
+    )
+  })
+})
