@@ -184,6 +184,7 @@ export function createLocalMachine({
     child.on('close', (code) => exit(code))
 
     return {
+      ...(pgid !== undefined && { pid: pgid }),
       write: (data) => {
         if (child.stdin.writable) child.stdin.write(data)
       },

@@ -30,6 +30,8 @@ export type {
 } from '@kothar/extension-api'
 
 export interface EngineProcess {
+  // The process group the machine started it in (its leader's pid), where the machine knows one (the local machine).
+  pid?: number
   write(data: string): void
   closeStdin(): void
   kill(): void

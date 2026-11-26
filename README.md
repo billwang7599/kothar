@@ -64,6 +64,9 @@ What works today:
 - **Engines:** Claude Code, Codex, OpenCode and pi, with saved accounts for each.
 - **Spaces:** a folder becomes a space whose lead agent streams its replies, tool calls and permission requests. Chats
   survive a restart.
+- **Quitting or crashing loses no work:** queued messages are saved with their chat and sent when Kothar starts again.
+  A worker cut off by a quit or crash stays, and its lead gets a report saying so, so it can carry the worker on or
+  start another. If Kothar crashes, the next start stops the engines it left running.
 - **Home:** the main chat, a personal assistant that sees every space and can make new ones. It's part of Kothar and
   always on; its role prompt is editable in Settings → Home.
 - **Workers:** a lead can hand tasks to workers that run beside it, and extensions start them for their own work. They're

@@ -51,6 +51,7 @@ import type { Chat } from './chat.ts'
 import { pageOf } from './history.ts'
 import { reaches } from './reach.ts'
 import { lockGarage } from './garage-lock.ts'
+import { recordingMachine, stopLeftovers } from './process-records.ts'
 import { openFolderAccess, realOr } from './folder-access.ts'
 import { openFileLinks } from './file-links.ts'
 import { openCheckouts } from './checkouts.ts'
@@ -60,6 +61,7 @@ import { extensionPicture, extensionStorageDir } from './extension-files.ts'
 import { openExtensionHosts } from './extension-host.ts'
 import { appendEntry, openSettings, saveChatFile } from './chat-store.ts'
 import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
+import { QUEUE_FILE } from './queue-store.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
 import { openMessageEdits } from './message-edits.ts'
@@ -69,7 +71,7 @@ export { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, W
 
 export const STOP_GRACE_MS = 60_000
 // A chat's own files, which extensions' chat storage can't touch.
-const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, 'attachments', TOOL_IMAGES_DIR]
+const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, QUEUE_FILE, 'attachments', TOOL_IMAGES_DIR]
 
 
 export type Core = ReturnType<typeof openCore>
@@ -80,10 +82,17 @@ type CoreOptions = Parameters<typeof assembleCore>[0]
 // same garage fails here and changes nothing.
 export function openCore(options: CoreOptions) {
   mkdirSync(options.garage, { recursive: true })
-  const release = lockGarage(realpathSync(options.garage))
+  const garage = realpathSync(options.garage)
+  const release = lockGarage(garage)
   let core: ReturnType<typeof assembleCore>
   try {
-    core = assembleCore(options)
+    // What a core that crashed left running stops before anything loads (process-records.ts); this core's own
+    // processes are recorded from here on.
+    const stopped = stopLeftovers(garage)
+    if (stopped.length) {
+      console.warn(`Kothar stopped ${stopped.length} process${stopped.length === 1 ? '' : 'es'} an earlier Kothar left running: ${stopped.map((r) => `${r.command} (${r.pgid})`).join(', ')}`)
+    }
+    core = assembleCore({ ...options, machine: recordingMachine(garage, options.machine) })
   } catch (error) {
     release()
     throw error
@@ -639,6 +648,7 @@ function assembleCore(options: {
     whenAllStopped,
     requestPermission,
     startWaitingWorkers,
+    resumeQueues,
   } = openTurns({
     garage,
     home,
@@ -796,6 +806,7 @@ function assembleCore(options: {
     stopSession,
     forgetChat,
     removeWorkDir: (chat) => removeWorkDir(chat),
+    queueMessage: (chat, message) => setQueue(chat, [...chat.queue, { id: randomUUID().slice(0, 8), ...message }]),
     hasGroup: spaceGroups.has,
   })
   loadAll()
@@ -1219,6 +1230,8 @@ function assembleCore(options: {
       })
       return 'error' in found ? undefined : found
     },
+    // Runs what was queued before Kothar last quit; startCore calls it once the server is up (turn.ts resumeQueues).
+    resume: resumeQueues,
     serveMcp(url: string) {
       mcpUrl = url
       return mcp.handle

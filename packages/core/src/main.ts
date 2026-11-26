@@ -91,6 +91,8 @@ export async function startCore(
   if (work) core.setWorkFolder(work)
   await core.refreshEngines()
   const server = await startServer({ core, port, uiOrigin: uiUrl, token, uiDir })
+  // Sessions need the server's MCP address, so what was queued before the last quit runs only now.
+  core.resume()
   return {
     core,
     garage,

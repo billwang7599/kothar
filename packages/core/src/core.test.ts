@@ -21,6 +21,9 @@ import { createFakeAdapter, FAKE_DEFAULTS, FAKE_MODELS, FAKE_THINKING, type Fake
 import { sandboxingMachine } from './adapters/test-machine.ts'
 import { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
 import { LOCK_FILE } from './garage-lock.ts'
+import { CUT_OFF_BY_RESTART } from './chat-lifecycle.ts'
+import { QUEUE_FILE } from './queue-store.ts'
+import { PROCESSES_FILE } from './process-records.ts'
 import { openModels, snapLevel, SUMMARY_MODELS } from './models.ts'
 import { localMachine } from './machine.ts'
 import { WINDOW_MAX_CHARS } from './memory.ts'
@@ -43,7 +46,7 @@ import {
   type SessionOptions,
   type ThinkingLevel,
 } from './shared.ts'
-import { cantSandbox, cantWriteTmp, needs } from './test-env.ts'
+import { cantPs, cantSandbox, cantWriteTmp, needs } from './test-env.ts'
 import { until as waitUntil } from './test-wait.ts'
 
 const TEST_STOP_GRACE_MS = 30
@@ -409,22 +412,144 @@ describe('chats', () => {
     expect(JSON.stringify(lead)).toContain('Done')
   })
 
-  it('removes a worker left over from before, once it has worked, with its folder', () => {
-    const first = setup(textScript)
-    const space = createChat(first, { name: 'Space' })
-    first.core.close()
-    for (const id of ['done', 'fresh']) {
-      mkdirSync(join(first.garage, 'chats', id), { recursive: true })
-      const saved = { id, name: id, parentId: space.id, worker: true, engine: 'fake', createdAt: at }
-      writeFileSync(join(first.garage, 'chats', id, 'chat.json'), JSON.stringify(saved))
+  describe('workers left over from before a restart', () => {
+    // A space, and workers below it saved as a quit or crash left them.
+    const leftOver = (workers: { id: string; log?: object[]; quiet?: boolean }[], leadLog: object[] = []) => {
+      const first = setup(textScript)
+      const space = createChat(first, { name: 'Space' })
+      first.core.close()
+      const dirOf = (id: string) => join(first.garage, 'chats', id)
+      for (const { id, log, quiet } of workers) {
+        mkdirSync(dirOf(id), { recursive: true })
+        const saved = { id, name: `Worker ${id}`, parentId: space.id, worker: true, engine: 'fake', createdAt: at, ...(quiet && { quiet }) }
+        writeFileSync(join(dirOf(id), 'chat.json'), JSON.stringify(saved))
+        if (log) writeFileSync(join(dirOf(id), 'log.jsonl'), log.map((e) => JSON.stringify(e) + '\n').join(''))
+      }
+      appendFileSync(join(dirOf(space.id), 'log.jsonl'), leadLog.map((e) => JSON.stringify(e) + '\n').join(''))
+      return { garage: first.garage, space, dirOf }
     }
-    const entry = { at, type: 'user', text: 'Go' }
-    writeFileSync(join(first.garage, 'chats', 'done', 'log.jsonl'), JSON.stringify(entry) + '\n')
-    const t = setup(textScript, first.garage)
-    expect(chatOf(t.core, 'done')).toBeUndefined()
-    expect(existsSync(join(t.garage, 'chats', 'done'))).toBe(false)
-    expect(chatOf(t.core, 'fresh')).toBeDefined()
-    expect(chatOf(t.core, space.id)).toBeDefined()
+    const halfway = [
+      { at, type: 'user.message', text: 'Go' },
+      { at, type: 'turn.started' },
+      { at, type: 'text.completed', text: 'Half done' },
+    ]
+    const queueOf = (t: { core: Core }, id: string) => chatOf(t.core, id)?.queue ?? []
+
+    it('keeps one cut off mid-task, and its report wakes the lead once Kothar resumes', async () => {
+      const { garage, space, dirOf } = leftOver([{ id: 'cut', log: halfway }])
+      const t = setup(textScript, garage)
+      expect(chatOf(t.core, 'cut')).toMatchObject({ status: 'idle', worker: true })
+      expect(entriesOf(t.core, 'cut').at(-1)).toMatchObject({ type: 'turn.completed', error: expect.any(String) })
+      expect(queueOf(t, space.id)).toMatchObject([
+        { text: 'Half done', report: { chatId: 'cut', name: 'Worker cut', error: CUT_OFF_BY_RESTART } },
+      ])
+      // Saved with the lead, so a second quit before it runs keeps it.
+      expect(JSON.parse(readFileSync(join(dirOf(space.id), QUEUE_FILE), 'utf8'))).toHaveLength(1)
+      expect(t.calls).toHaveLength(0)
+
+      t.core.resume()
+      await until(() => statusOf(t.core, space.id) === 'idle' && t.calls.length === 1)
+      expect(t.calls[0]!.prompt).toContain('Report from worker "Worker cut" (cut)')
+      expect(t.calls[0]!.prompt).toContain('Half done')
+      expect(t.calls[0]!.prompt).toContain('cut off')
+      expect(existsSync(join(dirOf(space.id), QUEUE_FILE))).toBe(false)
+      // The lead can carry it on: it's still there until the lead's read its report and a start finds it unchanged.
+      expect(chatOf(t.core, 'cut')).toBeDefined()
+      await t.core.close()
+
+      const again = setup(textScript, garage)
+      expect(chatOf(again.core, 'cut')).toBeUndefined()
+      expect(existsSync(dirOf('cut'))).toBe(false)
+      expect(queueOf(again, space.id)).toEqual([])
+    })
+
+    it('keeps one whose report its lead has not read yet, without reporting it twice', async () => {
+      const { garage, space } = leftOver([{ id: 'cut', log: halfway }])
+      await setup(textScript, garage).core.close()
+      const t = setup(textScript, garage)
+      expect(chatOf(t.core, 'cut')).toBeDefined()
+      expect(queueOf(t, space.id)).toHaveLength(1)
+    })
+
+    it('reports one that finished as Kothar quit, as it would have, and removes it', () => {
+      const done = [...halfway, { at, type: 'turn.completed' }]
+      const { garage, space, dirOf } = leftOver([{ id: 'done', log: done }])
+      const t = setup(textScript, garage)
+      expect(chatOf(t.core, 'done')).toBeUndefined()
+      expect(existsSync(dirOf('done'))).toBe(false)
+      expect(queueOf(t, space.id)).toMatchObject([{ text: 'Half done', report: { chatId: 'done', name: 'Worker done' } }])
+      expect(queueOf(t, space.id)[0]!.report).not.toHaveProperty('error')
+    })
+
+    it('removes one its lead already has the report of, and a quiet one, with their folders', () => {
+      // Logged after Kothar closed the worker's cut-off turn on the start before.
+      const report = { at: '2999-01-01T00:00:00.000Z', type: 'worker.report', chatId: 'read', name: 'Worker read', text: 'ok' }
+      const { garage, space, dirOf } = leftOver(
+        [
+          { id: 'read', log: halfway },
+          { id: 'quiet', log: halfway, quiet: true },
+          { id: 'fresh' },
+        ],
+        [{ at, type: 'user.message', text: 'go' }, report, { at: report.at, type: 'turn.started' }, { at: report.at, type: 'turn.completed' }],
+      )
+      const t = setup(textScript, garage)
+      for (const id of ['read', 'quiet']) {
+        expect(chatOf(t.core, id)).toBeUndefined()
+        expect(existsSync(dirOf(id))).toBe(false)
+      }
+      expect(queueOf(t, space.id)).toEqual([])
+      // One that never started (it waited for a slot) stays with whatever is queued for it.
+      expect(chatOf(t.core, 'fresh')).toBeDefined()
+    })
+  })
+
+  it('stops an engine a crashed Kothar left running, as it opens the garage', async (context) => {
+    needs(context, cantPs)
+    const garage = tempDir()
+    const left = spawn('/bin/sleep', ['30'], { detached: true, stdio: 'ignore' })
+    const exited = new Promise((resolve) => left.on('exit', resolve))
+    // What the crashed Kothar recorded, under a pid that isn't this process's.
+    const record = { pgid: left.pid, command: '/bin/sleep', startedAt: Date.now(), owner: process.pid + 1 }
+    writeFileSync(join(garage, PROCESSES_FILE), JSON.stringify([record]))
+    setup(textScript, garage)
+    await exited
+    expect(existsSync(join(garage, PROCESSES_FILE))).toBe(false)
+  })
+
+  describe('queued messages across a restart', () => {
+    it('keeps what was queued when Kothar quit, and sends it once Kothar resumes', async () => {
+      const t = setup(permissionScript)
+      const chat = folderChat(t)
+      t.handle({ type: 'chat.send', chatId: chat.id, text: 'first' })
+      await until(() => statusOf(t.core, chat.id) === 'waiting')
+      t.handle({ type: 'chat.send', chatId: chat.id, text: 'then this' })
+      expect(chatOf(t.core, chat.id)?.queue).toMatchObject([{ text: 'then this' }])
+      const file = join(t.garage, 'chats', chat.id, QUEUE_FILE)
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject([{ text: 'then this' }])
+      await t.core.close(true)
+
+      const reopened = setup(textScript, t.garage)
+      expect(chatOf(reopened.core, chat.id)?.queue).toMatchObject([{ text: 'then this' }])
+      expect(reopened.calls).toHaveLength(0)
+      reopened.core.resume()
+      await until(() => reopened.calls.length === 1 && statusOf(reopened.core, chat.id) === 'idle')
+      expect(reopened.calls[0]!.prompt).toContain('then this')
+      expect(chatOf(reopened.core, chat.id)?.queue).toEqual([])
+      expect(existsSync(file)).toBe(false)
+    })
+
+    it('leaves an archived chat\'s queue for when it comes back', async () => {
+      const t = setup(textScript)
+      const chat = createChat(t, { name: 'Later' })
+      const dir = join(t.garage, 'chats', chat.id)
+      writeFileSync(join(dir, QUEUE_FILE), JSON.stringify([{ id: 'q1', text: 'hold on' }]))
+      t.handle({ type: 'chat.archive', chatId: chat.id, archived: true })
+      await t.core.close()
+      const reopened = setup(textScript, t.garage)
+      reopened.core.resume()
+      expect(reopened.calls).toHaveLength(0)
+      expect(chatOf(reopened.core, chat.id)?.queue).toMatchObject([{ id: 'q1', text: 'hold on' }])
+    })
   })
 
   it('renames a chat and saves it', () => {

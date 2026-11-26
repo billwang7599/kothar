@@ -145,6 +145,18 @@ Why some things are the way they are. Add one when you make a choice the next co
   agent knows and can wait or stop one; an extension's worker waits for a slot instead, because the extension's work
   (a research run) should finish, not fail. That's also why the switch for agents is separate from the limit: a
   limit of 0 would leave an extension's workers waiting forever.
+- **A restart picks up where Kothar stopped.** A worker is there for one task, so one still saved at start was stopped
+  by a quit or crash (`chat-lifecycle.ts` `restartedWorker`). It isn't deleted: if it was cut off, it stays idle with
+  its log and its lead gets a report saying so, so the lead decides whether to carry it on (`send_message`) or start
+  another. A worker whose turn had ended well reports as it would have and goes; one whose report the lead has already
+  read goes; a quiet one goes, since its extension owns its work. Queues are saved in each chat's `queue.json`
+  (`queue-store.ts`) and run only after startup (`core.resume()`, called by `startCore` once the server is up),
+  because sessions need the MCP address. The core records each process group it spawns in
+  `<garage>/processes.json` (`process-records.ts`); after taking `kothar.lock`, a start stops an earlier core's groups
+  that are still running, but only when the leader's start time (to the second, from `ps`) and command still match, so
+  a reused pid is never killed. Records from this process are skipped, since a restart in place or a test keeps a
+  sibling core running. A normal quit and SIGINT/SIGTERM/SIGHUP already stop every session (`closeOnSignals`, the
+  desktop app's `before-quit`).
 - **The agent combines extensions; code rarely does.** Each session's "What you can use" section (`core-prompts.ts`)
   lists what the chat can use, made from extensions' metadata, and tells the agent to combine them. Workers get their
   lead's extension tools. An extension a worker uses may start workers one level below that worker (only there), so a

@@ -29,6 +29,7 @@ import type { openModels } from './models.ts'
 import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, trustableSshHost, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
 import { runningChildren } from './workers.ts'
+import { saveQueue } from './queue-store.ts'
 import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
 import {
   editsAnywhere,
@@ -1028,9 +1029,17 @@ export function openTurns(deps: TurnDeps) {
     setQueue(chat, [...plain, ...chat.queue.filter((q) => !back.includes(q))])
   }
 
+  // Kept on disk too (queue-store.ts), so a quit or a crash doesn't lose it. A chat whose folder is gone keeps it in
+  // memory only, and the user hears why.
   const setQueue = (chat: Chat, queue: QueuedMessage[]) => {
     chat.queue = queue
     broadcast({ type: 'chat.queue', chatId: chat.info.id, queue })
+    if (!queue.length && !existsSync(chat.dir)) return
+    try {
+      saveQueue(chat.dir, queue)
+    } catch (error) {
+      broadcast({ type: 'error', message: `"${chat.info.name}": its queue couldn't be saved (${messageOf(error)})` })
+    }
   }
 
   const sendQueue = (chat: Chat, message?: Omit<QueuedMessage, 'id'>) => {
@@ -1069,6 +1078,18 @@ export function openTurns(deps: TurnDeps) {
       if (isQuitting() || waitsForSlot(chat) || !chats.has(chat.info.id)) continue
       reportErrors(() => sendQueue(chat))
     }
+  }
+
+  // Once the core has started (main.ts startCore, after its server): what was queued when Kothar last quit runs now, as
+  // it would have once its turn ended, and workers waiting for a slot start as the limit allows. A lead woken by its
+  // cut-off workers' reports (chat-lifecycle.ts restartedWorker) runs here too. Archived chats keep theirs.
+  const resumeQueues = () => {
+    for (const chat of chats.values()) {
+      if (isQuitting()) return
+      if (chat.info.worker || chat.info.archived || chat.status !== 'idle' || !chat.queue.length) continue
+      reportErrors(() => sendQueue(chat))
+    }
+    if (!isQuitting()) startWaitingWorkers()
   }
 
   const enqueue = (chat: Chat, message: Omit<QueuedMessage, 'id'>) => {
@@ -1231,6 +1252,7 @@ export function openTurns(deps: TurnDeps) {
     sendMessage,
     enqueue,
     setQueue,
+    resumeQueues,
     canSteer,
     interrupt,
     respond,
