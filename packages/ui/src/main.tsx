@@ -32,6 +32,7 @@ import { folderName, folderOf, initialState, reduce, type Action, storedFlag } f
 import { dockedPanels, MIN_WINDOW_PX, storedColumn } from './layout.ts'
 import { fileLinksChecked } from './file-links.tsx'
 import { receiveCopyChanges } from './folder-copies.tsx'
+import { wantComposerFocus } from './composer-focus.ts'
 import './styles.css'
 
 const SELECTED_KEY = 'kothar.selectedChat'
@@ -228,6 +229,7 @@ function App() {
   useMarkRead(selected, looking && state.connected, send)
   const select = useCallback((chatId: string) => {
     dispatch({ type: 'select', chatId })
+    wantComposerFocus(chatId)
     setOverlay((open) => (open === 'sidebar' ? null : open))
   }, [])
   // A notification clicked: its chat opens, if it's still there.
