@@ -52,6 +52,11 @@ async function start(workers = { enabled: false, limit: 4 }) {
     return made
   }
   const extensionTools: { tool: ExtensionTool; values: ExtensionValues }[] = []
+  // The roles extensions on for a chat declare, as core.ts passes them.
+  const roles = [
+    { id: 'planning', label: 'Planning' },
+    { id: 'searching', label: 'Searching', description: 'Research workers.' },
+  ]
   const host = {
     createChat: ({ name, folders, files, engine }) => created({ name: name ?? "", folders, files, engine }),
     send: (chatId, text) => void calls.push(['send', chatId, text]),
@@ -61,6 +66,7 @@ async function start(workers = { enabled: false, limit: 4 }) {
     seesAll: (chatId) => chatId === 'main',
     extensionTools: () => extensionTools.map((entry) => ({ ...entry, host })),
     createChild: (parentId, spec) => created({ parentId, ...spec, worker: true }),
+    roles: () => roles,
     workers: () => workers,
     send(chatId, text) {
       calls.push(['send', chatId, text])
@@ -116,7 +122,7 @@ async function start(workers = { enabled: false, limit: 4 }) {
   }
   const names = async (chatId: string) =>
     (await rpc(grant(chatId), 'tools/list')).body.result.tools.map((t: { name: string }) => t.name).sort()
-  return { mcp, chats, calls, extensionTools, rpc, tool, json, grant, names, workers }
+  return { mcp, chats, calls, extensionTools, rpc, tool, json, grant, names, workers, roles }
 }
 
 describe('Kothar MCP server', () => {
@@ -366,6 +372,23 @@ describe('Kothar MCP server', () => {
       ])
       expect((await tool(grant('main'), 'spawn_worker', { task: 'Go', role: 'chat' })).isError).toBe(true)
       expect(calls).toHaveLength(6)
+    })
+
+    it("offers the roles extensions on for the chat declare, and no role when none do", async () => {
+      const { calls, rpc, tool, grant, roles, mcp } = await on()
+      const spawnSchema = async (chatId: string) =>
+        (await rpc(grant(chatId), 'tools/list')).body.result.tools.find((t: { name: string }) => t.name === 'spawn_worker').inputSchema
+      const offered = await spawnSchema('aaaa0001')
+      expect(offered.properties.role.enum).toEqual(['planning', 'searching'])
+      expect(offered.properties.role.description).toContain('searching: Searching (Research workers.)')
+      expect(mcp.toolsFor('aaaa0001').find((t) => t.name === 'spawn_worker')?.schema).toMatchObject({
+        properties: { role: { enum: ['planning', 'searching'] } },
+      })
+      roles.splice(0)
+      expect((await spawnSchema('aaaa0001')).properties.role).toBeUndefined()
+      // With none, a role it names anyway is dropped, as an engine it names is: the worker runs on Workers' models.
+      expect((await tool(grant('aaaa0001'), 'spawn_worker', { task: 'Go', role: 'planning' })).isError).toBe(false)
+      expect(calls[0]).toEqual(['createChat', { parentId: 'aaaa0001', name: 'Go', worker: true }])
     })
 
     it("passes no setup on at the spawn: a worker uses its space's", async () => {

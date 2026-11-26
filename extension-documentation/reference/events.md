@@ -206,9 +206,11 @@ const lookOnly: Extension = {
   description: 'A switch in the composer that makes the chat read only.',
   enabledByDefault: false,
   composerToggles: [{ id: 'look', label: 'Look only' }],
+  // Its own model list in Settings → Models (see Model roles in extension.md).
+  modelRoles: [{ id: 'look-only', label: 'Look only', description: 'Turns while Look only is on.' }],
   turnOptions(chat, { host }) {
     if (!host.toggled(chat.id, 'look')) return undefined
-    return { readOnly: true, reason: 'Look only is on: read and explain, change nothing.', role: 'planning' }
+    return { readOnly: true, reason: 'Look only is on: read and explain, change nothing.', role: 'look-only' }
   },
 }
 
@@ -226,7 +228,8 @@ export default lookOnly
     tools. pi never asks before using a tool, so outside the sandbox (Edits anywhere on) nothing stops it writing.
 - `reason` is what the agent is told when a request is refused for being read only.
 - `role` runs the turn on that model list (Settings → Models) when the user has put models in it, and on the chat's own
-  model otherwise. The chat's saved engine and model don't change.
+  model otherwise. The chat's saved engine and model don't change. It's `chat`, `workers`, or a role an extension
+  that's on declares ([`modelRoles`](extension.md#model-roles)); any other shows as the extension's error.
 - Every extension that's on for the chat is asked. The turn is read only if any of them says so, with the first one's
   `reason`, and runs on the first `role` given.
 - Keep it quick and synchronous. If it throws, its error shows and the turn runs as if it had returned nothing.

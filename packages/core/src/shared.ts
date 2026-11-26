@@ -1,6 +1,7 @@
 import type {
   ToolCapability,
-  ModelRole as ApiModelRole,
+  CoreModelRole as ApiCoreModelRole,
+  ExtensionModelRole,
   Answers,
   Attachment,
   ChatEntry,
@@ -17,6 +18,7 @@ import type {
 } from '@kothar/extension-api'
 
 export type {
+  ExtensionModelRole,
   Answers,
   ChatEntry,
   ChatStatus,
@@ -403,28 +405,32 @@ export type WorkFolder = PermissionSwitches & {
 export const allowsAll = (...layers: PermissionSwitches[]) => switchedOn('allowAll', ...layers)
 export const editsAnywhere = (...layers: PermissionSwitches[]) => allowsAll(...layers) || switchedOn('editAnywhere', ...layers)
 
-export const MODEL_ROLES = ['chat', 'planning', 'searching', 'workers'] as const
-
-export type ModelRole = (typeof MODEL_ROLES)[number]
-// The extension API names the same roles; this fails to compile if the two lists drift apart.
+// Kothar's own model roles: Chat, and Workers for every worker no role names. Extensions declare more
+// (Extension.modelRoles), such as Plan's 'planning' and Deep Research's 'searching'; a role is any of these ids.
+export const CORE_MODEL_ROLES = ['chat', 'workers'] as const
+export type CoreModelRole = (typeof CORE_MODEL_ROLES)[number]
+export type ModelRole = string
+// The extension API names the same core roles; this fails to compile if the two lists drift apart.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
-export const ROLES_MATCH_EXTENSION_API: Same<ModelRole, ApiModelRole> = true
+export const ROLES_MATCH_EXTENSION_API: Same<CoreModelRole, ApiCoreModelRole> = true
 
-export const ROLE_NAMES: Record<ModelRole, string> = {
+export const ROLE_NAMES: Record<CoreModelRole, string> = {
   chat: 'Chat',
-  planning: 'Planning',
-  searching: 'Searching',
   workers: 'Workers',
 }
+
+// A role's id is lowercase letters, digits and dashes, starting with a letter.
+export const MODEL_ROLE_ID = /^[a-z][a-z0-9-]*$/
 
 // One entry in a role's model list: a model on an engine, and the thinking level it runs at there. `thinking` is left
 // out only for a model that takes no levels, or until its engine has said which it takes.
 export type ModelRow = { engine: string; model: string; thinking?: ThinkingLevel }
 
-// One list per role, shared by every engine; a list can mix engines.
-export type ModelLists = Record<ModelRole, ModelRow[]>
+// One list per role, shared by every engine; a list can mix engines. Chat and Workers are always there; an extension's
+// role has its list once the user saved one, and keeps it while the extension is off.
+export type ModelLists = { chat: ModelRow[]; workers: ModelRow[] } & Record<string, ModelRow[]>
 
-export const NO_LISTS: ModelLists = { chat: [], planning: [], searching: [], workers: [] }
+export const NO_LISTS: ModelLists = { chat: [], workers: [] }
 
 /** The thinking levels a model takes: its own list if its engine gives one, else the engine's. */
 export const levelsOf = (engine: EngineInfo | undefined, model?: string): ThinkingLevel[] =>
@@ -480,6 +486,8 @@ export type ExtensionInfo = {
   blockedSettings?: Record<string, string>
   // A built-in extension's uses, read from the fields it sets, for its page (a community one's are community.uses).
   uses?: ExtensionUse[]
+  // The model roles it declares (Extension.modelRoles), each a list in Settings → Models; only while it runs.
+  modelRoles?: ExtensionModelRole[]
   // A community extension: installed in the garage from the marketplace or a folder, and what it says it uses. running:
   // the version this run of Kothar loaded, if any; extensions load only at startup.
   community?: {

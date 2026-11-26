@@ -128,8 +128,9 @@ Kothar, so this needs no other extension:
 - It's listed under its parent, and it's view only: you can watch it and stop it, not write to it.
 - It works in its space's work folder and checkouts, so it takes no `folders` or `files` of its own.
 - It sees its parent's memory as it was at launch.
-- It runs on the model list named by `role`: `chat`, `planning`, `searching` or `workers` (the default). Use `role`
-  only with `parentId`.
+- It runs on the model list named by `role`: `chat`, `workers` (the default), or a role an extension that's on declares
+  ([`modelRoles`](extension.md#model-roles)), such as Deep Research's `searching`. Any other role is refused. Use
+  `role` only with `parentId`.
 - Its final reply joins the parent's queue as a report and wakes the parent. Then the child is removed.
 - With `quiet: true`, its final reply goes to your extension instead: read it in
   [`onTurnCompleted`](events.md) (`turn.text`, with `turn.chat` the child). The parent gets no report and isn't woken.
@@ -151,9 +152,10 @@ start workers** switch only concerns `spawn_worker`; your extension can start wo
 ```ts
 import type { ExtensionHost } from '@kothar/extension-api'
 
+// With modelRoles: [{ id: 'my-research', label: 'My research' }] on the extension.
 function research(host: ExtensionHost, parentId: string, question: string) {
   const task = `Find out: ${question}. Reply with a short answer and your sources.`
-  return host.createChat({ name: 'Research', parentId, role: 'searching', task }).id
+  return host.createChat({ name: 'Research', parentId, role: 'my-research', task }).id
 }
 
 export { research }

@@ -520,6 +520,7 @@ export function Chat(props: ChatProps) {
               offers={offers}
               noEngineOn={noEngineOn}
               modelLists={props.modelLists}
+              extensions={props.extensions}
               connected={connected}
               send={send}
               openSettings={openSettings}

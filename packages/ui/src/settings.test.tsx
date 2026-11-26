@@ -444,7 +444,13 @@ test('Settings → Models lists each role once across engines, each model with i
     ],
     searching: [],
     workers: [],
+    // A list kept for an extension that's off (or gone): saved, but not shown.
+    gone: [{ engine: 'pi', model: 'p/one' }],
   }
+  // The roles come from the extensions that are on (the core sends an extension's modelRoles only while it runs).
+  const roleOf = (id: string, name: string, role: string, label: string) =>
+    ({ id, name, description: '', enabled: true, settings: [], values: {}, modelRoles: [{ id: role, label, description: `${label} work.` }] }) satisfies ExtensionInfo
+  const extensions = [roleOf('plan', 'Plan', 'planning', 'Planning'), roleOf('deep-research', 'Deep Research', 'searching', 'Searching')]
   const sent: ClientMessage[] = []
   act(() =>
     root.render(
@@ -459,7 +465,7 @@ test('Settings → Models lists each role once across engines, each model with i
               engines={[cc, pi]}
               accounts={[]}
               contextDefaults={{ agents: true, folders: true, files: true }}
-              extensions={[]}
+              extensions={extensions}
               modelLists={lists}
               workFolder={workFolder}
               chooseWorkFolder={() => {}}
@@ -488,6 +494,10 @@ test('Settings → Models lists each role once across engines, each model with i
   expect(select('Thinking for Haiku · Claude Code in Planning')).toBeNull()
   // Empty roles run what Chat does, and the Chat list's only model can't be removed.
   expect(dialog().textContent?.match(/Same as Chat/g)).toHaveLength(2)
+  // Kothar's own lists first, then each extension's, and none for a role no extension that's on declares.
+  const roleNames = [...dialog().querySelectorAll('button[aria-label^="Add a "]')].map((b) => b.getAttribute('aria-label'))
+  expect(roleNames).toEqual(['Add a Chat model', 'Add a Workers model', 'Add a Planning model', 'Add a Searching model'])
+  expect(dialog().textContent).toContain('Planning work. From Plan.')
   expect(select('Remove Opus · Claude Code')!.disabled).toBe(true)
 
   open('Thinking for One · pi in Planning')
@@ -496,7 +506,7 @@ test('Settings → Models lists each role once across engines, each model with i
   expect(sent.at(-1)).toEqual({
     type: 'models.setList',
     role: 'planning',
-    models: [lists.planning[0], lists.planning[1], { engine: 'pi', model: 'p/one', thinking: 'high' }],
+    models: [lists.planning![0], lists.planning![1], { engine: 'pi', model: 'p/one', thinking: 'high' }],
   })
 
   // Adding a model offers every engine's, grouped; the core gives it the level it runs at.

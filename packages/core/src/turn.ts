@@ -36,7 +36,6 @@ import {
   IMAGE_TYPES,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_TOTAL_BYTES,
-  MODEL_ROLES,
   type Adapter,
   type Answers,
   type Attachment,
@@ -63,6 +62,8 @@ export const UNSANDBOXED_NEEDS_EDIT_ANYWHERE = true
 type Sandbox = { writable: string[]; tmpDir: string; readOnly?: string[] }
 
 export type TurnDeps = {
+  // Whether a turn can run on this role: Kothar's own, or one an extension that's on declares (model-roles.ts).
+  liveRole: (role: unknown) => boolean
   garage: string
   /** The user's home folder, which permission answers keep secrets in. */
   home: string
@@ -611,7 +612,7 @@ export function openTurns(deps: TurnDeps) {
           by.readOnly = extension.id
         }
         if (role === undefined && options.role !== undefined) {
-          if (!MODEL_ROLES.includes(options.role)) throw new Error(`Unknown model role "${String(options.role)}"`)
+          if (!deps.liveRole(options.role)) throw new Error(`Unknown model role "${String(options.role)}"`)
           role = options.role
           by.role = extension.id
         }
@@ -723,7 +724,7 @@ export function openTurns(deps: TurnDeps) {
     if (isQuitting()) throw new Error('Kothar is quitting')
     if (chat.status !== 'idle') throw new Error('A turn is already running in this chat')
     checkActive(chat)
-    const roleRun = role && models.lists()[role].length ? models.runOf({ engine: chat.info.engine, role }) : undefined
+    const roleRun = role && models.lists()[role]?.length ? models.runOf({ engine: chat.info.engine, role }) : undefined
     const run = roleRun ?? models.runOf(choosesOf(chat))
     if (run && !roleRun && run.engine !== chat.info.engine) updateChat(chat, { engine: run.engine })
     const cant = run ? undefined : models.whyNot(choosesOf(chat))

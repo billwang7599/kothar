@@ -307,8 +307,25 @@ export type ExtensionStorage = {
 
 export type ExtensionStoredFile = { name: string; size: number }
 
-// Which of the user's model lists (Settings → Models) a chat runs on.
-export type ModelRole = 'chat' | 'planning' | 'searching' | 'workers'
+// Which of the user's model lists (Settings → Models) a chat runs on: Kothar's own Chat and Workers, or a role an
+// extension declares (Extension.modelRoles), such as Plan's 'planning'. A role no extension that's on declares is
+// refused where a role is given (createChat, turnOptions); a chat already on one runs on the Chat list.
+export type CoreModelRole = 'chat' | 'workers'
+export type ModelRole = CoreModelRole | (string & {})
+
+// A model list an extension adds to Settings → Models while it's on, for the chats it starts (host.createChat's role)
+// or turns it runs (turnOptions' role), and for spawn_worker's role in chats it's on for.
+export type ExtensionModelRole = {
+  // Lowercase letters, digits and dashes, starting with a letter. Not 'chat' or 'workers', and not another
+  // extension's: the first to declare one keeps it, and a later one's is left out with an error. It's also the key
+  // the list is saved under (settings.json models.<id>), so changing it drops the user's list. A community extension
+  // should start it with its own id ('<extension id>-…') so it can't clash.
+  id: string
+  // Its name in Settings → Models and in spawn_worker's description: "Planning".
+  label: string
+  // What runs on it, shown under its name: "Workers started to plan."
+  description?: string
+}
 
 export type NewChatSpec = {
   // The chat's name in the sidebar. A worker started with a task may leave it out: it's named after its task, as
@@ -1091,6 +1108,9 @@ export type Extension = {
   // Live cards in the transcript, put there with host.note (see ExtensionNoteView).
   noteViews?: ExtensionNoteView[]
   composerToggles?: ExtensionComposerToggle[]
+  // Model lists of its own in Settings → Models (see ExtensionModelRole), shown while it's on. A role with no models
+  // in its list runs on the Chat list.
+  modelRoles?: ExtensionModelRole[]
   memory?: ExtensionMemory
   // Kothar is ready for model calls (engines detected, a work folder chosen), or the extension was turned on after
   // that. For background work, such as summarizing chats.
@@ -1197,7 +1217,7 @@ export type ExtensionUse =
   | 'memory'
   // Host calls: chats, chat, read, space, messages, message, reaches, reachable; and onTurnSent.
   | 'readChats'
-  // send, report, createChat, retry, continue, interrupt, addContextFile
+  // send, report, createChat, retry, continue, interrupt, addContextFile; and modelRoles
   | 'sendMessages'
   // accounts, useAccount
   | 'accounts'

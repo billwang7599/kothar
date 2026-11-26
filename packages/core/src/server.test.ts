@@ -122,7 +122,7 @@ it('sends a snapshot, then broadcasts to every client', async () => {
     engines: [{ id: 'fake', enabled: false }],
     chats: [],
     accounts: [{ engine: 'fake', active: 'default' }],
-    modelLists: { chat: [], planning: [], searching: [], workers: [] },
+    modelLists: { chat: [], workers: [] },
     memory: {},
     extensions: [],
     workers: { start: true, limit: 4, instructions: { id: 'instructions', text: WORKER_INSTRUCTIONS, default: WORKER_INSTRUCTIONS } },
@@ -549,7 +549,14 @@ it('tells a chat that can spawn workers the saved worker instructions, or the de
 })
 
 it("starts a worker on the Workers list, else the Chat list, or its role's list, not its parent's model", async () => {
-  const { core, garage, json, send, sessionOf } = await startHeld()
+  const plans: Extension = {
+    id: 'planner',
+    name: 'Planner',
+    description: '',
+    enabledByDefault: true,
+    modelRoles: [{ id: 'planning', label: 'Planning' }],
+  }
+  const { core, garage, json, send, sessionOf } = await startHeld({ extensions: [mainExtension, plans] })
   const handle = handleOn(core)
   await core.refreshEngines()
   workersOn(core, -1)
@@ -772,6 +779,7 @@ const childExtension: Extension = {
   name: 'Kids',
   description: '',
   enabledByDefault: true,
+  modelRoles: [{ id: 'searching', label: 'Searching' }],
   tools: [
     {
       name: 'delegate',

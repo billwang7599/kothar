@@ -39,6 +39,7 @@ after it cover each group in detail.
 | `noteViews` | Live cards in the transcript, drawn and updated by the extension, such as a research run's progress | [Panels and commands](panels.md#live-cards) |
 | `composerToggles` | Modes in the composer's mode picker, such as Deep research: one at a time, for the next message | [Panels and commands](panels.md#composer-modes) |
 | `chats` | Chats of the extension's own | [Chats](#chats), below |
+| `modelRoles` | Model lists of its own in Settings → Models, for the workers it starts and the turns it runs | [Model roles](#model-roles), below |
 | `memory` | What each session sees of its chat's history | [Tools, MCP servers, instructions and memory](agents.md#memory) |
 | `optionalDependencies`, `requires`, `onDependencyChanged` | Working with another extension: features that turn on with it, or not running without it | [Depending on other extensions](dependencies.md) |
 | `provides` | Capability names it shares an API under, for others to get with `host.use` | [Capabilities](dependencies.md#capabilities-provide-and-use) |
@@ -91,6 +92,35 @@ An extension's chat is pinned. It can't be renamed, archived or deleted, and it 
 of its own. When the extension is off, its chats are hidden and their history stays.
 
 List `chats` in the manifest's `uses`.
+
+## Model roles
+
+Kothar has two model lists of its own in **Settings → Models**: Chat, and Workers (every worker no other list is for).
+An extension adds more with `modelRoles`, each `{ id, label, description? }`. While the extension is on, each shows as
+a list in Settings → Models, under its `label` with its `description`, and its `id` can be named:
+
+- as `role` in [`host.createChat`](host.md#start-a-worker) with a `parentId`, for the workers it starts;
+- as `role` in [`turnOptions`](events.md#turnoptions), for a turn of a chat it's on for;
+- by agents, as `spawn_worker`'s `role`, in chats the extension is on for.
+
+A role whose list is empty runs on the Chat list. While the extension is off, its lists are hidden and kept, a role it
+declares is refused where one is given, and a chat already on one runs on the Chat list.
+
+```ts
+const plan: Extension = {
+  // …
+  modelRoles: [{ id: 'planning', label: 'Planning', description: 'Turns that work out a plan, and workers started to plan.' }],
+  turnOptions: (chat, { host }) => (host.toggled(chat.id, 'plan') ? { readOnly: true, role: 'planning' } : undefined),
+}
+```
+
+- An `id` is lowercase letters, digits and dashes, starting with a letter. It can't be `chat` or `workers`.
+- Ids aren't namespaced: the user's list is saved under the id (`models.<id>` in `settings.json`), so changing an id
+  drops the user's list. The first extension to declare an id keeps it; a later one's is left out, and its page says
+  why. A community extension should start its ids with its own id (`my-extension-review`).
+- Plan declares `planning` and Deep Research `searching`, the ids those lists had before extensions could declare them.
+
+List `sendMessages` in the manifest's `uses`.
 
 ## Rules for every hook
 

@@ -126,6 +126,13 @@ Why some things are the way they are. Add one when you make a choice the next co
   moving into core: it's the one extension that proves the API can own a chat, and moving it would grow the core for
   no new behaviour. `alwaysOn` is generic (any built-in extension can set it; a community extension's is ignored), and
   an always-on extension can still be left out per setup, except of a chat it owns.
+- **Model roles are declared by extensions, and their ids aren't namespaced.** Kothar keeps only Chat and Workers;
+  Plan declares `planning` and Deep Research `searching` (`Extension.modelRoles`, `packages/core/src/model-roles.ts`).
+  A role's id is the key its list is saved under (`settings.json` `models.<id>`), so keeping the old ids means users'
+  saved Planning and Searching lists work as they were, with no migration. Namespacing (`plan:planning`) would have
+  needed one, and would make community roles uglier for no gain while clashes are rare: the first extension to declare
+  an id keeps it and a later one's is shown as an error on its page. A role's list is kept while its extension is off
+  (hidden in Settings, not run), so turning it back on restores the user's picks.
 - **A release tag must match the version; the workflow never sets it.** The release workflow stops if `v0.2.0` is
   pushed while `packages/desktop/package.json` says `0.1.0`, instead of writing the version from the tag. That way the
   version that ships is the one in a reviewed commit on `main`, and a local `npm run package` of that commit builds the

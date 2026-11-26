@@ -190,7 +190,8 @@ Deep Research answers a question from many web sources and writes a report with 
   (change the sub-questions in the **Research** tab) or **Cancel**. Nothing is searched until you start. Turn off **Ask
   before starting research** in **Settings → Extensions → Deep Research** to skip this.
 - **The research:** each sub-question goes to a worker, listed under the space while it runs, on your **Searching**
-  models (Settings → Models) unless you pick another list. Workers use web search and fetch first, and a browser only
+  models (Settings → Models, a list Deep Research adds) unless you pick another list. Planning models are used only
+  while Plan is on, since that list is Plan's. Workers use web search and fetch first, and a browser only
   when a page needs one. Each returns findings: a claim, the exact quote that supports it, and the page. Kothar then
   fetches each page itself and keeps a finding only if the quote is on it. A review step then looks for gaps and
   contradictions and runs one or two more rounds (Standard and Thorough).

@@ -96,9 +96,9 @@ const PAGES = [
     intro:
       'Each list runs its first model that can run, on any engine; if that engine is off or stops offering it, the ' +
       `next one runs. A ${CHAT_NOUN.one}'s own pick in its message box comes first.`,
-    body: ({ engines, modelLists, connected, send }: PageProps) => {
+    body: ({ engines, modelLists, extensions, connected, send }: PageProps) => {
       if (!engines.some((e) => e.enabled)) return <p className="text-muted">Turn on an engine to pick models.</p>
-      return <ModelListsSection engines={engines} lists={modelLists} connected={connected} send={send} />
+      return <ModelListsSection engines={engines} lists={modelLists} extensions={extensions} connected={connected} send={send} />
     },
   },
   {

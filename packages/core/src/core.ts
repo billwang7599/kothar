@@ -37,6 +37,7 @@ import {
   type Setup,
 } from './shared.ts'
 import { followModels as followChatModels, nameModels, openModels } from './models.ts'
+import { openModelRoles } from './model-roles.ts'
 import { moveExtensionsDir } from './vocab-move.ts'
 import { openProtocol } from './protocol.ts'
 import { openExtensionSwitches } from './extension-switches.ts'
@@ -234,7 +235,10 @@ function assembleCore(options: {
     broadcast({ type: 'market.installed', items: marketplace.installed() })
   }
   // Everything about which engine, model and thinking level runs lives here.
-  const models = openModels({ settings, save: saveSettings, engines: engineInfos, defaultEngine, broadcast })
+  // Model roles: Kothar's own and the ones extensions declare (Extension.modelRoles).
+  const modelRoles = openModelRoles(extensions, isOn)
+  for (const [id, problem] of modelRoles.problems) console.error(`Extension ${id}: ${problem}`)
+  const models = openModels({ settings, save: saveSettings, engines: engineInfos, defaultEngine, broadcast, roles: modelRoles })
   const offersModel = (engine: string, model?: string) => detected.get(engine)?.models?.some((m) => m.id === model) === true
   const checkEnabled = (engine: string) => {
     if (!isEnabled(engine)) throw new Error(`Engine "${engine}" is off. Turn it on in Settings.`)
@@ -351,6 +355,7 @@ function assembleCore(options: {
     community,
     approvalOf: (id) => approvalOf(id),
     settingsErrors,
+    modelRoles,
     isOn,
     ownSwitch,
     extensionValues,
@@ -650,6 +655,7 @@ function assembleCore(options: {
     startWaitingWorkers,
     resumeQueues,
   } = openTurns({
+    liveRole: modelRoles.live,
     garage,
     home,
     now,
@@ -786,6 +792,7 @@ function assembleCore(options: {
     broadcast,
     extensionChats,
     models,
+    liveRole: modelRoles.live,
     checkEngine,
     checkEnabled,
     chatFor,
@@ -992,6 +999,7 @@ function assembleCore(options: {
       return idle ? 'sent' : steers ? 'steered' : 'queued'
     },
     stop: (chatId) => interrupt(chatFor(chatId), false),
+    roles: (chatId) => modelRoles.for((extension) => isOnFor(extension, chats.get(chatId))),
     forget: (chatId, ids) => forget(chatFor(chatId), ids),
     workers: (chatId: string) => {
       const chat = chats.get(chatId)

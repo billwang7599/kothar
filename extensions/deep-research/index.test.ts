@@ -9,6 +9,7 @@ import { sandboxingMachine } from '@kothar/core/test-machine'
 import { until } from '@kothar/core/test-wait'
 import { afterEach, describe, expect, it } from 'vitest'
 import home from '../home/index.ts'
+import { createPlanExtension } from '../plan/index.ts'
 import { createDeepResearchExtension, PLAN_SCHEMA, WRITE_SCHEMA, type Outcome } from './index.ts'
 
 const cleanups: (() => void | Promise<void>)[] = []
@@ -255,6 +256,17 @@ describe('the deep_research tool', () => {
     expect(t.chat(space).queue).toEqual([])
     expect(t.chat(space).entries.some((e) => e.type === 'turn.started')).toBe(false)
     expect(t.chat(space).status).toBe('idle')
+  })
+
+  it('runs its workers on the list Workers use picks: Planning only while Plan declares it, else Searching', async () => {
+    const rolesOf = async (others: Extension[]) => {
+      const t = await core({ askFirst: false, depth: 'quick', workerRole: 'planning' }, others)
+      const space = t.create()
+      expect(await t.callTool(space, 'Greek letters?')).toMatchObject({ status: 'done' })
+      return t.messages.flatMap((m) => (m.type === 'chat.added' && m.chat.parentId === space ? [m.chat.role] : []))
+    }
+    expect(await rolesOf([])).toEqual(['searching', 'searching'])
+    expect(await rolesOf([createPlanExtension()])).toEqual(['planning', 'planning'])
   })
 
   it('shows its workers as subagents in Home too', async () => {

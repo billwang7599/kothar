@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatSummary, ExtensionHost, ExtensionTool, ExtensionValues } from '@kothar/extension-api'
+import type { ChatSummary, ExtensionHost, ExtensionModelRole, ExtensionTool, ExtensionValues } from '@kothar/extension-api'
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node'
 import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server'
 import * as z from 'zod'
@@ -15,6 +15,8 @@ type Hub = {
   seesAll(chatId: string): boolean
   // A worker below parentId: the same call an extension's host.createChat makes with a parentId.
   createChild(parentId: string, spec: { name: string; role?: ModelRole }): ChatInfo
+  // The model roles extensions on for this chat declare (Extension.modelRoles): what its spawn_worker may name.
+  roles(chatId: string): ExtensionModelRole[]
   send(chatId: string, text: string): void
   // A message for a chat that may be mid-turn, as its composer sends one: steered in, queued or sent.
   deliver(chatId: string, text: string): 'sent' | 'steered' | 'queued'
@@ -61,7 +63,8 @@ type Tool = {
   // all: every chat, its own chat being what it acts on.
   for: 'reach' | 'workers' | 'all'
   description: string
-  input: z.ZodObject
+  // Or made for each chat, as its session lists the tools, from what's on for it.
+  input: z.ZodObject | ((hub: Hub, caller: ChatState) => z.ZodObject)
   run(context: Context, input: any): unknown
 }
 
@@ -132,13 +135,21 @@ const TOOLS: Record<string, Tool> = {
     description:
       'Start a worker: a new chat below this one that works on the task, in this folder, on the models the ' +
       'user picked for workers. Its final reply comes back to you as a message when its turn ends, so ' +
-        "don't poll it. Give a role to run it on that role's models instead. It uses this chat's setup and gets the same " +
+        "don't poll it. Give a role, if any are listed, to run it on that role's models instead. It uses this chat's setup and gets the same " +
       'tools as this chat (deep research, notes, MCP servers and the rest), so it can run any of them for you. Returns ' +
       'its id.',
-    input: z.object({
-      task: z.string().min(1),
-      role: z.enum(['planning', 'searching']).optional(),
-    }),
+    // The roles are the ones extensions on for this chat declare (Plan's planning, Deep Research's searching); with
+    // none, there's no role to give.
+    input: (hub, caller) => {
+      const roles = hub.roles(caller.id)
+      const [first, ...rest] = roles.map((role) => role.id)
+      if (first === undefined) return z.object({ task: z.string().min(1) })
+      const about = roles.map((role) => `${role.id}: ${role.label}${role.description ? ` (${role.description})` : ''}`)
+      return z.object({
+        task: z.string().min(1),
+        role: z.enum([first, ...rest]).optional().describe(`Which models it runs on. ${about.join('; ')}.`),
+      })
+    },
     run({ hub, caller }: Context, { task, role }: { task: string; role?: ModelRole }) {
       // Every running child counts, an extension's too (Deep Research's searches), so the user's limit holds.
       const { limit } = hub.workers(caller.id)
@@ -188,6 +199,8 @@ export function openKotharMcp(hub: Hub) {
   }
   const extensionToolsFor = (caller: ChatState) => hub.extensionTools(caller.id).filter(({ tool }) => tool.offered(summaryOf(caller)))
 
+  const inputOf = (tool: Tool, caller: ChatState) => (typeof tool.input === 'function' ? tool.input(hub, caller) : tool.input)
+
   const serverFor = (callerId: string) => {
     const server = new McpServer({ name: 'kothar', version: '0.0.0' })
     const caller = hub.chats().find((chat) => chat.id === callerId)
@@ -208,7 +221,7 @@ export function openKotharMcp(hub: Hub) {
     }
     for (const [name, tool] of Object.entries(TOOLS)) {
       if (!offers(caller, tool)) continue
-      server.registerTool(name, { description: tool.description, inputSchema: tool.input }, (input: any) =>
+      server.registerTool(name, { description: tool.description, inputSchema: inputOf(tool, caller) }, (input: any) =>
         answer((caller, chats) => {
           const reachable = (chatId: string) => {
             const chat = chats.find((c) => c.id === chatId)
@@ -256,7 +269,7 @@ export function openKotharMcp(hub: Hub) {
       return [
         ...Object.entries(TOOLS)
           .filter(([, tool]) => offers(chat, tool))
-          .map(([name, tool]) => ({ name, description: tool.description, schema: z.toJSONSchema(tool.input) })),
+          .map(([name, tool]) => ({ name, description: tool.description, schema: z.toJSONSchema(inputOf(tool, chat)) })),
         ...extensionToolsFor(chat).map(({ tool, extension }) => ({
           name: tool.name,
           description: tool.description,

@@ -1,5 +1,5 @@
 import type { ExtensionAction, ExtensionNoteCard, ExtensionView } from '@kothar/extension-api'
-import { bySpaceOrder, levelsOf, looksBinary, NO_LISTS } from '@kothar/core/shared'
+import { bySpaceOrder, CORE_MODEL_ROLES, levelsOf, looksBinary, NO_LISTS, ROLE_NAMES } from '@kothar/core/shared'
 import type {
   RestartState,
   Answers,
@@ -819,6 +819,26 @@ export const engineProblem = (engine: EngineInfo) =>
 export const engineName = (engine?: Pick<EngineInfo, 'id' | 'name'>) => engine?.name ?? engine?.id ?? ''
 
 // A model on an engine as one Select value; model ids can hold '/', never a newline.
+// A model list in Settings → Models: Kothar's own (Chat, Workers), then each role an extension that's on declares
+// (the core sends an extension's modelRoles only while it runs), in extension order.
+export type ShownRole = { id: string; label: string; description?: string; extension?: string }
+const CORE_ROLE_ABOUT: Record<(typeof CORE_MODEL_ROLES)[number], string> = {
+  chat: 'Chats you start.',
+  workers: 'Every worker no other list is for.',
+}
+export function modelRolesOf(extensions: readonly ExtensionInfo[] = []): ShownRole[] {
+  return [
+    ...CORE_MODEL_ROLES.map((id) => ({ id, label: ROLE_NAMES[id], description: CORE_ROLE_ABOUT[id] })),
+    ...extensions.flatMap((e) => (e.modelRoles ?? []).map((role) => ({ ...role, extension: e.name }))),
+  ]
+}
+
+/** A role's name ("Planning"), or the Chat list's when it has no models of its own or no extension that's on declares it. */
+export function listNameOf(role: string | undefined, lists: ModelLists | undefined, extensions?: readonly ExtensionInfo[]) {
+  const shown = role === undefined ? undefined : modelRolesOf(extensions).find((r) => r.id === role)
+  return shown && lists?.[shown.id]?.length ? shown.label : ROLE_NAMES.chat
+}
+
 export const modelKey = (choice: { engine: string; model: string }) => `${choice.engine}\n${choice.model}`
 export const fromModelKey = (key: string) => {
   const [engine = '', model = ''] = key.split('\n')

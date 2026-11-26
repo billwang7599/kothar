@@ -151,7 +151,9 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
   const investigate: Ports['investigate'] = (run, prompt, label, signal) =>
     new Promise<Investigation>((resolve) => {
       const h = host!
-      const role = values.workerRole === 'workers' || values.workerRole === 'planning' || values.workerRole === 'chat' ? values.workerRole : 'searching'
+      // Planning is Plan's list: with Plan off, there's no such list, so its workers search on Searching.
+      const planning = values.workerRole === 'planning' && h.extensionEnabled('plan')
+      const role = values.workerRole === 'workers' || values.workerRole === 'chat' || planning ? (values.workerRole as string) : 'searching'
       let chatId: string
       try {
         // Workers are part of Kothar, so this needs nothing else: a child chat counts toward Settings → Workers' limit,
@@ -644,6 +646,9 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
     name: 'Deep Research',
     description: 'Long, multi-source research that ends in a cited report. Workers search and read the web; every claim in the report is backed by a quote Kothar found on its page.',
     enabledByDefault: true,
+    // Its own model list in Settings → Models, which research workers run on unless Workers use says another. The id
+    // predates declared roles: users' saved Searching lists are under it.
+    modelRoles: [{ id: 'searching', label: 'Searching', description: 'Research workers, and workers started to search.' }],
     prompts: [
       {
         id: 'chip',
@@ -714,7 +719,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
         options: [
           { value: 'searching', label: 'Searching models' },
           { value: 'workers', label: 'Workers models' },
-          { value: 'planning', label: 'Planning models' },
+          { value: 'planning', label: 'Planning models (with Plan on)' },
           { value: 'chat', label: 'Chat models' },
         ],
         default: 'searching',

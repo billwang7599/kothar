@@ -25,7 +25,6 @@ import {
   type CoreMessage,
   type MemoryMessage,
   type ModelRole,
-  MODEL_ROLES,
   type NewChat,
   type QueuedMessage,
   type Setup,
@@ -50,6 +49,8 @@ export type ChatLifecycleDeps = {
   // The chats extensions declare (Home), loaded first and named as declared.
   extensionChats: readonly DeclaredChat[]
   models: Pick<ReturnType<typeof openModels>, 'engineFor' | 'pinOn'>
+  // Whether a child can be started on this role: Kothar's own, or one an extension that's on declares.
+  liveRole: (role: unknown) => boolean
   checkEngine: (engine: string) => void
   checkEnabled: (engine: string) => void
   chatFor: (chatId: string) => Chat
@@ -249,7 +250,7 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
   // A chat below another, for one task: what spawn_worker and an extension's host.createChat with a parentId both make.
   const createChild = (parentId: string, spec: NewChat & { role?: ModelRole; quiet?: boolean; showReport?: boolean }) => {
     if (spec.folders?.length || spec.files?.length) throw new Error('A child chat takes its folders from its space')
-    if (spec.role !== undefined && !MODEL_ROLES.includes(spec.role)) throw new Error(`Unknown role "${spec.role}"`)
+    if (spec.role !== undefined && !deps.liveRole(spec.role)) throw new Error(`Unknown role "${spec.role}"`)
     const quiet = spec.quiet === true
     return createChat({ name: spec.name, engine: spec.engine, parentId, worker: true, role: spec.role, quiet, showReport: quiet && spec.showReport === true })
   }

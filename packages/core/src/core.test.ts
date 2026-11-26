@@ -25,6 +25,7 @@ import { CUT_OFF_BY_RESTART } from './chat-lifecycle.ts'
 import { QUEUE_FILE } from './queue-store.ts'
 import { PROCESSES_FILE } from './process-records.ts'
 import { openModels, snapLevel, SUMMARY_MODELS } from './models.ts'
+import { openModelRoles } from './model-roles.ts'
 import { localMachine } from './machine.ts'
 import { WINDOW_MAX_CHARS } from './memory.ts'
 import {
@@ -4118,13 +4119,21 @@ describe('models', () => {
   }
 
   const row = (model: string, thinking?: ThinkingLevel, engine = 'fake') => ({ engine, model, ...(thinking && { thinking }) })
-  const seeded = { chat: [row(defaultModel, defaultThinking)], planning: [], searching: [], workers: [] }
+  const seeded = { chat: [row(defaultModel, defaultThinking)], workers: [] }
+  // An extension with a model list of its own, as Plan has.
+  const planner: Extension = {
+    id: 'planner',
+    name: 'Planner',
+    description: '',
+    enabledByDefault: true,
+    modelRoles: [{ id: 'planning', label: 'Planning', description: 'Plans.' }],
+  }
 
   it('fills an empty Chat list from what the engine runs by default, once the engines are detected', async () => {
     const garage = tempDir()
     writeFileSync(join(garage, 'settings.json'), JSON.stringify({ theme: 'dark' }))
     const t = setup(textScript, garage)
-    expect(t.core.modelLists()).toEqual({ chat: [], planning: [], searching: [], workers: [] })
+    expect(t.core.modelLists()).toEqual({ chat: [], workers: [] })
     await t.core.refreshEngines()
     expect(t.core.modelLists()).toEqual(seeded)
     expect(t.messages).toContainEqual({ type: 'models.updated', lists: seeded })
@@ -4135,7 +4144,7 @@ describe('models', () => {
 
   it('saves one list per role in settings.json, tells every client and keeps it after a restart', async () => {
     const garage = tempDir()
-    const t = setup(textScript, garage)
+    const t = setup(textScript, garage, TEST_STOP_GRACE_MS, [mainExtension, planner])
     await t.core.refreshEngines()
     const planning = [row(older, 'low'), row(newest, 'high')]
     t.handle({ type: 'models.setList', role: 'planning', models: [...planning, planning[0]!] })
@@ -4149,7 +4158,23 @@ describe('models', () => {
     }
     expect(() => t.handle({ type: 'models.setList', role: 'chat', models: [] })).toThrow(/Chat list needs/)
     t.core.close()
-    expect(setup(textScript, garage).core.modelLists()).toEqual(lists)
+    expect(setup(textScript, garage, TEST_STOP_GRACE_MS, [mainExtension, planner]).core.modelLists()).toEqual(lists)
+    // Without the extension that declares it, its list is kept, but can't be set.
+    const without = setup(textScript, garage)
+    expect(without.core.modelLists()).toEqual(lists)
+    expect(() => without.handle({ type: 'models.setList', role: 'planning', models: [] })).toThrow(/Unknown model role/)
+  })
+
+  it("lists an extension's roles while it's on, and shows why a role was left out on the extension", async () => {
+    const clash: Extension = { ...planner, id: 'clash', name: 'Clash', modelRoles: [{ id: 'planning', label: 'Mine' }] }
+    const t = setup(textScript, tempDir(), TEST_STOP_GRACE_MS, [mainExtension, planner, clash])
+    const info = (id: string) => t.core.extensions().find((e) => e.id === id)!
+    expect(info('planner').modelRoles).toEqual([{ id: 'planning', label: 'Planning', description: 'Plans.' }])
+    expect(info('clash').modelRoles).toBeUndefined()
+    expect(info('clash').loadError).toBe('Model role "planning" was left out: Planner declares it')
+    t.handle({ type: 'extension.setEnabled', extensionId: 'planner', enabled: false })
+    expect(info('planner').modelRoles).toBeUndefined()
+    expect(t.messages.findLast((m) => m.type === 'extension.updated')).toMatchObject({ extension: { id: 'planner', enabled: false } })
   })
 
   it("migrates per-engine lists and default thinking into one list per role without losing a row", async () => {
@@ -4245,15 +4270,22 @@ describe('models', () => {
   it("runs a role's list, else the Chat list while the role's own is empty", async () => {
     const t = setup(textScript)
     await t.core.refreshEngines()
+    let plannerOn = true
+    let planning: ReturnType<typeof row>[] = []
     const runs = (role: 'planning' | 'workers') => {
-      const settings = { engines: {}, models: t.core.modelLists() }
-      const options = { settings, save: () => {}, engines: t.core.engines, defaultEngine: 'fake', broadcast: () => {} }
+      const settings = { engines: {}, models: { ...t.core.modelLists(), planning } }
+      const roles = openModelRoles([planner], () => plannerOn)
+      const options = { settings, save: () => {}, engines: t.core.engines, defaultEngine: 'fake', broadcast: () => {}, roles }
       return openModels(options).runOf({ engine: 'fake', role })
     }
     expect(runs('workers')).toMatchObject({ model: defaultModel, thinking: defaultThinking })
-    t.handle({ type: 'models.setList', role: 'planning', models: [row(newest, 'low')] })
+    expect(runs('planning')).toMatchObject({ model: defaultModel })
+    planning = [row(newest, 'low')]
     expect(runs('planning')).toMatchObject({ model: newest, thinking: 'low' })
     expect(runs('workers')).toMatchObject({ model: defaultModel })
+    // With the extension that declares the role off, a chat on it runs the Chat list.
+    plannerOn = false
+    expect(runs('planning')).toMatchObject({ model: defaultModel })
   })
 
   it("runs at the row's level unless the chat picked its own, and picking the row's level follows it again", async () => {
