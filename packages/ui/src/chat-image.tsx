@@ -192,13 +192,17 @@ function ToolThumbnail({ path }: { path: string }) {
   )
 }
 
-/** A picture full size over the window. With path (a file in the chat's places), buttons open it or show it in Finder. */
+/**
+ * A picture full size over the window. With path (a file in the chat's places), buttons open it or show it in Finder;
+ * actions go in the header beside them.
+ */
 export function ImageLightbox(props: {
   open: boolean
   onOpenChange: (open: boolean) => void
   url: string
   title: string
   path?: string
+  actions?: ReactNode
 }) {
   const { open, onOpenChange, url, title } = props
   return (
@@ -216,6 +220,7 @@ export function ImageLightbox(props: {
               >
                 <header className="flex h-40 shrink-0 items-center gap-8 border-b pr-8 pl-12">
                   <Dialog.Title className="min-w-0 flex-1 truncate font-semibold">{title}</Dialog.Title>
+                  {props.actions}
                   {props.path && <FileButtons path={props.path} />}
                   <Dialog.Close asChild>
                     <Button variant="ghost" size="icon" aria-label="Close">

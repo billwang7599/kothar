@@ -1,9 +1,11 @@
-// Files on a message: ones waiting to be sent from the message box, and sent ones with Open and Pin.
+// Files on a message: ones waiting to be sent from the message box, and sent ones. A sent file has Open and Pin; a
+// sent picture opens full size on a click, with Add to context on hover.
 import { useEffect, useState, type ReactNode } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog } from 'radix-ui'
 import { IMAGE_TYPES, type Attachment, type ClientMessage, type ContextItem, type Upload } from '@kothar/core/shared'
 import { attachmentUrl, coreUrl, readToken } from '../connection.ts'
+import { ImageLightbox } from '../chat-image.tsx'
 import { Button, Hint, MOTION } from '../controls.tsx'
 import { MAX_PREVIEW_BYTES, pinState, previewText, type ChatView } from '../state.ts'
 import { formatBytes } from '../format.ts'
@@ -97,6 +99,62 @@ export function SentAttachment({ chat, attachment, contextItems, connected, send
     return () => abort.abort()
   }, [open, kind, url])
 
+  const toggle = () =>
+    send({ type: pin === 'pinned' ? 'context.remove' : 'context.add', chatId: chat.id, section: 'files', path })
+  const pinHint = pin === 'pinned' ? "Remove from this chat's context" : "Add to this chat's context, for every message"
+
+  if (kind === 'image') {
+    const label = pin === 'pinned' ? 'Remove from context' : 'Add to context'
+    return (
+      <div className="group/file relative">
+        <button
+          type="button"
+          className="block cursor-zoom-in rounded-lg focus-visible:outline-2"
+          aria-label={`Open ${name} full size`}
+          onClick={() => setOpen(true)}
+        >
+          <img
+            src={url}
+            alt={name}
+            title={name}
+            className="block max-h-160 min-h-32 max-w-240 min-w-80 rounded-lg border object-contain shadow-raised"
+          />
+        </button>
+        {pin && (
+          <span className={`absolute top-4 right-4 flex rounded border bg-panel p-2 shadow-floating ${REVEAL}`}>
+            <Hint text={pinHint}>
+              <button
+                className={FILE_ACTION}
+                disabled={!connected}
+                aria-label={`${label}: ${name}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggle()
+                }}
+              >
+                {label}
+              </button>
+            </Hint>
+          </span>
+        )}
+        {pin === 'pinned' && <PinnedBadge />}
+        <ImageLightbox
+          open={open}
+          onOpenChange={setOpen}
+          url={url}
+          title={name}
+          actions={
+            pin && (
+              <Button size="small" disabled={!connected} onClick={toggle}>
+                {label}
+              </Button>
+            )
+          }
+        />
+      </div>
+    )
+  }
+
   const actions = (
     <>
       <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -124,13 +182,6 @@ export function SentAttachment({ chat, attachment, contextItems, connected, send
                       </Button>
                     </Dialog.Close>
                   </header>
-                  {kind === 'image' && (
-                    <img
-                      src={url}
-                      alt={name}
-                      className="mx-auto block max-h-[calc(100vh-74px)] max-w-[calc(100vw-34px)] object-contain"
-                    />
-                  )}
                   {kind === 'pdf' && (
                     <iframe src={url} title={name} className="h-[calc(100vh-74px)] w-[min(900px,calc(100vw-34px))]" />
                   )}
@@ -169,14 +220,12 @@ export function SentAttachment({ chat, attachment, contextItems, connected, send
         </AnimatePresence>
       </Dialog.Root>
       {pin && (
-        <Hint text={pin === 'pinned' ? "Remove from this chat's context" : "Add to this chat's context, for every message"}>
+        <Hint text={pinHint}>
           <button
             className={FILE_ACTION}
             disabled={!connected}
             aria-label={pin === 'pinned' ? `Unpin ${name}` : `Pin ${name}`}
-            onClick={() =>
-              send({ type: pin === 'pinned' ? 'context.remove' : 'context.add', chatId: chat.id, section: 'files', path })
-            }
+            onClick={toggle}
           >
             {pin === 'pinned' ? 'Unpin' : 'Pin'}
           </button>
@@ -186,32 +235,24 @@ export function SentAttachment({ chat, attachment, contextItems, connected, send
   )
   return (
     <div className="group/file relative">
-      {kind === 'image' ? (
-        <>
-          <img
-            src={url}
-            alt={name}
-            title={name}
-            className="block max-h-160 min-h-32 max-w-240 min-w-80 rounded-lg border object-contain shadow-raised"
-          />
-          <span className={`absolute top-4 right-4 flex rounded border bg-panel p-2 shadow-floating ${REVEAL}`}>{actions}</span>
-        </>
-      ) : (
-        <div className={`${FILE_CHIP} h-40 bg-panel shadow-raised`} title={name}>
-          <FileLabel name={name} size={size} actions={<span className={`-ml-5 flex ${REVEAL}`}>{actions}</span>} />
-        </div>
-      )}
-      {pin === 'pinned' && (
-        <Hint text="Pinned to this chat's context">
-          <span
-            className="absolute -top-6 -left-6 grid size-18 place-items-center rounded-full bg-accent text-on-accent"
-            role="img"
-            aria-label="Pinned to the context"
-          >
-            <PinIcon />
-          </span>
-        </Hint>
-      )}
+      <div className={`${FILE_CHIP} h-40 bg-panel shadow-raised`} title={name}>
+        <FileLabel name={name} size={size} actions={<span className={`-ml-5 flex ${REVEAL}`}>{actions}</span>} />
+      </div>
+      {pin === 'pinned' && <PinnedBadge />}
     </div>
+  )
+}
+
+function PinnedBadge() {
+  return (
+    <Hint text="Pinned to this chat's context">
+      <span
+        className="absolute -top-6 -left-6 grid size-18 place-items-center rounded-full bg-accent text-on-accent"
+        role="img"
+        aria-label="Pinned to the context"
+      >
+        <PinIcon />
+      </span>
+    </Hint>
   )
 }
