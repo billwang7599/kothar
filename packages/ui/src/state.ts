@@ -38,6 +38,7 @@ import type {
   ToolKind,
   WorkFolder,
   ChatWait,
+  UsageTotals,
 } from '@kothar/core/shared'
 
 export type Permission = {
@@ -111,6 +112,10 @@ export type ChatView = ChatInfo & {
   draft: string
   queue: QueuedMessage[]
   waits?: ChatWait[]
+  // The usage its engines reported, its own (chat.usage), and its removed workers' (workersUsage); usage.tsx adds up a
+  // space's.
+  usage?: UsageTotals
+  workersUsage?: UsageTotals
   // A message the user undid: its text and attachments go back to the composer (chat.tsx), once per nonce.
   restored?: { text: string; attachments: Upload[]; nonce: number }
 }
@@ -536,7 +541,7 @@ function reduceAll(state: State, action: Action): State {
     case 'chat.updated':
       // The core sends the chat's whole info, and JSON drops a cleared field (pinned, model, thinking, run…), so the
       // update replaces the info outright; only what the UI keeps of its own carries over.
-      return updateChat(state, action.chat.id, ({ status, items, entries, from, shift, draft, queue, waits }) => ({
+      return updateChat(state, action.chat.id, ({ status, items, entries, from, shift, draft, queue, waits, usage, workersUsage }) => ({
         ...action.chat,
         status,
         items,
@@ -546,6 +551,8 @@ function reduceAll(state: State, action: Action): State {
         draft,
         queue,
         waits,
+        usage,
+        workersUsage,
       }))
     case 'chat.removed': {
       const chats = state.chats.filter((c) => c.id !== action.chatId)
@@ -591,6 +598,10 @@ function reduceAll(state: State, action: Action): State {
       return updateChat(state, action.chatId, (c) => ({ ...c, status: action.status }))
     case 'chat.queue':
       return updateChat(state, action.chatId, (c) => ({ ...c, queue: action.queue }))
+    case 'chat.usage': {
+      const { usage, workers } = action
+      return updateChat(state, action.chatId, (c) => ({ ...c, usage, ...(workers && { workersUsage: workers }) }))
+    }
     case 'chat.waits': {
       const { waits } = action
       return updateChat(state, action.chatId, ({ waits: _, ...c }) => (waits.length ? { ...c, waits } : c))

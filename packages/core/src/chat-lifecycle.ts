@@ -76,6 +76,8 @@ export type ChatLifecycleDeps = {
   // What ends with a removed chat: its session, its panels, its work folder.
   stopSession: (chat: Chat) => void
   forgetChat: (chatId: string) => void
+  /** Before the chats' folders go: a removed worker's usage moves to the chat above (core.ts keepUsage). */
+  keepUsage?: (family: Chat[]) => void
   removeWorkDir: (chat: Chat) => Promise<void>
   // Adds a message to a chat's queue without sending it (it runs once the core resumes, turn.ts resumeQueues).
   queueMessage: (chat: Chat, message: Omit<QueuedMessage, 'id'>) => void
@@ -347,6 +349,7 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
   // Removes each chat with its folder, without checks: deleteChat, and a finished worker (turn.ts).
   const removeChats = (family: Chat[]) => {
     const spaces: SpaceDetail[] = []
+    deps.keepUsage?.(family)
     for (const c of family) {
       deps.stopSession(c)
       const detail = deps.detailOf(c)

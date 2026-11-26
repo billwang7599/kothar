@@ -48,6 +48,7 @@ after it cover each group in detail.
 | `onChatCreated`, `onChatRemoved`, `onChatArchived`, `onMessagesRemoved`, `onSpaceRemoved`, `onStatusChanged`, `onTurnStarted`, `onTurnCompleted`, `onSessionEnded`, `onEvent`, `onLimitReached` | Hooks that react to chats as they run | [Events and hooks](events.md) |
 | `onPermissionRequested` | A policy that answers permission requests | [Events and hooks](events.md#onpermissionrequested) |
 | `onTurnSent` | Everything a turn's session was sent, labelled, as it opens | [Events and hooks](events.md#onturnsent) |
+| `onUsage` | What engines reported each turn and one-shot call used | [Events and hooks](events.md#onusage) |
 | `turnOptions` | Makes a turn read only, or runs it on another model list | [Events and hooks](events.md#turnoptions) |
 | `transformMessage`, `transformOutput` | Rewrites of messages and replies | [Events and hooks](events.md#transforms) |
 | `onWaitAction` | The user's answer to the extension's wait on a chat | [The host](host.md#waiting-for-the-user) |

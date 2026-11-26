@@ -726,3 +726,35 @@ describe("OpenCode's sign-in folders", () => {
     expect(JSON.parse(readFileSync(join(account, 'auth.json'), 'utf8'))).toEqual({ groq: { type: 'api', key: 'sk-local' } })
   })
 })
+
+describe('usage', () => {
+  it('reports each turn’s tokens from session/prompt and its cost from the change in usage_update’s running total', async () => {
+    const { fake, events, session } = startSession({ model: 'opencode/big-pickle' })
+    fake.stdout(INITIALIZED)
+    await tick()
+    fake.stdout(created(MODEL_OPTIONS))
+    await tick()
+    const cost = (amount: number, currency = 'USD') =>
+      line({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: { sessionId: 'ses_1', update: { sessionUpdate: 'usage_update', used: 1000, size: 200000, cost: { amount, currency } } },
+      })
+    const usage = { inputTokens: 900, outputTokens: 50, thoughtTokens: 30, cachedReadTokens: 4000, totalTokens: 4980 }
+    session.prompt('one')
+    fake.stdout(cost(0.03))
+    fake.stdout(line({ jsonrpc: '2.0', id: 3, result: { stopReason: 'end_turn', usage } }))
+    await tick()
+    session.prompt('two')
+    fake.stdout(cost(0.05))
+    // Another currency isn't dollars: the last one stands.
+    fake.stdout(cost(9, 'EUR'))
+    fake.stdout(line({ jsonrpc: '2.0', id: 4, result: { stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } } }))
+    await tick()
+    expect(events.filter((e) => e.type === 'turn.usage')).toEqual([
+      { type: 'turn.usage', usage: { model: 'opencode/big-pickle', inputTokens: 900, outputTokens: 80, cacheReadTokens: 4000, costUsd: 0.03 } },
+      { type: 'turn.usage', usage: { model: 'opencode/big-pickle', costUsd: 0.05 - 0.03 } },
+    ])
+    expect(types(events).slice(-2)).toEqual(['turn.usage', 'turn.completed'])
+  })
+})

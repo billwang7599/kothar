@@ -47,6 +47,23 @@ export type Question = {
 // Keyed by question text: the labels picked, then any text the user typed. Sent without answers, a question is declined.
 export type Answers = Record<string, string[]>
 
+// Tokens and cost an engine reported for model calls, in words every engine shares. Any field the engine doesn't report
+// is absent (Codex reports no cost; pi's one-shot calls report nothing).
+// - inputTokens: input read fresh, without cache reads or writes.
+// - outputTokens: what the model wrote, its thinking included.
+// - cacheReadTokens, cacheWriteTokens: input read from, and written to, the provider's prompt cache.
+// - costUsd: what the engine says the calls cost, in US dollars. An engine on a subscription still reports what the
+//   same calls would cost on the API, so read it as a guide, not a bill.
+// - model: the engine's own id for the model.
+export type Usage = {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  costUsd?: number
+  model?: string
+}
+
 export type EngineEvent =
   | { type: 'turn.started' }
   | { type: 'text.delta'; text: string }
@@ -86,6 +103,9 @@ export type EngineEvent =
   | { type: 'steer.returned'; id: string }
   // The built-in tools the engine says the session has, by its own names (MCP servers' tools left out), as it starts.
   | { type: 'tools.listed'; names: string[] }
+  // What the turn's model calls used, sent before turn.completed (or session.ended), once per model the turn called. An
+  // engine that doesn't report usage never sends it.
+  | { type: 'turn.usage'; usage: Usage }
   // errorKind (here and on session.ended): why it failed, as the engine's adapter reads its error (see TurnErrorKind).
   | { type: 'turn.completed'; error?: string; errorKind?: TurnErrorKind }
   | { type: 'session.ended'; error?: string; errorKind?: TurnErrorKind }
@@ -174,7 +194,8 @@ export type ChatEntry = { at: string } & (
   | (PermissionRequest & { sshHost?: { host: string; key?: string } })
   | Exclude<
       EngineEvent,
-      { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' | 'permission.requested' }
+      // Usage goes in the chat's usage.jsonl (UsageRecord), not its log.
+      { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' | 'turn.usage' | 'permission.requested' }
     >
 )
 
@@ -401,6 +422,9 @@ export type ExtensionHost = {
   // Every chat callerId may reach, by the same rule.
   reachable(callerId: string): ChatDetail[]
   chat(chatId: string): ChatDetail | undefined
+  // The usage engines reported for the chat, and for its space with every chat in it (ChatUsage), from the chats' usage
+  // files.
+  usage(chatId: string): ChatUsage
   // The chat's log, oldest first; `last` keeps only the newest entries.
   read(chatId: string, options?: { last?: number }): ChatEntry[]
   // The space the chat is in (the chat itself for a space).
@@ -649,6 +673,39 @@ export type TurnSummary = {
   tools: { name: string; kind: ToolKind; summary: string; path?: string; isError?: boolean }[]
   files: string[]
 }
+
+// One report of usage as Kothar keeps it, in usage.jsonl in the chat's folder (or the garage's, for a one-shot call no
+// chat asked for): a turn's model calls (source 'turn', with turn: the id the Inspector knows the turn by, SentTurn.turn)
+// or one host.complete call (source 'complete', with extension: whose call it was).
+export type UsageRecord = Usage & {
+  at: string
+  engine: string
+  source: 'turn' | 'complete'
+  chatId?: string
+  turn?: string
+  extension?: string
+}
+
+// Usage added up. turns and calls count the reports of each source; unpriced, those with tokens but no cost (Codex's),
+// so a total cost can say it leaves some out.
+export type UsageTotals = {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costUsd: number
+  turns: number
+  calls: number
+  unpriced: number
+}
+
+// A chat's usage: its own reports (chat), its workers' (workers: those running and those since removed, whose reports
+// move up to the chat as they go), and its space's (the space's own chat and every chat below it, removed workers
+// included). A deleted space takes its reports with it.
+export type ChatUsage = { chat: UsageTotals; workers: UsageTotals; space: UsageTotals }
+
+// What Extension.onUsage gets: the report, and the chat it's for (absent for a one-shot call no chat asked for).
+export type UsageReport = { usage: UsageRecord; chat?: ChatDetail }
 
 // message is shown to the agent when the request is denied.
 export type PermissionVerdict = { allow: boolean; message?: string }
@@ -1153,6 +1210,10 @@ export type Extension = {
   // Something Kothar or an extension did on its own (ActivityEvent), as it happens. Like onTurnSent, called only when
   // some extension that's on watches, so the core builds nothing otherwise.
   onActivity?(event: ActivityEvent, context: ExtensionContext): void
+  // Usage an engine reported, as Kothar saves it: each turn's (turn.usage) and each host.complete call's, whichever
+  // extension made it. With host.usage for totals, enough for a budget: interrupt a chat, or tell the user, past a
+  // limit. Keep it quick.
+  onUsage?(report: UsageReport, context: ExtensionContext): void
   // A policy for permission requests the core would otherwise ask the user about, or would allow on its own. Return a
   // verdict to answer it, or nothing to leave it. Extensions are asked in load order; the first verdict wins. The
   // core's own denials (edits outside the work folder in a sandbox) always stand.
@@ -1225,7 +1286,8 @@ export type ExtensionUse =
   | 'setup'
   // memory, and host.chatStorage, everyChatStorage
   | 'memory'
-  // Host calls: chats, chat, read, space, messages, message, reaches, reachable; and onTurnSent.
+  // Host calls: chats, chat, read, space, messages, message, reaches, reachable, usage; and onTurnSent, onActivity,
+  // onUsage.
   | 'readChats'
   // send, report, createChat, retry, continue, interrupt, addContextFile; and modelRoles
   | 'sendMessages'

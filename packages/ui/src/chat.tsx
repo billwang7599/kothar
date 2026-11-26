@@ -41,6 +41,7 @@ import { columnSlider } from './layout.ts'
 import { localNth, onReveal, revealIn, takeReveal, type Reveal } from './search.tsx'
 import { ArchivedNote, EngineNote, QueuedMessages, Waits, WorkerBar, WorkerRequests } from './chat/above-composer.tsx'
 import { ChatHeader } from './chat/header.tsx'
+import { usageFor } from './usage.tsx'
 import { useRevealNumbers } from './chat/reveal-numbers.ts'
 import { useAttachments, useFileDrop } from './chat/use-attachments.ts'
 import { Composer } from './chat/composer.tsx'
@@ -151,6 +152,7 @@ export function Chat(props: ChatProps) {
   const [jumpShown, setJumpShown] = useState(false)
   const reduceMotion = useReducedMotion()
   const line = lineOf(props.chats, chat)
+  const usage = useMemo(() => usageFor(props.chats, chat), [props.chats, chat])
   const space = line.at(-1)!
   const stepsShown = useStepsShown(chat.id, ...line.slice(1).map((c) => c.id))
   const reportsShown = useReportsShown(chat.id, ...line.slice(1).map((c) => c.id))
@@ -391,6 +393,7 @@ export function Chat(props: ChatProps) {
           toggleSidebar={props.toggleSidebar}
           contextOpen={props.contextOpen}
           toggleContext={props.toggleContext}
+          usage={usage}
         />
         <div
           // Chrome's scroll anchoring would otherwise drag the view along with output added near the bottom. The

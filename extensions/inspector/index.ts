@@ -14,6 +14,7 @@ import type {
   SentSection,
   SentSource,
   SentTurn,
+  Usage,
 } from '@kothar/extension-api'
 import { activityStore, activityView, type Scope, type StoredEvent } from './activity.ts'
 
@@ -28,7 +29,8 @@ export const DEFAULT_KEEP = 30
 
 // A section as kept: its text stored once by hash, in TEXT_DIR. at: when a steered message came in.
 export type StoredSection = Omit<SentSection, 'text'> & { hash: string; chars: number; at?: string }
-export type StoredTurn = Omit<SentTurn, 'sections' | 'kind' | 'id'> & { sections: StoredSection[] }
+// usage: what the engine reported the turn used (onUsage), one entry per model.
+export type StoredTurn = Omit<SentTurn, 'sections' | 'kind' | 'id'> & { sections: StoredSection[]; usage?: Usage[] }
 
 const hashOf = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 32)
 // About four characters a token, as a rough guide.
@@ -91,7 +93,42 @@ export function sentStore(storage: ExtensionStorage) {
     const changed = kept.length !== turns.length || kept.some((turn, i) => turn.sections.length !== turns[i]!.sections.length)
     if (changed) write(kept, Math.max(1, kept.length))
   }
-  return { read, text, add, forgetSince }
+  // The engine's report of what a kept turn used, added to it; a turn no longer kept (or not yet sent) is skipped.
+  const addUsage = (turnId: string, usage: Usage) => {
+    const turns = read()
+    const turn = turns.find((t) => t.turn === turnId)
+    if (!turn) return false
+    turn.usage = [...(turn.usage ?? []), usage]
+    storage.write(SENT_FILE, JSON.stringify({ turns }) + '\n')
+    return true
+  }
+  return { read, text, add, forgetSince, addUsage }
+}
+
+const tokenCount = (n: number) => (n >= 1000 ? `${Number((n / 1000).toFixed(n >= 10_000 ? 0 : 1))}k` : String(n))
+const dollars = (usd: number) => (usd >= 1 ? `$${usd.toFixed(2)}` : `$${Number(usd.toPrecision(2))}`)
+
+// The turn's usage as the engine reported it, one row of badges per model.
+export function usageView(usage: readonly Usage[]): ExtensionView[] {
+  return usage.map((u) => ({
+    type: 'row',
+    children: [
+      ...(u.model ? [{ type: 'badge' as const, text: u.model, tone: 'muted' as const }] : []),
+      ...(
+        [
+          ['inputTokens', 'in', 'Input read fresh, without the cache'],
+          ['outputTokens', 'out', 'What the model wrote, its thinking included'],
+          ['cacheReadTokens', 'cache read', 'Input read from the provider’s prompt cache'],
+          ['cacheWriteTokens', 'cache write', 'Input written to the provider’s prompt cache'],
+        ] as const
+      ).flatMap(([field, label, hint]) =>
+        u[field] ? [{ type: 'badge' as const, text: `${tokenCount(u[field])} ${label}`, tone: 'faint' as const, hint }] : [],
+      ),
+      ...(u.costUsd
+        ? [{ type: 'badge' as const, text: dollars(u.costUsd), tone: 'normal' as const, hint: 'What the engine says the turn cost, at API prices' }]
+        : []),
+    ],
+  }))
 }
 
 // One of the user's messages in a chat's log: where it is (its entry), when it was sent and what it said.
@@ -227,6 +264,12 @@ export function turnView(
     children: [
       head,
       { type: 'text', text: `${turn.at} · ${about.join(' · ')}`, small: true, tone: 'muted' },
+      ...(turn.usage?.length
+        ? [
+            { type: 'heading' as const, text: 'Used', hint: 'What the engine reported this turn’s model calls used' },
+            ...usageView(turn.usage),
+          ]
+        : []),
       ...(options.nav?.length ? [{ type: 'row' as const, children: options.nav }] : []),
       ...PARTS.flatMap(({ part, title }) => {
         const sections = turn.sections.filter((section) => section.part === part)
@@ -348,6 +391,12 @@ export function createInspectorExtension(): Extension {
         added.set(key, 0)
       } else added.set(key, count)
       redrawSoon(host)
+    },
+    // The engine's report of what a turn used goes with the turn it's for.
+    onUsage({ usage, chat }, { host }) {
+      if (!chat || usage.source !== 'turn' || !usage.turn) return
+      const { at: _at, engine: _engine, source: _source, chatId: _chatId, turn, extension: _extension, ...used } = usage
+      if (storeOf(host, chat.id).addUsage(turn, used)) host.refresh(chat.id)
     },
     onTurnSent(sent, { host, values }) {
       storeOf(host, sent.chat.id).add(sent, keepOf(values))

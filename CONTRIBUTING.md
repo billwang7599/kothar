@@ -126,6 +126,11 @@ Why some things are the way they are. Add one when you make a choice the next co
   chat keys, `Mod*` aliases and `ChatDetail.mod`) was deleted rather than kept forever. Don't add it back.
 - **Fresh installs start lean.** Deep Research and Pins are off by default; a switch saved in `settings.json` wins, so
   only installs that never touched them change. The fake engine is for development and tests (`KOTHAR_DEV`), not the app.
+- **Usage is its own file, not the log.** Each chat's `usage.jsonl` holds what engines reported (`turn.usage` and
+  one-shot calls), apart from `log.jsonl`, so deleting or forgetting messages never drops what they cost, and memory
+  and the transcript never see it. A worker's records move to its lead's file before its folder goes, so a space's
+  total keeps them. Costs are the engines' own figures; Kothar keeps no price list, so Codex, which reports none, shows
+  tokens only.
 
 - **Home is part of Kothar, but still an extension.** The main chat and spaces are what Kothar is, so Home is always on:
   it has no switch, isn't listed under Built-in extensions, and its page (its editable role prompt) sits under
@@ -366,6 +371,9 @@ An adapter is one file in `packages/core/src/adapters/`, implementing `Adapter` 
   `turn.completed` and so on. Every tool call carries a common kind (`shell`, `edit`, `read`, `search`, `fetch`,
   `mcp`, `other`).
 - Optional: `complete` (one-shot model calls, used by Memory) and `accounts` (sign in, sign out, API keys).
+- Wanted: usage. Emit `turn.usage` (a `Usage`: tokens without the cache, cache reads and writes, cost in dollars,
+  model) just before `turn.completed`, once per model, with only what the engine reports; and call `options.onUsage`
+  from `complete`. Engines that report running totals need the change since the last turn (see Codex and ACP).
 - Optional but wanted: `tools`, the engine's built-in tools, each with a shared capability and a group (`core`,
   `replaced`, `outside`; see [Decisions](#decisions)). With it, `start` gets `options.tools` (`off` and `on`, by the
   engine's names) and `options.noTools` (every built-in off, MCP tools kept), and Settings → Engines → Tools lists the

@@ -267,6 +267,18 @@ describe('reduce', () => {
     expect(updated.chats[1]).toMatchObject({ ...change, items: [{ kind: 'user', text: 'hi' }] })
   })
 
+  it('follows a chat’s usage, which a change to its info keeps', () => {
+    const totals = { inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.1, turns: 1, calls: 0, unpriced: 0 }
+    const { status, entries, draft, queue, ...info } = chat('c')
+    const state = run(
+      snapshot([chat(MAIN_CHAT_ID), chat('c')]),
+      { type: 'chat.usage', chatId: 'c', usage: totals },
+      { type: 'chat.usage', chatId: 'c', usage: totals, workers: { ...totals, costUsd: 0.2 } },
+      { type: 'chat.updated', chat: { ...info, name: 'Renamed' } },
+    )
+    expect(state.chats[1]).toMatchObject({ name: 'Renamed', usage: totals, workersUsage: { costUsd: 0.2 } })
+  })
+
   it('sets and clears a chat model and thinking level, since JSON drops the cleared field', () => {
     const { status, entries, draft, ...info } = chat('c')
     const state = run(snapshot([chat(MAIN_CHAT_ID), chat('c')]), {

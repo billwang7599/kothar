@@ -1,6 +1,6 @@
 // A chat as the core keeps it while it runs: what's saved (info, context, entries) plus its live turn state. The core's
 // modules share this type; only the core makes and holds chats.
-import type { ExtensionWait, TurnSummary } from '@kothar/extension-api'
+import type { ExtensionWait, TurnSummary, UsageTotals } from '@kothar/extension-api'
 import type { ChatEntry, ChatInfo, ChatStatus, QueuedMessage, Session } from './shared.ts'
 
 export type Chat = {
@@ -38,6 +38,9 @@ export type Chat = {
   seen?: number[]
   // What the running turn has done so far, for onTurnCompleted.
   turn?: { text: string; tools: TurnSummary['tools'] }
+  // The usage its engines reported (usage.jsonl), added up: its own, and its removed workers' (usage.ts); read on first
+  // use (core.ts usageOf).
+  usage?: { own: UsageTotals; carried: UsageTotals }
   // The run the UI last got for this chat (JSON), so a change in Settings or an engine resends only the chats it moves.
   shownRun?: string
 }

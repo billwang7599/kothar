@@ -39,6 +39,7 @@ Built-in extensions aren't held to `uses`.
 | `space(chatId)` | The space the chat is in (the chat itself for a space), as a [`SpaceDetail`](types.md#spaces), or `undefined`. |
 | `reaches(callerId, chatId)` | Whether chat `callerId` may reach chat `chatId`. See below. |
 | `reachable(callerId)` | Every chat `callerId` may reach, by the same rule. |
+| `usage(chatId)` | What engines reported the chat used, its workers (running and removed) and its whole space, as a [`ChatUsage`](types.md#usage). See [`onUsage`](events.md#onusage). |
 
 ### Who may reach whom
 
@@ -312,7 +313,8 @@ List `models` in the manifest's `uses`: each call runs on your account.
 
 Each call is listed in the Inspector's **Activity**, with your extension's name, the model, what was sent and the reply.
 Pass `chatId` (the chat the call is for, such as the chat a summary is of) to list it under that chat; without it, it's
-listed as not tied to a chat.
+listed as not tied to a chat. What the call used, if the engine says, counts toward that chat's usage (or the garage's
+own `usage.jsonl` without one) and reaches [`onUsage`](events.md#onusage) under your extension's id.
 
 ## Activity
 

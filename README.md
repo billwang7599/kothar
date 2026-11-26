@@ -142,7 +142,13 @@ What works today:
   (a folded What was sent row under each of your messages), each part labelled by who it's from, with Edit links to the
   extension prompts behind it; extensions' prompts and tool descriptions are editable on their Settings pages. Its
   Activity tab lists what Kothar and extensions do on their own: model calls, permission answers and the rule behind
-  each, workers, retries and account switches.
+  each, workers, retries and account switches. Each turn's What was sent row also shows what the engine reported it
+  used: tokens per model, and the cost where the engine gives one.
+- **Usage:** what engines report their model calls used is kept in each chat's folder (`usage.jsonl`), turns and
+  extensions' one-shot calls alike, from Claude Code (tokens and cost), pi (tokens and cost), OpenCode (tokens and
+  cost) and Codex (tokens only). The chat's header shows a quiet total, a space's with its workers', and the breakdown
+  on hover. Costs are the engines' figures at API prices, so a subscription's bill differs. Extensions read it with
+  `onUsage` and `host.usage`, enough to build a budget.
 
 Not built yet: remote machines, sandboxing outside macOS, a published signed release, and sync.
 

@@ -52,6 +52,7 @@ import {
   type SessionOptions,
   type Upload,
   type SshHost,
+  type Usage,
 } from './shared.ts'
 import { saveToolImages } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
@@ -132,6 +133,8 @@ export type TurnDeps = {
   engineToolsFor?: (chat: Chat, engine: string) => Pick<SessionOptions, 'tools' | 'noTools'>
   // The engine said which built-in tools its session has.
   toolsListed?: (engine: string, names: string[]) => void
+  // The engine reported what the turn's model calls used (turn.usage): saved in the chat's usage file.
+  usage?: (chat: Chat, usage: Usage, engine: string, turn?: string) => void
   // The user's message took the chat's composer mode, which went back off: the picker redraws.
   modesTaken?: (chat: Chat) => void
 }
@@ -908,6 +911,7 @@ export function openTurns(deps: TurnDeps) {
       const at = now().toISOString()
       for (const extension of watchersOf('onEvent')) callExtension(extension, () => extension.onEvent!(detailOf(chat), event, contextOf(extension)))
       if (event.type === 'tools.listed') return deps.toolsListed?.(engine, event.names)
+      if (event.type === 'turn.usage') return deps.usage?.(chat, event.usage, engine, chat.sentTurn)
       if (event.type === 'tool.started') {
         const { name, kind, summary, path } = event
         chat.turn?.tools.push({ name, kind, summary, ...(path !== undefined && { path }) })

@@ -172,6 +172,8 @@ describe('codex adapter', () => {
       { type: 'thinking.delta', text: 'Thinking it over' },
       ...['Hell', 'o fr', 'om t', 'he m', 'ock.'].map((text) => ({ type: 'text.delta', text })),
       { type: 'text.completed', text: 'Hello from the mock.' },
+      // The thread's running totals (thread/tokenUsage/updated) at the turn's end.
+      { type: 'turn.usage', usage: { inputTokens: 1, outputTokens: 1 } },
       { type: 'turn.completed' },
     ])
   })

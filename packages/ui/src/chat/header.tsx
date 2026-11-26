@@ -1,10 +1,12 @@
-// The bar across the top of a chat: the panel toggles, its name and folder, a sandbox warning and the account picker.
+// The bar across the top of a chat: the panel toggles, its name and folder, a sandbox warning, what its engines used
+// and the account picker.
 import { allowsAll, editsAnywhere, type ClientMessage, type EngineAccounts, type WorkFolder } from '@kothar/core/shared'
 import { Hint, PanelToggle, Select } from '../controls.tsx'
 import { usePathsShown } from '../paths.ts'
 import type { SettingsPage } from '../settings.tsx'
 import { type ChatView } from '../state.ts'
 import { accountLabel, listedAccounts } from '../accounts.ts'
+import { UsageTotal, type usageFor } from '../usage.tsx'
 
 const MANAGE_ACCOUNTS = '__manage'
 const WARNING_CHIP = 'shrink-0 cursor-help rounded-full bg-warning-bg px-8 py-2 text-xs text-amber'
@@ -37,6 +39,8 @@ type ChatHeaderProps = {
   toggleSidebar: () => void
   contextOpen: boolean
   toggleContext: () => void
+  // What its engines reported (usage.tsx usageFor): a space's with its workers'.
+  usage?: ReturnType<typeof usageFor>
 }
 
 export function ChatHeader(props: ChatHeaderProps) {
@@ -81,6 +85,7 @@ export function ChatHeader(props: ChatHeaderProps) {
           <span className={WARNING_CHIP}>{workFolder.canSandbox ? 'Edits anywhere' : 'Not sandboxed'}</span>
         </Hint>
       )}
+      <UsageTotal usage={props.usage} />
       {accounts && listed && !engineOff && (
         <Select
           variant="chip"

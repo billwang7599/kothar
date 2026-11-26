@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ChatDetail, Extension, ExtensionContext, SentTurn, SpaceDetail } from '@kothar/extension-api'
+import type { ChatDetail, ChatUsage, Extension, ExtensionContext, SentTurn, SpaceDetail, Usage, UsageRecord } from '@kothar/extension-api'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { openAccounts } from './accounts.ts'
 import { openChatSetups, openSetups } from './setups.ts'
@@ -74,6 +74,7 @@ import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
 import { QUEUE_FILE } from './queue-store.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
+import { addUsage, appendUsage, carryUsage, cleanUsage, sumTotals, totalsOf as usageTotalsOf, USAGE_FILE, usedText } from './usage.ts'
 import { openMessageEdits } from './message-edits.ts'
 import { openAcpAgents } from './acp-agents.ts'
 
@@ -82,7 +83,7 @@ export { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, W
 
 export const STOP_GRACE_MS = 60_000
 // A chat's own files, which extensions' chat storage can't touch.
-const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, QUEUE_FILE, 'attachments', TOOL_IMAGES_DIR]
+const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, QUEUE_FILE, 'attachments', TOOL_IMAGES_DIR, USAGE_FILE]
 
 
 export type Core = ReturnType<typeof openCore>
@@ -417,14 +418,19 @@ function assembleCore(options: {
     chat.shownRun = JSON.stringify(run)
     return { ...chat.info, ...(run && { run }) }
   }
-  const state = (chat: Chat): ChatState => ({
-    ...withRun(chat),
-    status: chat.status,
-    entries: chat.entries,
-    draft: chat.unsavedText,
-    queue: chat.queue,
-    ...(chat.waits.size && { waits: waitsOf(chat) }),
-  })
+  const state = (chat: Chat): ChatState => {
+    const { own, carried } = usageOf(chat)
+    return {
+      ...withRun(chat),
+      status: chat.status,
+      entries: chat.entries,
+      draft: chat.unsavedText,
+      queue: chat.queue,
+      ...(chat.waits.size && { waits: waitsOf(chat) }),
+      ...(own.turns + own.calls > 0 && { usage: { ...own } }),
+      ...(carried.turns + carried.calls > 0 && { workersUsage: { ...carried } }),
+    }
+  }
   // A chat as the UI's views get it: only the latest page of its log, which the UI pages back through (chat.history).
   const shownState = (chat: Chat): ChatState => {
     const { from, entries } = pageOf(chat.entries)
@@ -469,13 +475,15 @@ function assembleCore(options: {
     const chatId = typeof request.chatId === 'string' && chats.has(request.chatId) ? request.chatId : undefined
     const { chatId: _chatId, ...call } = request
     const started = Date.now()
+    // What the call used, if the engine says, for its Activity line.
+    const used: Usage[] = []
     const record = (outcome: { result?: string; error?: unknown }) =>
       activity.emit(chatId, () => ({
         kind: 'model',
         ...(from && { by: from }),
         title: `Called ${model ?? 'a model'}${engine ? ` on ${adapterFor(engine)?.name ?? engine}` : ''}`,
         ...(model && { model }),
-        detail: `${((Date.now() - started) / 1000).toFixed(1)} s${request.schema ? ', asked for JSON' : ''}`,
+        detail: `${((Date.now() - started) / 1000).toFixed(1)} s${request.schema ? ', asked for JSON' : ''}${usedText(used)}`,
         sections: [
           { label: 'Instructions (system)', text: request.system },
           { label: 'Prompt', text: request.prompt },
@@ -490,7 +498,15 @@ function assembleCore(options: {
       const cwd = join(chosenWorkFolder(), 'home')
       mkdirSync(cwd, { recursive: true })
       const sandbox = sandboxIn(cwd)
-      const options = { ...call, cwd, model, ...accounts.sessionFor(adapter.id), ...(sandbox && { sandbox }) }
+      const onUsage = (usage: Usage) => {
+        used.push(usage)
+        recordUsage(chatId === undefined ? undefined : chats.get(chatId), { model, ...usage }, {
+          engine: adapter.id,
+          source: 'complete',
+          extension: from?.id,
+        })
+      }
+      const options = { ...call, cwd, model, ...accounts.sessionFor(adapter.id), ...(sandbox && { sandbox }), onUsage }
       const result = await adapter.complete(machine, options)
       record({ result })
       return result
@@ -616,6 +632,60 @@ function assembleCore(options: {
 
   // With a chat: only the extensions that shape its sessions (see isOnFor).
   const watchersOf = (hook: ExtensionHook, chat?: Chat) => extensions.filter((extension) => isOnFor(extension, chat) && extension[hook])
+
+  // Usage (usage.ts): a chat's totals, read from its usage.jsonl once and kept up to date as reports come in.
+  const usageOf = (chat: Chat) => (chat.usage ??= usageTotalsOf(chat.dir, chat.info.id))
+  // Saves what an engine reported, tells the UI the chat's new totals and the extensions that watch (onUsage). chat
+  // absent: a one-shot call no chat asked for, kept in the garage's usage.jsonl.
+  const recordUsage = (chat: Chat | undefined, reported: Usage, meta: Pick<UsageRecord, 'engine' | 'source' | 'turn' | 'extension'>) => {
+    const usage = cleanUsage(reported)
+    if (!usage) return
+    const record: UsageRecord = {
+      at: now().toISOString(),
+      ...(chat && { chatId: chat.info.id }),
+      ...Object.fromEntries(Object.entries(meta).filter(([, value]) => value !== undefined)),
+      ...usage,
+    } as UsageRecord
+    // Read before the file grows, or the new record would count twice.
+    const totals = chat && usageOf(chat)
+    try {
+      appendUsage(chat?.dir ?? garage, record)
+    } catch (error) {
+      console.error('Kothar could not save usage:', error)
+      return
+    }
+    if (chat && totals) {
+      addUsage(totals.own, record)
+      broadcast({ type: 'chat.usage', chatId: chat.info.id, usage: { ...totals.own } })
+    }
+    if (quitting) return
+    const report = { usage: record, ...(chat && { chat: detailOf(chat) }) }
+    for (const extension of watchersOf('onUsage', chat)) callExtension(extension, () => extension.onUsage!(report, contextOf(extension)))
+  }
+  // A chat's usage, its workers' (running and removed) and its space's: the top chat and every chat below it.
+  const chatUsage = (chat: Chat): ChatUsage => {
+    const everything = (c: Chat) => [usageOf(c).own, usageOf(c).carried]
+    return {
+      chat: { ...usageOf(chat).own },
+      workers: sumTotals([usageOf(chat).carried, ...familyOf(chat).slice(1).flatMap(everything)]),
+      space: sumTotals(familyOf(chainOf(chat)[0] ?? chat).flatMap(everything)),
+    }
+  }
+  // A worker's folder is about to go (removeChats): its usage, and that of any chat below it, moves to the chat above, so
+  // the space's total keeps it.
+  const keepUsage = (family: Chat[]) => {
+    const parent = family[0] && parentOf(family[0])
+    if (!parent || family.includes(parent)) return
+    try {
+      const totals = usageOf(parent)
+      const moved = carryUsage(family.map((c) => c.dir), parent.dir)
+      if (!moved.length) return
+      for (const record of moved) addUsage(totals.carried, record)
+      broadcast({ type: 'chat.usage', chatId: parent.info.id, usage: { ...totals.own }, workers: { ...totals.carried } })
+    } catch (error) {
+      console.error('Kothar could not keep a worker’s usage:', error)
+    }
+  }
   // What Kothar and its extensions do on their own, for extensions that watch (onActivity), such as the Inspector.
   const activity = openActivity<Chat>({
     now,
@@ -749,6 +819,7 @@ function assembleCore(options: {
     workerLimit: () => workers.limit(),
     engineToolsFor: (chat, engine) => engineTools.sessionFor(engine, providedFor(chat)),
     toolsListed: (engine, names) => engineTools.record(engine, names),
+    usage: (chat, usage, engine, turn) => recordUsage(chat, usage, { engine, source: 'turn', turn }),
     modesTaken: (chat) => {
       if (shown(chat)) broadcast(extensionsOf(chat))
     },
@@ -799,6 +870,7 @@ function assembleCore(options: {
     accounts,
     run: () => runFor(),
     complete: completeFor,
+    usage: chatUsage,
     activity,
     promptText: prompts.textOf,
     broadcast,
@@ -830,6 +902,7 @@ function assembleCore(options: {
     })
 
   const { loadAll, createChat, createChild, renameChat, archiveChat, moveChat, removeChats, deleteChat } = openChatLifecycle({
+    keepUsage,
     chats,
     chatsDir,
     home,

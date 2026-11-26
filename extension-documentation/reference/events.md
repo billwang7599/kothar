@@ -276,6 +276,37 @@ running then, if any (as in `SentTurn`). Long texts are cut at 100,000 character
 
 List `readChats` in the manifest's `uses`.
 
+## onUsage
+
+`onUsage({ usage, chat? }, context)` gets each report of what an engine's model calls used, as Kothar saves it in the
+chat's `usage.jsonl` (a [`UsageRecord`](types.md#usage)): a turn's (`source: 'turn'`, once per model, with the turn's id
+as in `SentTurn`) and each `host.complete` call's, whichever extension made it (`source: 'complete'`). `chat` is absent
+for a one-shot call no chat asked for. Read totals with [`host.usage`](host.md#reading-chats). Together they're enough
+for a budget:
+
+```ts
+import type { Extension } from '@kothar/extension-api'
+
+const LIMIT_USD = 5
+
+const budget: Extension = {
+  id: 'budget',
+  name: 'Budget',
+  description: 'Stops a space’s turns once it has cost $5.',
+  enabledByDefault: false,
+  onUsage({ chat }, { host }) {
+    if (!chat || host.usage(chat.id).space.costUsd < LIMIT_USD) return
+    if (host.chat(chat.id)?.status === 'running') host.interrupt(chat.id)
+    host.note(chat.id, `This space has cost over $${LIMIT_USD}.`)
+  },
+}
+
+export default budget
+```
+
+Costs are what engines report at API prices, so read them as a guide: a subscription is billed its own way, and Codex
+reports no cost (`unpriced` counts those reports). List `readChats` in the manifest's `uses`.
+
 ## Transforms
 
 `transformMessage(text, chat, context)` rewrites each message on its way to the engine. The chat's log, and you, keep

@@ -123,6 +123,11 @@ describe('pi adapter', () => {
       { type: 'turn.started' },
       { type: 'text.delta', text: 'Hello there' },
       { type: 'text.completed', text: 'Hello there' },
+      // pi's own numbers for the reply's one model call (the empty first message reports zeros, left out).
+      {
+        type: 'turn.usage',
+        usage: { model: 'claude-haiku-5-5', inputTokens: 4, outputTokens: 6, cacheWriteTokens: 2394, costUsd: 0.00030264999999999996 },
+      },
       { type: 'turn.completed' },
     ])
   })
@@ -150,6 +155,18 @@ describe('pi adapter', () => {
       { type: 'tool.completed', toolId, output: 'a.txt\nAGENTS.md\n', isError: false },
       { type: 'text.delta', text: 'Done' },
       { type: 'text.completed', text: 'Done' },
+      // Both model calls (the tool call, then the reply) added up.
+      {
+        type: 'turn.usage',
+        usage: {
+          model: 'claude-haiku-5-5',
+          inputTokens: 6,
+          outputTokens: 75,
+          cacheReadTokens: 2400,
+          cacheWriteTokens: 2491,
+          costUsd: 0.00037347499999999996,
+        },
+      },
       { type: 'turn.completed' },
     ])
   })
@@ -250,6 +267,11 @@ describe('pi adapter', () => {
       { type: 'turn.started' },
       { type: 'tool.started', toolId, name: 'bash', kind: 'shell', summary: 'sleep 30', input: { command: 'sleep 30', timeout: 60 } },
       { type: 'tool.completed', toolId, output: 'Command aborted', isError: true },
+      // An interrupted turn's calls still count.
+      {
+        type: 'turn.usage',
+        usage: { model: 'claude-haiku-5-5', inputTokens: 4, outputTokens: 74, cacheReadTokens: 2310, cacheWriteTokens: 93, costUsd: 0.000072125 },
+      },
       { type: 'turn.completed', error: 'Interrupted', errorKind: 'interrupted' },
     ])
   })
@@ -295,6 +317,7 @@ describe('pi adapter', () => {
       'thinking.delta',
       'text.delta',
       'text.completed',
+      'turn.usage',
       'turn.completed',
     ])
   })
@@ -312,7 +335,7 @@ describe('pi adapter', () => {
     const { fake, events } = startSession()
     const text = fixture('text').replaceAll('\n', '\r\n')
     for (let i = 0; i < text.length; i += 7) fake.stdout(text.slice(i, i + 7))
-    expect(events.map((e) => e.type)).toEqual(['text.delta', 'text.completed', 'turn.completed'])
+    expect(events.map((e) => e.type)).toEqual(['text.delta', 'text.completed', 'turn.usage', 'turn.completed'])
   })
 
   it('keeps U+2028 and U+2029 inside a JSON string', () => {

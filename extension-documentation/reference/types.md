@@ -95,11 +95,32 @@ all of them.
 | `steer.landed` | `id` | A message you sent mid-turn entered the running turn. |
 | `steer.returned` | `id` | A message you sent mid-turn was handed back unsent. |
 | `tools.listed` | `names` | The engine's built-in tools for this session, by its own names, as it starts (Claude Code only). |
+| `turn.usage` | `usage` | What the turn's model calls used, as a [`Usage`](#usage), just before `turn.completed`; once per model. Engines that report nothing never send it. Not in the log. |
 | `turn.completed` | `error?`, `errorKind?` | A turn ended. `errorKind` says why it failed (see [`onTurnCompleted`](events.md)). |
 | `session.ended` | `error?`, `errorKind?` | The engine session ended. |
 
 A tool's `kind` is one of `shell`, `edit`, `read`, `search`, `fetch`, `mcp` or `other`, the same across engines. So one
 permission policy works for every engine.
+
+## Usage
+
+What engines report their model calls used, in words every engine shares. A field the engine doesn't report is absent.
+
+| Type | Fields |
+|---|---|
+| `Usage` | `inputTokens?` (input read fresh, without the cache), `outputTokens?` (thinking included), `cacheReadTokens?`, `cacheWriteTokens?`, `costUsd?`, `model?` |
+| `UsageRecord` | A `Usage` as Kothar saves it in the chat's `usage.jsonl`: plus `at`, `engine`, `source` (`'turn'` or `'complete'`), `chatId?`, `turn?` (the turn's id, as in `SentTurn`) and `extension?` (whose `host.complete` call it was) |
+| `UsageTotals` | `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `costUsd`, `turns`, `calls` (one-shot calls) and `unpriced` (reports with tokens but no cost) |
+| `ChatUsage` | `chat` (its own), `workers` (its workers', running and removed) and `space` (the whole space) |
+
+Which engines report what:
+
+| Engine | Tokens | Cost |
+|---|---|---|
+| Claude Code | Each result's usage per model (`model_usage_since_last_result`, or the change in `modelUsage` on older versions), one-shot calls too | Yes, at API prices, even on a subscription |
+| Codex | The thread's token totals (`thread/tokenUsage/updated`), and `exec`'s for one-shot calls; cached input counted apart | No |
+| pi | Each assistant message's `usage` | Yes (`cost.total`); its one-shot calls report nothing |
+| OpenCode (ACP) | `session/prompt`'s `usage` | The change in `usage_update`'s running cost, in dollars |
 
 ## Tool capabilities
 

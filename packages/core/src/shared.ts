@@ -15,6 +15,8 @@ import type {
   ExtensionValues,
   ExtensionView,
   ExtensionWait,
+  Usage,
+  UsageTotals,
 } from '@kothar/extension-api'
 
 export type {
@@ -29,6 +31,10 @@ export type {
   Question,
   ToolCapability,
   ToolKind,
+  Usage,
+  UsageRecord,
+  UsageTotals,
+  ChatUsage,
 } from '@kothar/extension-api'
 
 export interface EngineProcess {
@@ -176,6 +182,8 @@ export type CompleteOptions = CompletionRequest & {
   accountDir?: string
   apiKey?: string
   sandbox?: Sandbox
+  // Called with what the call used, if the engine says (once per model it called).
+  onUsage?: (usage: Usage) => void
 }
 
 export interface Session {
@@ -703,6 +711,10 @@ export type ChatState = ChatInfo & {
   queue: QueuedMessage[]
   // What extensions are waiting on the user for, while the turn runs (ExtensionHost.wait).
   waits?: ChatWait[]
+  // The usage its engines reported (usage.jsonl), its own only; the UI adds up a space's. Absent: none reported.
+  usage?: UsageTotals
+  // What its workers that have since been removed used (carried up to it). Absent: none.
+  workersUsage?: UsageTotals
 }
 
 export type ChatWait = ExtensionWait & { extension: string }
@@ -910,6 +922,9 @@ export type CoreMessage =
   | { type: 'chat.thinking'; chatId: string; text: string }
   | { type: 'chat.status'; chatId: string; status: ChatStatus }
   | { type: 'chat.queue'; chatId: string; queue: QueuedMessage[] }
+  // The chat's usage totals changed: a turn or a one-shot call it asked for reported usage, or (workers) a worker of its
+  // was removed and its usage carried up to it.
+  | { type: 'chat.usage'; chatId: string; usage: UsageTotals; workers?: UsageTotals }
   | { type: 'chat.waits'; chatId: string; waits: ChatWait[] }
   | { type: 'chat.context'; chatId: string; items: ContextItem[] }
   | {

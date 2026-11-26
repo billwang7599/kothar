@@ -6,6 +6,7 @@ import { appendFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import type {
   ChatDetail,
+  ChatUsage,
   Extension,
   ExtensionAction,
   ExtensionContext,
@@ -142,6 +143,8 @@ export type HostDeps<C extends HostChat> = {
   run: () => ExtensionRun
   /** A model call for an extension (host.complete); from: the extension, for the Activity record. */
   complete: (request: CompletionRequest, from: Extension) => Promise<string>
+  /** The chat's usage and its space's (host.usage). */
+  usage: (chat: C) => ChatUsage
   /** Kothar's activity stream (activity.ts): what extensions do through the host is emitted to it. */
   activity: Activity
   /** One of the extension's prompts as it's sent: the user's edit, else its default. */
@@ -398,6 +401,7 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
       messages: (chatId) => messagesOf(chatFor(chatId).entries),
       message: (chatId, entry) => messageAt(chatFor(chatId).entries, Number(entry)),
       complete: (request) => deps.complete(request, extension),
+      usage: (chatId) => deps.usage(chatFor(String(chatId))),
       refresh: (chatId) => deps.refresh(extension, chatId),
       showPanel(chatId, panel) {
         const chat = chatFor(String(chatId))

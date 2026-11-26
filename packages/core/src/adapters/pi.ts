@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { type Adapter, type EngineToolSpec, type Sandbox, type SessionOptions, type ThinkingLevel, type ToolKind } from '../shared.ts'
+import { type Adapter, type EngineToolSpec, type Sandbox, type SessionOptions, type ThinkingLevel, type ToolKind, type Usage } from '../shared.ts'
+import { usageByModel } from '../usage.ts'
 import { onJsonLines } from './jsonl.ts'
 import { processUserEnv, type UserEnv } from './user-env.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
@@ -80,6 +81,15 @@ const CLEAN_ARGS = [
 ]
 
 const RPC_ARGS = ['--mode', 'rpc', ...CLEAN_ARGS]
+
+// One assistant message's usage in pi's words (input without the cache, cacheRead, cacheWrite, cost.total in dollars).
+export const piUsage = (u: any): Usage => ({
+  inputTokens: u?.input,
+  outputTokens: u?.output,
+  cacheReadTokens: u?.cacheRead,
+  cacheWriteTokens: u?.cacheWrite,
+  costUsd: u?.cost?.total,
+})
 
 // The provider's error once pi has stopped retrying: a usage cap, a rate limit or an exhausted quota.
 const LIMIT_ERROR = /usage limit|rate[_ ]limit|\b429\b|too many requests|quota|resource[_ ]exhausted/i
@@ -212,8 +222,12 @@ export function createPi(user: UserEnv = processUserEnv()): Adapter {
         emit({ type, id })
       }
 
+      // Each of the turn's model calls (its assistant messages): the model and what pi says it used.
+      let used: [string | undefined, any][] = []
       const endTurn = (error?: string) => {
         turnError = undefined
+        for (const usage of usageByModel(used, piUsage)) emit({ type: 'turn.usage', usage })
+        used = []
         for (const id of steers) emit({ type: 'steer.returned', id })
         steers = []
         if (error && error !== 'Interrupted' && LIMIT_ERROR.test(error)) emit({ type: 'limit.reached', message: error })
@@ -237,6 +251,7 @@ export function createPi(user: UserEnv = processUserEnv()): Adapter {
               return
             }
             if (message.role !== 'assistant') return
+            if (message.usage) used.push([typeof message.model === 'string' ? message.model : undefined, message.usage])
             for (const block of message.content ?? []) {
               if (block.type === 'text' && block.text) emit({ type: 'text.completed', text: block.text })
             }

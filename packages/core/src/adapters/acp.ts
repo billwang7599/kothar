@@ -1,5 +1,6 @@
 import type { McpServer } from '@kothar/extension-api'
-import type { EngineEvent, EngineProcess, ImageInput, Session, ThinkingLevel, ToolKind } from '../shared.ts'
+import type { EngineEvent, EngineProcess, ImageInput, Session, ThinkingLevel, ToolKind, Usage } from '../shared.ts'
+import { cleanUsage } from '../usage.ts'
 import { type RpcError, rpcClient } from './rpc.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
 import { withImages } from './tool-images.ts'
@@ -146,6 +147,24 @@ const textOf = (content: any): string =>
 
 const LINES_KEPT = 20
 
+/**
+ * What a turn used, from session/prompt's usage (its tokens; thoughtTokens counted as output, as Kothar counts
+ * thinking) and the change in the session's cost (usage_update's cost.amount, a running total, in US dollars only).
+ */
+export function acpUsage(tokens: any, cost: number | undefined, model?: string): Usage | undefined {
+  const num = (value: unknown) => (typeof value === 'number' ? value : undefined)
+  const output = num(tokens?.outputTokens)
+  const thought = num(tokens?.thoughtTokens)
+  return cleanUsage({
+    inputTokens: num(tokens?.inputTokens),
+    outputTokens: output === undefined && thought === undefined ? undefined : (output ?? 0) + (thought ?? 0),
+    cacheReadTokens: num(tokens?.cachedReadTokens),
+    cacheWriteTokens: num(tokens?.cachedWriteTokens),
+    costUsd: cost,
+    ...(model && { model }),
+  })
+}
+
 // One ACP session on a started agent process: initialize, session/new, then a prompt per turn. Each Kothar session
 // is one ACP session; nothing is loaded or resumed.
 export function startAcpSession(
@@ -168,6 +187,9 @@ export function startAcpSession(
   let limited = false
   let reply = { messageId: undefined as string | undefined, text: '' }
   let queued: { text: string; images: ImageInput[] } | undefined
+  // The session's cost so far (usage_update), and what of it the turns before have reported.
+  let sessionCost: number | undefined
+  let costReported = 0
 
   const turn: AcpTurn = {
     limit(message, resetsAt) {
@@ -190,13 +212,17 @@ export function startAcpSession(
     asked.clear()
   }
 
-  const endTurn = (error?: string) => {
+  const endTurn = (error?: string, tokens?: unknown) => {
     if (!running) return
     flushReply()
     cancelAsked()
     running = false
     const reason = interrupted ? 'Interrupted' : (error ?? hooks.turnError?.())
     interrupted = false
+    const cost = sessionCost === undefined ? undefined : sessionCost - costReported
+    if (sessionCost !== undefined) costReported = sessionCost
+    const usage = acpUsage(tokens, cost, options.model)
+    if (usage) emit({ type: 'turn.usage', usage })
     emit({ type: 'turn.completed', ...withKind(reason, hooks.errors) })
   }
 
@@ -228,6 +254,12 @@ export function startAcpSession(
     hooks.hasInput ? hooks.hasInput(call) : call.rawInput !== undefined && Object.keys(call.rawInput).length > 0
 
   const onUpdate = (update: any) => {
+    // The session's cost, a running total, whenever the agent sends it (ACP's usage_update).
+    if (update?.sessionUpdate === 'usage_update') {
+      const { amount, currency } = update.cost ?? {}
+      if (typeof amount === 'number' && Number.isFinite(amount) && (currency === undefined || currency === 'USD')) sessionCost = amount
+      return
+    }
     if (!running) return
     switch (update?.sessionUpdate) {
       case 'agent_message_chunk': {
@@ -325,7 +357,7 @@ export function startAcpSession(
     const prompt = [{ type: 'text', text }, ...images.map(({ mimeType, base64 }) => ({ type: 'image', mimeType, data: base64 }))]
     try {
       const result = await client.request('session/prompt', { sessionId, prompt })
-      endTurn(result?.stopReason === 'refusal' ? `${options.name} refused to go on` : undefined)
+      endTurn(result?.stopReason === 'refusal' ? `${options.name} refused to go on` : undefined, result?.usage)
     } catch (error) {
       endTurn(messageOf(error))
     }
