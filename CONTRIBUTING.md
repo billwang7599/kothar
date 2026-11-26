@@ -89,7 +89,7 @@ Use the names the code uses:
 | Chat | An endless conversation owned by Kothar, backed by a series of sessions. |
 | Space | A top-level chat with its own folders, files and `AGENTS.md`. Its agent is the **lead**. |
 | Worker | A chat started below another for one task: by its agent with `spawn_worker`, or by an extension with `host.createChat({ parentId })`. Its final reply wakes the lead (or, quiet, goes to the extension). Part of the core, set in Settings → Workers. |
-| Home | The built-in Home extension's chat (id `main`): a personal assistant that sees every space. |
+| Home | The main chat (id `main`): a personal assistant that sees every space. Part of Kothar and always on, though written as an extension (`extensions/home`, `alwaysOn`). |
 | Extension | Adds features to Kothar through the public extension API. **Built-in** ones ship in `extensions/`; **community** ones install from the marketplace. |
 | Setup | A saved choice for a kind of job: engine, model, thinking level, extensions to leave out, instructions. |
 | Garage | Kothar's own folder: settings, accounts, setups and every chat. Plain files (JSON, JSONL, Markdown). |
@@ -119,6 +119,13 @@ A **tool** is something an agent calls (run a command, edit a file, an MCP tool)
 
 Why some things are the way they are. Add one when you make a choice the next contributor would otherwise undo.
 
+- **Home is part of Kothar, but still an extension.** The main chat and spaces are what Kothar is, so Home is always on:
+  it has no switch, isn't listed under Built-in extensions, and its page (its editable role prompt) sits under
+  Options as Settings → Home. A saved `home: { enabled: false }` from when it could be turned off is dropped at
+  startup. Its code stays in `extensions/home` on the public extension API, marked `alwaysOn: true`, rather than
+  moving into core: it's the one extension that proves the API can own a chat, and moving it would grow the core for
+  no new behaviour. `alwaysOn` is generic (any built-in extension can set it; a community extension's is ignored), and
+  an always-on extension can still be left out per setup, except of a chat it owns.
 - **Workers are part of the core, not an extension.** They were the Workers extension, but it was only a switch and two
   settings over things that were already core: child chats (`chat-lifecycle.ts`) and the `spawn_worker` tool
   (`kothar-mcp.ts`). As an extension it invited other extensions to depend on it (Deep Research greyed out a setting

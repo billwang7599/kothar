@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -14,8 +14,9 @@ afterEach(async () => {
 
 const homeChat = home.chats![0]!
 
-async function start() {
+async function start(saved?: object) {
   const garage = realpathSync(mkdtempSync(join(tmpdir(), 'kothar-home-')))
+  if (saved) writeFileSync(join(garage, 'settings.json'), JSON.stringify(saved))
   const sessions: { options: SessionOptions; prompt?: string }[] = []
   const held: Adapter = {
     id: 'held',
@@ -112,14 +113,25 @@ it('runs Home in the scratch folder with its instructions, and makes top-level s
   ])
 })
 
-it('hides Home while it is off, keeping its history, and shows it again once it is on', async () => {
-  const { core, garage, handle, send } = await start()
-  send(homeChat.id, 'Remember this')
-  handle({ type: 'chat.interrupt', chatId: homeChat.id })
-  handle({ type: 'chat.create', name: 'Space' })
-  handle({ type: 'extension.setEnabled', extensionId: home.id, enabled: false })
-  expect(core.chats().map((c) => c.name)).toEqual(['Space'])
-  expect(readFileSync(join(garage, 'chats', homeChat.id, 'log.jsonl'), 'utf8')).toContain('Remember this')
+it('is always on: a saved switch from when Home could be turned off is dropped, and it can\'t be turned off', async () => {
+  const { core, garage, handle } = await start({ extensions: { home: { enabled: false } } })
+  expect(core.chats().map((c) => c.id)).toEqual([homeChat.id])
+  expect(JSON.parse(readFileSync(join(garage, 'settings.json'), 'utf8')).extensions?.home?.enabled).toBeUndefined()
+  const info = core.extensions().find((e) => e.id === home.id)!
+  expect(info).toMatchObject({ enabled: true, alwaysOn: true, ownsChat: true })
+  expect(() => handle({ type: 'extension.setEnabled', extensionId: home.id, enabled: false })).toThrow(
+    "Home is part of Kothar and can't be turned off",
+  )
   handle({ type: 'extension.setEnabled', extensionId: home.id, enabled: true })
-  expect(core.chats().map((c) => c.name)).toEqual([homeChat.name, 'Space'])
+  expect(core.chats().map((c) => c.id)).toEqual([homeChat.id])
+})
+
+it('keeps Home\'s role editable, and sends the edit', async () => {
+  const { core, handle, send } = await start()
+  expect(core.extensions().find((e) => e.id === home.id)!.prompts).toContainEqual(
+    expect.objectContaining({ id: 'role', label: 'Home’s role', where: 'instructions' }),
+  )
+  handle({ type: 'extension.prompt.set', extensionId: home.id, promptId: 'role', text: 'You are terse.' })
+  const session = send(homeChat.id, 'Hi')
+  expect(session.options.instructions.startsWith('You are terse.')).toBe(true)
 })

@@ -354,7 +354,7 @@ folder and go when the chat is deleted. Kothar's own files there are out of reac
 `memory` listed.
 
 `everyChatStorage()` returns `{ chatId, storage }[]`: the `chatStorage` of every chat Kothar keeps, including chats
-the user can't see right now, such as Home while its extension is off. It's for housekeeping across chats, such as
+the user can't see right now, such as an extension's own chat while that extension is off. It's for housekeeping across chats, such as
 showing how much disk your files take or deleting them all. It isn't for reading chats the user can't see. It needs
 `memory` listed. Memory's Settings readout uses it:
 

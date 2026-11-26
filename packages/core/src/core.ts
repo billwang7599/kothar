@@ -155,7 +155,14 @@ function assembleCore(options: {
   const savedApprovals = readApprovals(garage) ?? {}
   const heldOn = [...community].filter(([id, c]) => c.held && settings.extensions?.[id]?.enabled === true)
   for (const [id] of heldOn) settings.extensions = { ...settings.extensions, [id]: { ...settings.extensions?.[id], enabled: false } }
-  if (heldOn.length) saveSettings()
+  // An always-on extension's switch from when it had one (Home could be turned off) is dropped, so Settings never
+  // holds an "off" that does nothing.
+  const switchless = extensions.filter((e) => e.alwaysOn && !community.has(e.id) && settings.extensions?.[e.id]?.enabled !== undefined)
+  for (const { id } of switchless) {
+    const { enabled: _, ...rest } = settings.extensions![id]!
+    settings.extensions = { ...settings.extensions, [id]: rest }
+  }
+  if (heldOn.length || switchless.length) saveSettings()
   const brokenExtensions = options.brokenExtensions ?? []
   // Extensions whose saved settings failed to migrate at load, and why; shown on the extension like a load error.
   const settingsErrors = new Map<string, string>()
@@ -172,6 +179,7 @@ function assembleCore(options: {
   const switchedOn = (extension: Extension) => {
     const saved = settings.extensions?.[extension.id]?.enabled
     if (community.has(extension.id)) return communityOn() && saved === true
+    if (extension.alwaysOn) return true
     return typeof saved === 'boolean' ? saved : extension.enabledByDefault
   }
   // Whether an extension runs: its switch is on (switchedOn), and so is every extension it requires, all the way down.

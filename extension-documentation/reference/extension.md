@@ -21,6 +21,7 @@ after it cover each group in detail.
 
 | Field | What it adds | Page |
 |---|---|---|
+| `alwaysOn` | Built-in extensions only: part of Kothar, with no switch. It isn't listed under Built-in extensions, its page sits under Options, and a saved "off" is ignored. Home sets it. A community extension's is ignored | — |
 | `settings` | Settings on the extension's own page in Settings | [Settings and setup](settings.md) |
 | `spaceSettings` | Settings kept per space, shown in the extension's panels | [Settings and setup](settings.md#settings-per-space) |
 | `settingsVersion`, `migrateSettings` | Updating saved settings once when their shape changes | [Settings and setup](settings.md#migrating-saved-settings) |
@@ -53,8 +54,8 @@ after it cover each group in detail.
 
 ## Chats
 
-`chats` gives an extension chats of its own. Home is one: the built-in Home extension declares a single chat, and its
-tools let that chat make spaces.
+`chats` gives an extension chats of its own. Home is one: the built-in Home extension (always on, see `alwaysOn`)
+declares a single chat, and its tools let that chat make spaces.
 
 ```ts
 import type { Extension } from '@kothar/extension-api'

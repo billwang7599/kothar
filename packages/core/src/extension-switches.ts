@@ -96,6 +96,10 @@ export function openExtensionSwitches(deps: ExtensionSwitchDeps) {
   let approvals = deps.approvals
 
   const setExtensionEnabled = (extension: Extension, enabled: boolean) => {
+    if (extension.alwaysOn && !community.has(extension.id)) {
+      if (enabled) return
+      throw new Error(`${extension.name} is part of Kothar and can't be turned off`)
+    }
     if (community.has(extension.id) && !communityOn() && enabled) {
       throw new Error(`Turn on community extensions before turning on ${extension.name}`)
     }

@@ -453,6 +453,9 @@ export type ExtensionInfo = {
   loadError?: string
   // It has a chat of its own (Home). A setup can't leave it out of that chat, so setup forms don't list it.
   ownsChat?: boolean
+  // Part of Kothar (Extension.alwaysOn, such as Home): always on, with no switch, so it isn't listed among the
+  // extensions; its page sits under Options.
+  alwaysOn?: true
   // Its prompts the user can edit (Extension.prompts, and each tool's description), as sent now.
   prompts?: PromptInfo[]
   // It adds instructions the user can't edit: an instructions hook (or a memory's) with no 'instructions' prompt.

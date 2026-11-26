@@ -1016,6 +1016,10 @@ export type Extension = {
   name: string
   description: string
   enabledByDefault: boolean
+  // Part of Kothar rather than an add-on, such as Home: always on, with no switch, and not listed among the
+  // extensions. Its page (settings, prompts) shows under Options instead. A saved "off" is ignored. Built-in
+  // extensions only: a community extension's is ignored, as those always start off.
+  alwaysOn?: boolean
   settings?: ExtensionSetting[]
   // Other extensions, by id, this one works with when they're there: features of its own turn on while they're on
   // (check with host.extensionEnabled) and it's told when they switch (onDependencyChanged). It runs without them.

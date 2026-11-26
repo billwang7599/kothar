@@ -17,9 +17,11 @@ const home: Extension = {
   id: 'home',
   name: 'Home',
   description:
-    'A main chat beside your spaces: your assistant for general questions and personal tasks. It can list, read ' +
-    'and message every space, and make new ones. Off hides it; its history stays.',
+    'The main chat beside your spaces: your assistant for general questions and personal tasks. It can list, read ' +
+    'and message every space, and make new ones.',
   enabledByDefault: true,
+  // Part of Kothar, not an add-on, but still written on the public API: it proves an extension can own a chat.
+  alwaysOn: true,
   prompts: [{ id: 'role', label: 'Home’s role', text: INSTRUCTIONS, where: 'instructions' }],
   chats: [{ id: HOME_ID, name: 'Home', instructions: INSTRUCTIONS, prompt: 'role', seesAll: true }],
   tools: [

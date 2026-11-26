@@ -11,7 +11,8 @@ import { linked, SettingRow } from './rows.tsx'
 import type { Page, PageProps } from './types.ts'
 
 export function ExtensionsPage({ extensions: all, connected, send }: PageProps) {
-  const extensions = all.filter((m) => !m.community)
+  // Always-on ones (Home) are part of Kothar, with no switch: their pages sit under Options.
+  const extensions = all.filter((m) => !m.community && !m.alwaysOn)
   const [setupFor, setSetupFor] = useState<string>()
   const [setupShown, setSetupShown] = useState(false)
   const extension = extensions.find((m) => m.id === setupFor && m.enabled)
@@ -183,7 +184,8 @@ function ExtensionSettingsView({ extension, connected, send }: SetupProps) {
 // An extension with something to set (settings, a setup, a settings view or prompts) gets a page, as in Obsidian; one without
 // gets none. Each page starts with the same header, saying what it is, whether it's on and what it may do, then its
 // setup, settings and settings view. It keeps its page while off. A community extension's page shows while community
-// extensions are on (its switch and details are in Community hub too).
+// extensions are on (its switch and details are in Community hub too). An always-on one's page (Home) sits under
+// Options, as part of Kothar, with no switch.
 export const hasPage = (extension: ExtensionInfo) =>
   !!(extension.setup || extension.settings.length || extension.settingsView || extension.prompts?.length)
 
@@ -192,13 +194,13 @@ export const extensionPages = (extensions: ExtensionInfo[], communityExtensions:
     .filter((extension) => (!extension.community || communityExtensions) && hasPage(extension))
     .map((extension) => ({
       id: `extension:${extension.id}`,
-      group: 'Extensions',
+      group: extension.alwaysOn ? 'Options' : 'Extensions',
       title: extension.name,
       body: ({ connected, send }: PageProps) => <ExtensionPage extension={extension} connected={connected} send={send} />,
     }))
 
 function ExtensionPage({ extension, connected, send }: SetupProps) {
-  const { enabled, community } = extension
+  const { enabled, community, alwaysOn } = extension
   // A community extension's settings view draws only while it runs; a built-in's, while off too.
   const shownOff = !!extension.settingsView && !community
   const uses = community?.uses ?? extension.uses
@@ -212,19 +214,21 @@ function ExtensionPage({ extension, connected, send }: SetupProps) {
             <span className="block text-faint" data-testid="extension-kind">
               {community
                 ? `Community extension · ${community.version}${community.author ? ` by ${community.author}` : ''}`
-                : 'Built-in extension'}
+                : alwaysOn
+                  ? 'Part of Kothar'
+                  : 'Built-in extension'}
             </span>
             {extension.blocked && <BlockedLine text={extension.blocked} />}
           </>
         }
         below={extension.loadError && <ErrorText>Couldn't load: {extension.loadError}</ErrorText>}
       >
-        <Switch
+        {!alwaysOn && <Switch
           label={`${extension.name} on`}
           checked={enabled}
           disabled={!connected || (!community && extension.loadError !== undefined) || (!enabled && extension.blocked !== undefined)}
           onChange={(on) => send({ type: 'extension.setEnabled', extensionId: extension.id, enabled: on })}
-        />
+        />}
       </SettingRow>
       {uses && <SettingRow name={community ? 'Uses' : 'What it does'} description={<UsesList uses={uses} />} />}
       {enabled && extension.setup && <ExtensionSetupRow extension={extension} connected={connected} send={send} />}

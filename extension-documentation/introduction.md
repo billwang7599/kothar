@@ -64,7 +64,7 @@ them only through their headless mode. That limit is what lets one extension wor
 | **Space** | A top-level chat with its own context: folders, files and instructions. Its agent works in the space's own work folder. |
 | **Lead** | The agent behind a space. It plans, does small tasks itself and hands bigger ones to workers. |
 | **Worker** | A chat a lead starts below its own space for one task. Its final reply wakes the lead. Older versions of Kothar called these subagents. |
-| **Home** | Your personal assistant: one pinned chat beside your spaces that can see and message all of them. It's a built-in extension. |
+| **Home** | Your personal assistant: one pinned chat beside your spaces that can see and message all of them. It's part of Kothar and always on, written as a built-in extension. |
 | **Built-in extension** | An extension that ships with Kothar, such as Home, Processes or Browser. |
 | **Community extension** | An extension someone else wrote, installed from the Marketplace or from a folder. |
 | **Garage** | The folder where Kothar keeps settings, accounts, chats and each extension's files. On a Mac it's `~/Library/Application Support/Kothar/`. |

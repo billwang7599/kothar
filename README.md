@@ -64,7 +64,8 @@ What works today:
 - **Engines:** Claude Code, Codex, OpenCode and pi, with saved accounts for each.
 - **Spaces:** a folder becomes a space whose lead agent streams its replies, tool calls and permission requests. Chats
   survive a restart.
-- **Home:** a personal assistant that sees every space and can make new ones.
+- **Home:** the main chat, a personal assistant that sees every space and can make new ones. It's part of Kothar and
+  always on; its role prompt is editable in Settings → Home.
 - **Workers:** a lead can hand tasks to workers that run beside it, and extensions start them for their own work. They're
   part of Kothar, not an extension: Settings → Workers sets whether agents may start them, how many one chat runs at
   once (every worker counts, an extension's too; more wait for a slot), and the instructions agents get about them.
@@ -103,7 +104,7 @@ What works today:
   `\[…\]` as blocks, `$…$` and `\(…\)` inline. Dollar amounts ("$5 and $10") stay text, a block still streaming stays
   text until it closes, and a formula KaTeX can't read shows its source in red. Notes' editor draws math the same way,
   showing a formula's source while the cursor is in it.
-- **Setups, themes, the marketplace,** and the built-in extensions in `extensions/`: Artifacts, Browser, Git, Home,
+- **Setups, themes, the marketplace,** and the built-in extensions in `extensions/`: Artifacts, Browser, Git,
   Inspector, MCP servers, Memory, Notes, Pins, Plan, Processes, Reconnect, Skills, Deep Research and Account rotation. MCP servers connects
   GitHub, Linear, Notion and other MCP servers to every engine through Kothar, which is their only client, so keys stay in Kothar
   and each call is asked for and recorded. Browser lets agents browse in your own Chrome, with your logins, through

@@ -97,6 +97,7 @@ export function openExtensionSettings(deps: ExtensionSettingsDeps) {
       ...(view && { settingsView: view }),
       ...(settingsError && { loadError: settingsError }),
       ...(extension.chats?.length && { ownsChat: true }),
+      ...(extension.alwaysOn && !community.has(id) && { alwaysOn: true as const }),
       ...(prompts.length && { prompts }),
       ...(fixedInstructions && { fixedInstructions }),
       ...(extension.requires?.length && { requires: [...extension.requires] }),
