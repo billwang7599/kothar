@@ -331,6 +331,13 @@ export type ChatInfo = PermissionSwitches & {
   thinking?: ThinkingLevel
   workDir?: string
   worktrees?: Record<string, Worktree>
+  // Spaces only: each worker's own branches, by worker id, while they run and until their changes are reviewed.
+  workerBranches?: Record<string, WorkerBranch>
+  // Spaces only: a shell script run in each worktree made for a worker, before its first turn (npm ci, copying .env).
+  setupScript?: string
+  // Workers only: 'own' works in worktrees of its own (worker-checkouts.ts); 'shared' (or absent, for workers from
+  // before) in the space's checkouts. Set when the worker is made.
+  checkout?: WorkerCheckout
   // The mode the user picked for a folder that isn't a git repo, by path: a folder of this chat's or one it inherits.
   // A folder without one takes the nearest chat above's, else DEFAULT_FOLDER_MODE (folder-modes.ts).
   folderModes?: Record<string, FolderMode>
@@ -377,6 +384,23 @@ export const isUnread = (chat: Pick<ChatInfo, 'doneAt' | 'readAt'>) =>
 
 // from: the branch the folder was on when it was checked out.
 export type Worktree = { path: string; branch: string; from?: string }
+
+// A worker's own checkout of one git folder (worker-checkouts.ts): its worktree and branch, the commit the branch was
+// made from, and the space's branch it merges into.
+export type WorkerRepo = { folder: string; path: string; branch: string; base: string; into: string }
+// What a worker changed in one repo since its branch was made: files and lines against the base (committed and not),
+// its commits, and how many paths are uncommitted.
+export type WorkerRepoChanges = { folder: string; files: number; added: number; removed: number; uncommitted: number; commits: number }
+// A worker's branches, kept on its space (ChatInfo.workerBranches) since the worker goes once it reports. working: the
+// worker runs; review: it's gone and its changes wait for Merge, Squash, Discard or Keep; kept: the user left them.
+export type WorkerBranchState = 'working' | 'review' | 'kept'
+export type WorkerBranch = {
+  name: string
+  createdAt: string
+  state: WorkerBranchState
+  repos: WorkerRepo[]
+  changes?: WorkerRepoChanges[]
+}
 
 /**
  * Where a pinned space sat before it was pinned, among the spaces of its group (or the ungrouped ones): the ids of the
@@ -464,7 +488,11 @@ export type PromptInfo = {
 
 // Settings → Workers: whether agents may start workers (spawn_worker), how many one chat runs at once (-1: no limit;
 // extensions' workers count too), and the instructions chats that may start them get.
-export type WorkersSettings = { start: boolean; limit: number; instructions: PromptInfo }
+// ownCheckouts: whether a new worker gets worktrees of its own, unless its spawn says otherwise (default on).
+export type WorkersSettings = { start: boolean; limit: number; ownCheckouts: boolean; instructions: PromptInfo }
+
+export type WorkerCheckout = 'own' | 'shared'
+export const MAX_SETUP_SCRIPT = 20_000
 
 export type ExtensionInfo = {
   id: string
@@ -601,7 +629,9 @@ export type Upload = { name: string; mimeType: string; base64: string }
 
 // A worker's final reply to its lead: which worker, and why its turn ended early, if it did. from: an extension's
 // report of its own background work instead (ExtensionHost.report), by the extension's id, which chatId is then too.
-export type WorkerReport = { chatId: string; name: string; error?: string; from?: string }
+// changes: one line per repo for a worker with its own checkouts that changed something (worker-checkouts.ts
+// changesText), so the lead knows there's work to review.
+export type WorkerReport = { chatId: string; name: string; error?: string; from?: string; changes?: string[] }
 
 // steering: handed to the running turn, waiting for its next tool boundary; it can't be taken back.
 export type QueuedMessage = {
@@ -706,6 +736,8 @@ export type ClientMessage =
   | { type: 'chat.setPermission'; chatId: string; name: PermissionSwitch; enabled?: boolean }
   // The chat's own allowed SSH hosts, or none to take its space's or Settings' again.
   | { type: 'chat.setSshHosts'; chatId: string; hosts?: SshHost[] }
+  // A space's setup script for its workers' own worktrees; empty or absent: none.
+  | { type: 'chat.setSetupScript'; chatId: string; script?: string }
   // steer: hand it to the running turn if its engine can steer; otherwise, or without it, it waits for the turn to end.
   | { type: 'chat.send'; chatId: string; text: string; attachments?: Upload[]; steer?: boolean }
   | { type: 'chat.unqueue'; chatId: string; id: string }
@@ -757,7 +789,7 @@ export type ClientMessage =
   // Saves the user's edit of one of an extension's prompts; without text (or with the default), back to the default.
   | { type: 'extension.prompt.set'; extensionId: string; promptId: string; text?: string }
   // Settings → Workers. text undefined: the instructions go back to their default.
-  | { type: 'workers.set'; start?: boolean; limit?: number }
+  | { type: 'workers.set'; start?: boolean; limit?: number; ownCheckouts?: boolean }
   // Settings → Engines → Tools: a master switch (every engine's without engine), one tool (on absent: back to its
   // default), or every tool of an engine back to its default.
   | { type: 'engineTools.setEnabled'; engine?: string; enabled: boolean }

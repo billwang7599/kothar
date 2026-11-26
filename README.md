@@ -73,6 +73,12 @@ What works today:
 - **Workers:** a lead can hand tasks to workers that run beside it, and extensions start them for their own work. They're
   part of Kothar, not an extension: Settings → Workers sets whether agents may start them, how many one chat runs at
   once (every worker counts, an extension's too; more wait for a slot), and the instructions agents get about them.
+  In a space with git folders, each worker gets its **own worktree** on a branch of its own (`kothar-worker/…`), made
+  from the space's checkout, so workers running side by side never edit the same files. A space's **Worker setup
+  script** (its General tab) runs in each new worktree first, such as `npm ci`; if it fails, the worker stops and its
+  lead is told. When the worker reports, its changes (files, lines, commits, uncommitted) come with the report and wait
+  for review; one that changed nothing leaves no branch behind. An agent can pass `checkout: "shared"` for a task that
+  only reads, and **Own worktree per worker** in Settings → Workers turns it off for every new worker.
 - **Extensions that work together:** each session is told what it can use (Kothar's tools and every extension's, one
   line each, made from their names and descriptions) and to combine them on its own, such as handing a deep research
   run to a worker. Workers get the same tools as their lead. The intro is editable in Settings → Prompts.

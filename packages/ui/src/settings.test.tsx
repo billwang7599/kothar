@@ -138,6 +138,7 @@ function renderSettings(
 test('Settings → Workers: agents’ switch, the limit for every child, and the instructions as an editable prompt', () => {
   const workers: WorkersSettings = {
     start: true,
+    ownCheckouts: true,
     limit: 4,
     instructions: { id: 'instructions', label: 'When to start workers', where: 'instructions', default: 'Delegate.', text: 'Delegate.' },
   }

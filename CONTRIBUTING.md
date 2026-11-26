@@ -155,6 +155,19 @@ Why some things are the way they are. Add one when you make a choice the next co
   extension had: **Let agents start workers** (the old switch, so turning it off still takes `spawn_worker` and its
   instructions away), **Max running per chat**, and the instructions as an editable prompt. A setup keeps its chats
   from starting workers with `workers: false` (older setups' `extensionsOff: ['workers']` reads as that).
+- **Workers get worktrees of their own, and their branches belong to the space.** Workers sharing the space's
+  checkout clashed when two ran at once, so a worker in a space with git folders gets its own worktree of each, made in
+  code (as every checkout is) from the space checkout's current commit, under `<work>/<space>/workers/<id>/`, on
+  `kothar-worker/<space>/<id>-<task>`. Not `kothar/<space>/…`: git can't keep `kothar/<space>` and a branch below it.
+  Its work folder stays the space's, so its sandbox and scratch files are as before; only its checkouts differ, and its
+  sandbox may not move the space's branch or another worker's. A worker is removed once it reports, so what its branch
+  holds is kept on the space (`chat.json`'s `workerBranches`, plain JSON, by worker id), not on the worker; a restart
+  that drops a worker settles its entry at startup. A worker that changed nothing leaves nothing. Nothing deletes work
+  silently: merging commits what's left first, discarding is only ever the user's (or a lead's, on the user's
+  approval) call, and deleting the space commits each worker's leftovers and keeps every branch with commits of its
+  own. A quiet child (an extension's own work, such as research) shares the space's checkout unless it asks, since it
+  rarely edits a repo and a worktree per search would be waste. `workers.ts` only gains the switch
+  (`checkout: 'shared'` when off); the rest is `worker-checkouts.ts`.
 - **One limit counts every worker.** Max running per chat counts every running child of a chat, `spawn_worker`'s and
   extensions' (quiet ones too), so an extension can't run past the user's limit. Over it, `spawn_worker` fails, so the
   agent knows and can wait or stop one; an extension's worker waits for a slot instead, because the extension's work
@@ -388,6 +401,8 @@ the full API reference. Built-in extensions in `extensions/` follow the same API
 - The core creates every checkout and removes them when a space is deleted (design rule 10). Optional cleanup of merged
   work belongs to an extension; see `extensions/git/cleanup.ts`. A repo with no commits yet isn't checked out: it's a
   plain folder with its mode until its first commit (`hasNoCommits` in `checkouts.ts`), so `checkouts` lacks it.
+- A child chat you start with `host.createChat({ parentId })` shares the space's checkouts when it's quiet, and follows
+  Settings → Workers (its own worktree by default) when it isn't. Pass `checkout: 'own'` or `'shared'` to choose.
 - If the API lacks something, add the smallest generic change to `packages/extension-api/index.ts` and the core in its
   own PR, update `extension-documentation/reference/`, then build the extension on top.
 

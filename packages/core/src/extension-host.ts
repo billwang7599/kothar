@@ -239,7 +239,7 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
     const dir = join(deps.garage, 'extensions', extension.id)
     const chatStorageOf = (chat: C) => storageAt(chat.dir, `${extension.name}'s files in this chat`, deps.chatOwnFiles)
     const host: ExtensionHost = {
-      createChat({ name: given, folders, files, engine, parentId, role, quiet, showReport, task }) {
+      createChat({ name: given, folders, files, engine, parentId, role, quiet, showReport, task, checkout }) {
         if (task !== undefined && (typeof task !== 'string' || !task.trim())) throw new Error('A worker’s task is text')
         const name = (given ?? (task === undefined ? '' : workerName(task))) as string
         if (parentId === undefined) {
@@ -247,11 +247,21 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
           if (role !== undefined) throw new Error('Only a child chat (with parentId) takes a role')
           if (quiet !== undefined) throw new Error('Only a child chat (with parentId) can be quiet')
           if (showReport !== undefined) throw new Error('Only a quiet child chat can show its report')
+          if (checkout !== undefined) throw new Error('Only a child chat (with parentId) takes a checkout')
           return deps.createChat({ name, folders, files, engine })
         }
         if (showReport === true && quiet !== true) throw new Error('Only a quiet child chat can show its report')
         const shows = quiet === true && showReport === true
-        const info = deps.createChild(String(parentId), { name, engine, role, folders, files, ...(quiet === true && { quiet }), ...(shows && { showReport }) })
+        const info = deps.createChild(String(parentId), {
+          name,
+          engine,
+          role,
+          folders,
+          files,
+          ...(quiet === true && { quiet }),
+          ...(shows && { showReport }),
+          ...(checkout !== undefined && { checkout }),
+        })
         deps.activity.emit(String(parentId), () => ({
           kind: 'worker',
           by: extension,

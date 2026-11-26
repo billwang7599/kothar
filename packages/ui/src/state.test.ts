@@ -57,6 +57,7 @@ const extensions = [extensionInfo('browser'), extensionInfo('other')]
 const workers = {
   start: true,
   limit: 4,
+  ownCheckouts: true,
   instructions: { id: 'instructions', label: 'When to start workers', where: 'instructions' as const, default: 'D', text: 'D' },
 }
 const noLists = { chat: [], planning: [], searching: [], workers: [] }

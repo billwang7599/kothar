@@ -757,6 +757,42 @@ function WorkFolderRow({ chatId, path, disabled, send, errors }: {
   )
 }
 
+export const SETUP_SCRIPT_ABOUT = 'Runs in each new worker worktree before its first message, such as npm ci.'
+
+// A space's setup script for its workers' own worktrees, saved when the field loses focus.
+function SetupScriptRow({ chatId, script, disabled, send }: {
+  chatId: string
+  script: string
+  disabled: boolean
+  send: (m: ClientMessage) => void
+}) {
+  const [draft, setDraft] = useState(script)
+  const [saved, setSaved] = useState(script)
+  if (saved !== script) {
+    setSaved(script)
+    setDraft(script)
+  }
+  return (
+    <section className="flex flex-col gap-4" aria-label="Worker setup script">
+      <h3 className="font-semibold">Worker setup script</h3>
+      <span className="text-xs text-muted">{SETUP_SCRIPT_ABOUT}</span>
+      <textarea
+        className="block w-full resize-y px-8 py-6 font-mono text-xs leading-[1.5] focus:border-accent disabled:text-muted"
+        aria-label="Worker setup script"
+        placeholder="npm ci"
+        rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+        spellCheck={false}
+        value={draft}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== script) send({ type: 'chat.setSetupScript', chatId, ...(draft.trim() && { script: draft }) })
+        }}
+      />
+    </section>
+  )
+}
+
 /** A tab's how-it-works notes, folded under one quiet line until asked for. */
 function About({ intro, notes }: { intro: string; notes: readonly { label: string; about: string }[] }) {
   return (
@@ -913,6 +949,9 @@ export function ContextPanel(props: ContextPanelProps) {
             send={send}
             errors={props.terminalErrors}
           />
+        )}
+        {shown === 'general' && chat && !chat.parentId && !chat.extension && (
+          <SetupScriptRow chatId={chatId} script={chat.setupScript ?? ''} disabled={locked} send={send} />
         )}
         {shown === 'general' && chat && (
           <Permissions chat={chat} above={above} workFolder={workFolder} disabled={locked} send={send} />

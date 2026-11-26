@@ -126,7 +126,11 @@ Kothar, so this needs no other extension:
   sidebar unless you give a `name`. Without a `task`, give a `name` and send its first message with `send`.
 
 - It's listed under its parent, and it's view only: you can watch it and stop it, not write to it.
-- It works in its space's work folder and checkouts, so it takes no `folders` or `files` of its own.
+- It works in its space's work folder, so it takes no `folders` or `files` of its own. In a space with git folders,
+  `checkout: 'own'` gives it a worktree of each on a branch of its own, made from the space's checkout, and its changes
+  wait in its report for review (merge, squash, discard or keep); `checkout: 'shared'` has it work in the space's
+  checkouts. Without `checkout`, a quiet child shares and any other follows **Settings → Workers → Own worktree per
+  worker** (on by default).
 - It sees its parent's memory as it was at launch.
 - It runs on the model list named by `role`: `chat`, `workers` (the default), or a role an extension that's on declares
   ([`modelRoles`](extension.md#model-roles)), such as Deep Research's `searching`. Any other role is refused. Use

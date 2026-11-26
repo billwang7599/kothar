@@ -206,7 +206,7 @@ test('Unpin takes a space out of Pinned and back into the spaces list, and pinni
     modelLists: { chat: [], planning: [], searching: [], workers: [] },
     setups: [],
     memory: {},
-    workers: { start: true, limit: 4, instructions: { id: 'i', label: 'i', where: 'instructions', default: '', text: '' } },
+    workers: { start: true, limit: 4, ownCheckouts: true, instructions: { id: 'i', label: 'i', where: 'instructions', default: '', text: '' } },
     corePrompts: [],
     workFolder: { defaultPath: '/g/work', canSandbox: true },
     themes: [],

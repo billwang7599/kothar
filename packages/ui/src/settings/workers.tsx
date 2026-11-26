@@ -37,6 +37,17 @@ export function WorkersPage({ workers, connected, send }: Props) {
             onChange={(start) => send({ type: 'workers.set', start })}
           />
         </SettingRow>
+        <SettingRow
+          name="Own worktree per worker"
+          description="Each worker gets its own branch and worktree of each git folder, so workers never clash. Its changes wait in its report to be merged or discarded. Off: workers share the space’s checkout."
+        >
+          <Switch
+            label="Own worktree per worker"
+            checked={workers.ownCheckouts}
+            disabled={!connected}
+            onChange={(ownCheckouts) => send({ type: 'workers.set', ownCheckouts })}
+          />
+        </SettingRow>
         <ExtensionSettingRow
           setting={LIMIT}
           value={workers.limit}

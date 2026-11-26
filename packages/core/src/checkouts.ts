@@ -14,7 +14,8 @@ const GIT_WRITABLE = ['objects', 'refs', 'logs', 'worktrees', 'packed-refs*', 'F
 // Moving a branch checked out in another worktree would show there as staged changes.
 const PROTECT_CHECKED_OUT_BRANCHES = true
 
-export type Checkout = { folder: string; worktree: Worktree; writable: string[]; readOnly: string[] }
+// own: a worker's own worktree (worker-checkouts.ts), not the space's.
+export type Checkout = { folder: string; worktree: Worktree; writable: string[]; readOnly: string[]; own?: boolean }
 export type GitAccess = { writable: string[]; readOnly: string[] }
 
 /** What the checkouts need of a space: its saved info. */

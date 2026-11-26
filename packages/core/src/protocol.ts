@@ -14,6 +14,7 @@ import { searchChats } from './search.ts'
 import {
   CONTEXT_SECTIONS,
   isUnread,
+  MAX_SETUP_SCRIPT,
   type ChatInfo,
   type ClientMessage,
   type ContextItem,
@@ -191,6 +192,14 @@ export function openProtocol(deps: ProtocolDeps) {
       deps.checkActive(chat)
       return deps.updateChat(chat, { sshHosts: hosts })
     },
+    'chat.setSetupScript': (message) => {
+      const chat = chatFor(message.chatId)
+      if (chat.info.parentId !== undefined || chat.info.extension) throw new Error('Only a space has a setup script')
+      if (message.script !== undefined && typeof message.script !== 'string') throw new Error('A setup script is text')
+      if ((message.script?.length ?? 0) > MAX_SETUP_SCRIPT) throw new Error(`A setup script is at most ${MAX_SETUP_SCRIPT} characters`)
+      deps.checkActive(chat)
+      return deps.updateChat(chat, { setupScript: message.script?.trim() ? message.script : undefined })
+    },
     search: (message, reply) => {
       const spaces = deps.shownChats().filter((c) => !c.info.worker)
       const hits = searchChats(
@@ -305,7 +314,7 @@ export function openProtocol(deps: ProtocolDeps) {
     'terminal.set': (message) => deps.setTerminal(message.terminal),
     'editor.set': (message) => deps.setEditor(message.editor, message.command),
     'memory.set': (message) => deps.setMemory(optionalText(message.engine), optionalText(message.model)),
-    'workers.set': (message) => deps.workers.set({ start: message.start, limit: message.limit }),
+    'workers.set': (message) => deps.workers.set({ start: message.start, limit: message.limit, ownCheckouts: message.ownCheckouts }),
     'workers.prompt.set': (message) => deps.workers.setInstructions(typeof message.text === 'string' ? message.text : undefined),
     'engineTools.setEnabled': (message) => deps.engineTools.setEnabled(message.engine, message.enabled),
     'engineTools.setTool': (message) => deps.engineTools.setTool(message.engine, message.tool, message.on),

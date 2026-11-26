@@ -54,7 +54,8 @@ import { lockGarage } from './garage-lock.ts'
 import { recordingMachine, stopLeftovers } from './process-records.ts'
 import { openFolderAccess, realOr } from './folder-access.ts'
 import { openFileLinks } from './file-links.ts'
-import { openCheckouts } from './checkouts.ts'
+import { openCheckouts, type Checkout } from './checkouts.ts'
+import { changesText, hasChanges, openWorkerCheckouts, workerWorkDirOf } from './worker-checkouts.ts'
 import { openFolderCopies } from './folder-copies.ts'
 import { placeAccess, placesOf } from './folder-modes.ts'
 import { extensionPicture, extensionStorageDir } from './extension-files.ts'
@@ -724,7 +725,8 @@ function assembleCore(options: {
     workDirOf: (chat) => workDirOf(chat),
     sandboxIn,
     attachmentsDirOf: (chat) => attachmentsDirOf(chat),
-    checkoutOf: (space, folder, workDir, sandboxed) => checkoutOf(space, folder, workDir, sandboxed),
+    checkoutOf: (space, folder, workDir, sandboxed, chat) => checkoutOf(space, folder, workDir, sandboxed, chat),
+    workerChanges: (chat) => workerChanges(chat),
     copyOf: (space, folder, workDir) =>
       copies.copyOf(space, folder, workDir).finally(() => broadcastContext(space)),
     viewOf,
@@ -845,6 +847,7 @@ function assembleCore(options: {
     removeWorkDir: (chat) => removeWorkDir(chat),
     queueMessage: (chat, message) => setQueue(chat, [...chat.queue, { id: randomUUID().slice(0, 8), ...message }]),
     hasGroup: spaceGroups.has,
+    ownCheckouts: () => workers.ownCheckouts(),
   })
   loadAll()
   const groupActions = openGroupActions({
@@ -983,10 +986,80 @@ function assembleCore(options: {
     return space.info.workDir!
   }
 
-  const { checkoutOf, gitAccess, removeWorkDir } = openCheckouts<Chat>({
+  const { checkoutOf: spaceCheckoutOf, gitAccess, removeWorkDir: removeSpaceWorkDir } = openCheckouts<Chat>({
     machine,
     saveWorktrees: (space, worktrees) => updateChat(space, { worktrees }),
   })
+
+  // Workers' own checkouts (worker-checkouts.ts): kept on their space, since a worker goes once it reports.
+  const workerCheckouts = openWorkerCheckouts<Chat>({
+    machine,
+    now,
+    saveBranches: (space, workerBranches) => {
+      if (chats.get(space.info.id) === space) updateChat(space, { workerBranches })
+    },
+  })
+  const ownsCheckouts = (chat: Chat) => !!chat.info.worker && chat.info.checkout === 'own'
+  // The space a worker's branches are kept on, while it's still there (not mid-delete with it).
+  const spaceOfWorker = (chat: Chat) => {
+    let at: Chat | undefined = chat
+    while (at?.info.parentId !== undefined) at = chats.get(at.info.parentId)
+    return at && at !== chat && !at.info.extension ? at : undefined
+  }
+
+  // A git folder checked out for a turn: the space's checkout, or for a worker with its own checkouts a worktree of
+  // its own made from it, with the space's setup script run in it once it's made. Its sandbox may not move the branch
+  // of the space's checkout or any other worker's.
+  const checkoutOf = async (space: Chat, folder: string, workDir: string, sandboxed: boolean, chat?: Chat): Promise<Checkout> => {
+    if (!chat || !ownsCheckouts(chat) || space.info.extension) return spaceCheckoutOf(space, folder, workDir, sandboxed)
+    const shared = await spaceCheckoutOf(space, folder, workDir, false)
+    const own = workerWorkDirOf(workDir, chat.info.id)
+    const { worktree, made } = await workerCheckouts.checkoutOf(space, chat, folder, shared.worktree, own)
+    const script = space.info.setupScript?.trim()
+    if (made && script) {
+      append(chat, { at: now().toISOString(), type: 'extension.note', text: `Running the space's setup script in ${worktree.path}…` })
+      const { ok, code, output } = await workerCheckouts.runSetup(script, worktree.path)
+      const shown = output ? `\n\n\`\`\`\n${output}\n\`\`\`` : ''
+      append(chat, {
+        at: now().toISOString(),
+        type: 'extension.note',
+        text: `${ok ? 'Setup script done' : `Setup script failed (exit ${code})`} in ${worktree.path}${shown}`,
+      })
+      if (!ok) throw new Error(`The space's setup script failed in ${worktree.path} (exit ${code})${output ? `: ${output.slice(-500)}` : ''}`)
+    }
+    const access = sandboxed ? await gitAccess(folder, own) : { writable: [], readOnly: [] }
+    return { folder, worktree, ...access, own: true }
+  }
+
+  // A chat goes: a space takes its workers' worktrees with it (their leftovers committed first), and a worker's own
+  // branches wait on its space for review, or go when it changed nothing.
+  const removeWorkDir = async (chat: Chat) => {
+    if (chat.info.worker) {
+      const space = ownsCheckouts(chat) ? spaceOfWorker(chat) : undefined
+      if (space) await workerCheckouts.settle(space, chat.info.id)
+      return
+    }
+    await workerCheckouts.removeAll(chat).catch((error) => broadcast({ type: 'error', message: messageOf(error) }))
+    await removeSpaceWorkDir(chat)
+  }
+
+  // A worker with its own checkouts reports: what it changed there, as lines for its lead. Undefined at once for a
+  // worker with none made (no git folders, or sharing the space's), so its report goes out as it always did.
+  const workerChanges = (chat: Chat) => {
+    const space = ownsCheckouts(chat) ? spaceOfWorker(chat) : undefined
+    if (!space?.info.workerBranches?.[chat.info.id]) return undefined
+    return workerCheckouts.summarize(space, chat.info.id).then((entry) => (entry && hasChanges(entry.changes) ? changesText(entry) : undefined))
+  }
+
+  // Workers whose branches were still `working` when Kothar last stopped (loadAll has run) are gone now, or will be:
+  // their changes wait for review.
+  for (const space of [...chats.values()]) {
+    for (const [id, entry] of Object.entries(space.info.workerBranches ?? {})) {
+      if (entry.state === 'working' && !chats.has(id)) {
+        workerCheckouts.settle(space, id).catch((error) => console.error(`Kothar couldn't settle worker ${id}'s branches:`, error))
+      }
+    }
+  }
 
   // Where a command an extension starts for a chat runs, and its sandbox: the chat's own, over the space's work folder
   // and the checkouts it has now. Nothing is checked out for it.

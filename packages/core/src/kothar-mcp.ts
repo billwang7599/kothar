@@ -14,7 +14,7 @@ type Hub = {
   chats(): ChatState[]
   seesAll(chatId: string): boolean
   // A worker below parentId: the same call an extension's host.createChat makes with a parentId.
-  createChild(parentId: string, spec: { name: string; role?: ModelRole }): ChatInfo
+  createChild(parentId: string, spec: { name: string; role?: ModelRole; checkout?: 'own' | 'shared' }): ChatInfo
   // The model roles extensions on for this chat declare (Extension.modelRoles): what its spawn_worker may name.
   roles(chatId: string): ExtensionModelRole[]
   send(chatId: string, text: string): void
@@ -137,20 +137,24 @@ const TOOLS: Record<string, Tool> = {
       'user picked for workers. Its final reply comes back to you as a message when its turn ends, so ' +
         "don't poll it. Give a role, if any are listed, to run it on that role's models instead. It uses this chat's setup and gets the same " +
       'tools as this chat (deep research, notes, MCP servers and the rest), so it can run any of them for you. Returns ' +
-      'its id.',
+      'its id. In a space with git folders it works on a branch and worktree of its own by default, and its changes ' +
+      'wait in its report for review; give checkout "shared" for a task that only reads, so it works in your checkout ' +
+      'instead.',
     // The roles are the ones extensions on for this chat declare (Plan's planning, Deep Research's searching); with
     // none, there's no role to give.
     input: (hub, caller) => {
       const roles = hub.roles(caller.id)
       const [first, ...rest] = roles.map((role) => role.id)
-      if (first === undefined) return z.object({ task: z.string().min(1) })
+      const checkout = z.enum(['own', 'shared']).optional()
+      if (first === undefined) return z.object({ task: z.string().min(1), checkout })
       const about = roles.map((role) => `${role.id}: ${role.label}${role.description ? ` (${role.description})` : ''}`)
       return z.object({
         task: z.string().min(1),
         role: z.enum([first, ...rest]).optional().describe(`Which models it runs on. ${about.join('; ')}.`),
+        checkout,
       })
     },
-    run({ hub, caller }: Context, { task, role }: { task: string; role?: ModelRole }) {
+    run({ hub, caller }: Context, { task, role, checkout }: { task: string; role?: ModelRole; checkout?: 'own' | 'shared' }) {
       // Every running child counts, an extension's too (Deep Research's searches), so the user's limit holds.
       const { limit } = hub.workers(caller.id)
       const running = hub.chats().filter((c) => c.parentId === caller.id && c.worker && c.status !== 'idle').length
@@ -161,7 +165,7 @@ const TOOLS: Record<string, Tool> = {
         )
       }
       const name = workerName(task)
-      const chat = hub.createChild(caller.id, { name, ...(role && { role }) })
+      const chat = hub.createChild(caller.id, { name, ...(role && { role }), ...(checkout && { checkout }) })
       hub.send(chat.id, task)
       return { chatId: chat.id }
     },

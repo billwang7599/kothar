@@ -27,6 +27,7 @@ import {
   type ModelRole,
   type NewChat,
   type QueuedMessage,
+  type WorkerCheckout,
   type Setup,
 } from './shared.ts'
 
@@ -38,6 +39,9 @@ export type ChatSpec = NewChat & {
   setup?: string
   quiet?: boolean
   showReport?: boolean
+  // A worker's checkouts: its own worktrees or the space's. Absent: Settings → Workers for an agent's or a shown
+  // worker, the space's for a quiet one (an extension's own work, such as research, rarely edits a repo).
+  checkout?: WorkerCheckout
 }
 
 export type ChatLifecycleDeps = {
@@ -77,6 +81,8 @@ export type ChatLifecycleDeps = {
   queueMessage: (chat: Chat, message: Omit<QueuedMessage, 'id'>) => void
   // Whether a sidebar group with this id exists (groups.ts).
   hasGroup: (id: string | undefined) => boolean
+  // Settings → Workers: whether a new worker gets worktrees of its own by default.
+  ownCheckouts: () => boolean
 }
 
 // Why a worker Kothar's quit or crash cut off reported early, in its report to its lead.
@@ -229,6 +235,7 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
         parentMessages: parentMessages.length,
         ...(spec.quiet === true && { quiet: true as const }),
         ...(spec.quiet === true && spec.showReport === true && { showReport: true as const }),
+        checkout: spec.checkout ?? (spec.quiet !== true && deps.ownCheckouts() ? 'own' : 'shared'),
       }),
       folders,
       files,
@@ -248,11 +255,21 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
   }
 
   // A chat below another, for one task: what spawn_worker and an extension's host.createChat with a parentId both make.
-  const createChild = (parentId: string, spec: NewChat & { role?: ModelRole; quiet?: boolean; showReport?: boolean }) => {
+  const createChild = (parentId: string, spec: NewChat & { role?: ModelRole; quiet?: boolean; showReport?: boolean; checkout?: WorkerCheckout }) => {
     if (spec.folders?.length || spec.files?.length) throw new Error('A child chat takes its folders from its space')
     if (spec.role !== undefined && !deps.liveRole(spec.role)) throw new Error(`Unknown role "${spec.role}"`)
+    if (spec.checkout !== undefined && spec.checkout !== 'own' && spec.checkout !== 'shared') throw new Error('A checkout is "own" or "shared"')
     const quiet = spec.quiet === true
-    return createChat({ name: spec.name, engine: spec.engine, parentId, worker: true, role: spec.role, quiet, showReport: quiet && spec.showReport === true })
+    return createChat({
+      name: spec.name,
+      engine: spec.engine,
+      parentId,
+      worker: true,
+      role: spec.role,
+      quiet,
+      showReport: quiet && spec.showReport === true,
+      ...(spec.checkout && { checkout: spec.checkout }),
+    })
   }
 
   const renameChat = (chat: Chat, name: unknown) => {

@@ -144,7 +144,8 @@ export type ChatEntry = { at: string } & (
   | { type: 'user.message'; text: string; attachments?: Attachment[]; midTurn?: true }
   // quiet: a quiet child's report, logged for the user (NewChatSpec.showReport); it didn't start a turn.
   // from: an extension's report (ExtensionHost.report), by that extension's id; chatId is then the extension's id too.
-  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true; from?: string }
+  // changes: a worker with its own checkouts changed something there, one line per repo; it waits for review.
+  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true; from?: string; changes?: string[] }
   | { type: 'permission.resolved'; requestId: string; allow: boolean; auto?: true }
   | { type: 'question.resolved'; requestId: string; answers?: Answers }
   // panel: clicking the note opens that panel of the extension's, then sends it action. card: drawn as a card.
@@ -348,6 +349,10 @@ export type NewChatSpec = {
   // like any worker's, and in the parent's memory), so the user can read it, but it isn't queued for the parent's agent
   // and doesn't wake it. For quiet workers the user may want to see, such as research workers.
   showReport?: boolean
+  // Only with parentId, in a space with git folders: 'own' gives the child a branch and worktree of its own per git
+  // folder, made from the space's checkout, whose changes wait in its report for review (merge or discard); 'shared'
+  // has it work in the space's checkouts. Absent: Settings → Workers' default for a shown child, 'shared' for a quiet one.
+  checkout?: 'own' | 'shared'
 }
 
 // A result of an extension's background work, for ExtensionHost.report.

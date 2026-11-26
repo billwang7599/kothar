@@ -112,7 +112,11 @@ export type TurnDeps = {
   workDirOf: (chat: Chat) => string
   sandboxIn: (dir: string) => Sandbox | undefined
   attachmentsDirOf: (chat: Chat) => string
-  checkoutOf: (space: Chat, folder: string, workDir: string, sandboxed: boolean) => Promise<Checkout>
+  // chat: the chat the turn is for; a worker with its own checkouts gets its own worktree (worker-checkouts.ts).
+  checkoutOf: (space: Chat, folder: string, workDir: string, sandboxed: boolean, chat: Chat) => Promise<Checkout>
+  // A worker with its own checkouts is reporting: its changes as lines for the lead, if it made any. Undefined (not a
+  // promise) for a worker with no checkouts of its own, whose report then goes at once.
+  workerChanges?: (chat: Chat) => Promise<string[] | undefined> | undefined
   copyOf: (space: Chat, folder: string, workDir: string) => Promise<{ path: string }>
 
   // What a session is told
@@ -204,7 +208,7 @@ export function sessionPlaceOf(
   const sections = instructionSections({
     ...parts,
     ...(sandbox && { workDir }),
-    checkouts: checkouts.map(({ folder, worktree }) => ({ folder, path: worktree.path, branch: worktree.branch })),
+    checkouts: checkouts.map(({ folder, worktree, own }) => ({ folder, path: worktree.path, branch: worktree.branch, ...(own && { own }) })),
     folders: places,
   })
   const instructions = sections.map((section) => section.text).join('\n\n')
@@ -364,10 +368,23 @@ export function openTurns(deps: TurnDeps) {
     finishTurn(chat, end.error)
   }
 
-  // What follows a turn that's over: a worker reports and goes, queued messages run.
+  // What follows a turn that's over: a worker reports and goes, queued messages run. A worker with its own checkouts
+  // first sums up what it changed there, for its report.
   const finishTurn = (chat: Chat, error?: string) => {
+    const reports = chat.info.worker && !chat.info.quiet && parentOf(chat)
+    const changes = reports ? deps.workerChanges?.(chat) : undefined
+    if (!changes) return finishWith(chat, error)
+    changes.then(
+      (changes) => finishWith(chat, error, changes),
+      () => finishWith(chat, error),
+    )
+  }
+
+  const finishWith = (chat: Chat, error?: string, changes?: string[]) => {
+    // Deleted while its changes were summed up: it's gone, as a worker deleted mid-turn is.
+    if (!chats.has(chat.info.id) || isQuitting()) return
     const parent = chat.info.worker && !chat.info.quiet ? parentOf(chat) : undefined
-    if (parent) reportErrors(() => enqueue(parent, reportOf(chat, error)))
+    if (parent) reportErrors(() => enqueue(parent, reportOf(chat, error, changes)))
     showReport(chat, error)
     if (chat.queue.length) reportErrors(() => sendQueue(chat))
     // Workers are there for one task: once the lead has their reply, they go. The reply lives on in the lead's log.
@@ -421,11 +438,11 @@ export function openTurns(deps: TurnDeps) {
     reportErrors(() => append(parent, { at: now().toISOString(), type: 'worker.report', text, ...report, quiet: true }))
   }
 
-  const reportOf = (chat: Chat, error?: string) => {
+  const reportOf = (chat: Chat, error?: string, changes?: string[]) => {
     const asked = chat.entries.findLastIndex((e) => e.type === 'user.message')
     const reply = chat.entries.slice(asked + 1).findLast((e) => e.type === 'text.completed')
     const text = reply?.type === 'text.completed' ? reply.text : ''
-    return { text, report: { chatId: chat.info.id, name: chat.info.name, ...(error && { error }) } }
+    return { text, report: { chatId: chat.info.id, name: chat.info.name, ...(error && { error }), ...(changes?.length && { changes }) } }
   }
 
   const limitWatchers = () => extensions.filter((extension) => isOn(extension) && extension.onLimitReached)
@@ -704,7 +721,7 @@ export function openTurns(deps: TurnDeps) {
     // Checkouts and copies are made once, before the first session that needs them, and kept.
     const prepare = async () => {
       const checkouts: Checkout[] = []
-      for (const folder of repos) checkouts.push(await checkoutOf(space, folder, workDir, sandbox !== undefined))
+      for (const folder of repos) checkouts.push(await checkoutOf(space, folder, workDir, sandbox !== undefined, chat))
       const copies: Record<string, string> = {}
       for (const folder of copied) copies[folder] = (await copyOf(space, folder, workDir)).path
       return { checkouts, copies }
