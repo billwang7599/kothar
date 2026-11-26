@@ -6,6 +6,7 @@
   "exports": {
     "./shared": "./src/shared.ts",
     "./catalog-check": "./src/catalog-check.ts",
+    "./cli-access": "./src/cli-access.ts",
     "./main": "./src/main.ts",
     "./fake": "./src/adapters/fake.ts",
     "./test-machine": "./src/adapters/test-machine.ts",

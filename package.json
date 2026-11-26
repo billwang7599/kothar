@@ -9,7 +9,8 @@
     "dev": "export KOTHAR_DEV=1 KOTHAR_TOKEN=$(node -p 'crypto.randomUUID()'); npm run dev -w @kothar/core & npm run dev -w @kothar/ui & wait",
     "desktop": "npm run build -w @kothar/ui && electron packages/desktop",
     "package": "npm run package -w @kothar/desktop",
-    "typecheck": "tsc -p packages/core && tsc -p packages/ui && tsc -p packages/desktop && tsc -p extensions && tsc -p bench",
+    "kothar": "node packages/cli/src/main.ts",
+    "typecheck": "tsc -p packages/core && tsc -p packages/cli && tsc -p packages/ui && tsc -p packages/desktop && tsc -p extensions && tsc -p bench",
     "test": "vitest run --passWithNoTests",
     "lint": "oxlint",
     "bench:memory": "node bench/memory/run.ts"

@@ -68,6 +68,7 @@ packages/
     src/kothar-mcp.ts    the MCP server Kothar gives every agent (zoom, date, spawn_worker, ...)
   ui/              React app (Tailwind, Radix, Motion), talking to the core over a WebSocket (@kothar/ui)
   desktop/         Electron shell that runs the core and serves the built UI (@kothar/desktop)
+  cli/             the kothar command, a WebSocket client of a running core (@kothar/cli)
   extension-api/   @kothar/extension-api: the public extension types, MIT, types only
 extensions/<id>/   the built-in extensions, each default-exporting an Extension from index.ts
 extension-documentation/   the extension author docs
@@ -286,6 +287,16 @@ Why some things are the way they are. Add one when you make a choice the next co
   its own version: workers for subagents, Processes for background shells, Skills, Plan), and **outside** (off: they
   act where Kothar can't see, stop or log them, such as schedules, notifications and publishing). A tool an engine
   reports that its adapter doesn't know yet is on, marked new, and asks before each use.
+- **The CLI has a token of its own, taken only without an Origin.** The core's WebSocket checks Origin and the UI's
+  token. A running core also writes `<garage>/cli.json` (its port and a second token, mode 0600; `cli-access.ts`),
+  removed on close, and the server takes that token only on a socket with no `Origin` header. Browsers always send
+  Origin on a WebSocket, so no web page can use it, while any other origin is still refused outright. The UI's token
+  is never written to disk, and a process that can read the garage could already read every chat, so the file adds no
+  new reach. A separate Unix socket would have meant a second server path to keep in step; this reuses the protocol
+  the UI speaks, so the CLI gets every message type for free. `kothar new` has no reply to wait on, so it takes the
+  `chat.added` with its name and real folder path; `send --wait` follows the chat from the moment its own message is
+  logged, and acts on a permission request only once the chat is `waiting`, since the core logs a request before its
+  rules answer it.
 - **Extensions name capabilities, never engine tools.** An extension says what it stands in for with
   `replaces: ['background-shell']`; each adapter maps its own tool names to those capabilities (`Adapter.tools`), so
   engine names stay inside adapters and a community extension turns off the right tool on every engine.

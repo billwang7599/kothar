@@ -37,7 +37,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
-async function start(port = 0) {
+async function start(port = 0, cliToken?: string) {
   const garage = mkdtempSync(join(tmpdir(), 'kothar-test-'))
   const project = mkdtempSync(join(tmpdir(), 'kothar-test-'))
   const core = openCore({
@@ -57,6 +57,7 @@ async function start(port = 0) {
     port,
     uiOrigin: origin,
     token,
+    cliToken,
   })
   cleanups.push(() => server.close())
   const base = `ws://127.0.0.1:${server.port}`
@@ -83,6 +84,29 @@ it('rejects other origins', async () => {
     )
     expect(status).toBe(403)
   }
+})
+
+it("takes the CLI's token only from a socket with no Origin, and the UI's only from the UI's origin", async () => {
+  const cliToken = 'cli-token-0123456789'
+  const { base } = await start(0, cliToken)
+  const closeOf = (query: string, headers: { origin?: string }) => {
+    const { socket, messages } = connect(`${base}/?token=${query}`, headers)
+    return new Promise<{ code: number; messages: CoreMessage[] }>((resolve) =>
+      socket.on('close', (code) => resolve({ code, messages })),
+    )
+  }
+  // The wrong token for each kind of client is refused before anything is sent.
+  for (const [query, headers] of [[token, {}], [cliToken, { origin }]] as const) {
+    expect(await closeOf(query, headers)).toEqual({ code: BAD_TOKEN_CLOSE_CODE, messages: [] })
+  }
+  // Another origin is still refused outright, whichever token it brings.
+  const evil = connect(`${base}/?token=${cliToken}`, { origin: 'http://evil.example' })
+  expect(
+    await new Promise<number>((resolve) => evil.socket.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0))),
+  ).toBe(403)
+  const cli = connect(`${base}/?token=${cliToken}`, {})
+  await until(() => cli.messages.length > 0)
+  expect(cli.messages[0]?.type).toBe('snapshot')
 })
 
 it('rejects with a readable error when the port is taken, leaving nothing uncaught', async () => {

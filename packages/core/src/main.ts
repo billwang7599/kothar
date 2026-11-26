@@ -9,6 +9,7 @@ import { codex } from './adapters/codex.ts'
 import { createFakeAdapter } from './adapters/fake.ts'
 import { opencode } from './adapters/opencode.ts'
 import { pi } from './adapters/pi.ts'
+import { newCliToken, writeCliAccess } from './cli-access.ts'
 import { openCore } from './core.ts'
 import { loadCommunityExtensions, loadExtensions } from './extensions.ts'
 import { localMachine } from './machine.ts'
@@ -90,7 +91,9 @@ export async function startCore(
   const work = envVar(env, 'WORK')
   if (work) core.setWorkFolder(work)
   await core.refreshEngines()
-  const server = await startServer({ core, port, uiOrigin: uiUrl, token, uiDir })
+  const cliToken = newCliToken()
+  const server = await startServer({ core, port, uiOrigin: uiUrl, token, uiDir, cliToken })
+  const removeCliAccess = writeCliAccess(garage, { port: server.port, token: cliToken, pid: process.pid })
   // Sessions need the server's MCP address, so what was queued before the last quit runs only now.
   core.resume()
   return {
@@ -101,6 +104,7 @@ export async function startCore(
     token,
     openUrl: `${uiUrl}/#token=${encodeURIComponent(token)}`,
     close: async (force = false) => {
+      removeCliAccess()
       await Promise.all([core.close(force), server.close()])
     },
   }

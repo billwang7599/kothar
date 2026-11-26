@@ -34,8 +34,11 @@ export async function startServer(options: {
   uiOrigin: string
   token: string
   uiDir?: string
+  // The kothar CLI's token (cli-access.ts), taken only on a WebSocket with no Origin, which no browser can open.
+  // Without it, such sockets are refused as before.
+  cliToken?: string
 }) {
-  const { core, port, uiOrigin, token } = options
+  const { core, port, uiOrigin, token, cliToken } = options
   const uiDir = options.uiDir && resolve(options.uiDir)
   const serveUi: RequestListener = (request, response) => {
     if (!uiDir) return response.writeHead(426).end()
@@ -117,7 +120,8 @@ export async function startServer(options: {
   })
   const wss = new WebSocketServer({
     server: http,
-    verifyClient: (info, accept) => accept(info.origin === uiOrigin, 403, 'Origin not allowed'),
+    verifyClient: (info, accept) =>
+      accept(info.origin === uiOrigin || (!info.req.headers.origin && !!cliToken), 403, 'Origin not allowed'),
   })
   const send = (socket: WebSocket, message: CoreMessage) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
@@ -127,7 +131,9 @@ export async function startServer(options: {
 
   wss.on('connection', (socket, request) => {
     const given = new URL(request.url ?? '/', 'ws://core').searchParams.get('token') ?? ''
-    if (!sameToken(given, token)) return socket.close(BAD_TOKEN_CLOSE_CODE, 'Missing or wrong token')
+    // The UI's origin takes the UI's token; a socket with no Origin (the CLI) takes only the CLI's.
+    const expected = request.headers.origin ? token : cliToken
+    if (!expected || !sameToken(given, expected)) return socket.close(BAD_TOKEN_CLOSE_CODE, 'Missing or wrong token')
     send(socket, {
       type: 'snapshot',
       engines: core.engines(),

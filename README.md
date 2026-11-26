@@ -136,6 +136,27 @@ What works today:
 
 Not built yet: remote machines, sandboxing outside macOS, a published signed release, and sync.
 
+## Command line
+
+`kothar` drives a running Kothar (the app or `npm run dev`) from a terminal or a script. It isn't in the DMG yet: run
+it from a clone with `npm run kothar -- <command>`, or put it on your path with `npm link -w @kothar/cli`.
+
+```sh
+kothar list                          # spaces and their workers, with status (--json for scripts)
+kothar new ~/code/app --name App     # make a space on a folder; prints its id
+kothar send App "fix the failing test" --wait
+                                     # stream the reply; exit when the turn ends
+kothar status App                    # status, engine, model, queue, what it's waiting for
+kothar read App --last 5             # the latest messages (--tools adds tool calls)
+kothar stop App                      # stop the running turn
+kothar approve App                   # approve the permission request it's waiting on (or deny)
+```
+
+A chat is named by its id, the start of one, or a space's name; Home is `home`. `send --wait` exits 0 when the turn
+ends, 1 if it failed, 3 when it stops at a permission request or a question (the chat keeps waiting for `approve`,
+`deny` or the app), and 4 after `--timeout`. `--approve` approves every request during the wait; leave it off unless
+you'd have clicked Approve on all of them anyway. Ctrl+C leaves the turn running.
+
 ## Building the Mac app
 
 `npm run package` builds `packages/desktop/release/Kothar-<version>-arm64.dmg` (Apple Silicon). With a Developer ID
