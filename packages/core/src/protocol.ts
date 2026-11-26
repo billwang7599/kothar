@@ -26,6 +26,7 @@ import {
   type Setup,
 } from './shared.ts'
 import { checkSwitch } from './settings.ts'
+import { checkSshHosts } from './ssh-hosts.ts'
 import { messageOf } from './util.ts'
 import type { Workers } from './workers.ts'
 import type { GroupActions, Groups } from './groups.ts'
@@ -85,6 +86,7 @@ export type ProtocolDeps = {
   setEngineEnabled: (engine: string, enabled: boolean) => void
   setWorkFolder: (path: unknown) => void
   setPermissionDefault: (name: unknown, enabled: boolean) => void
+  setSshHostsDefault: (hosts: unknown) => void
   setTerminal: (terminal: unknown) => void
   setMemory: (engine?: string, model?: string) => void
   workers: Pick<Workers, 'set' | 'setInstructions'>
@@ -181,6 +183,12 @@ export function openProtocol(deps: ProtocolDeps) {
       const name = checkSwitch(message.name)
       deps.checkActive(chat)
       return deps.updateChat(chat, { [name]: typeof message.enabled === 'boolean' ? message.enabled : undefined })
+    },
+    'chat.setSshHosts': (message) => {
+      const chat = chatFor(message.chatId)
+      const hosts = message.hosts === undefined ? undefined : checkSshHosts(message.hosts)
+      deps.checkActive(chat)
+      return deps.updateChat(chat, { sshHosts: hosts })
     },
     search: (message, reply) => {
       const spaces = deps.shownChats().filter((c) => !c.info.worker)
@@ -287,6 +295,7 @@ export function openProtocol(deps: ProtocolDeps) {
     'engine.setEnabled': (message) => deps.setEngineEnabled(String(message.engine), message.enabled === true),
     'workFolder.set': (message) => deps.setWorkFolder(message.path),
     'permission.setDefault': (message) => deps.setPermissionDefault(message.name, message.enabled === true),
+    'permission.setSshHosts': (message) => deps.setSshHostsDefault(message.hosts),
     'terminal.set': (message) => deps.setTerminal(message.terminal),
     'editor.set': (message) => deps.setEditor(message.editor, message.command),
     'memory.set': (message) => deps.setMemory(optionalText(message.engine), optionalText(message.model)),

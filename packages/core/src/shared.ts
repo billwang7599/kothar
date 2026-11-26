@@ -261,7 +261,15 @@ export type PermissionSwitch = keyof typeof PERMISSION_DEFAULTS
 
 export const PERMISSION_SWITCHES = Object.keys(PERMISSION_DEFAULTS) as PermissionSwitch[]
 
-export type PermissionSwitches = Partial<Record<PermissionSwitch, boolean>>
+// A server the user trusts for ssh, scp, sftp and rsync: commands that reach only these run without asking, even with
+// network commands asking, and may use the listed key. host: a name, optionally user@ in front and *. as its first part
+// (any subdomain). key: an identity file (~/ or absolute); without one, no -i key is let through for the host.
+export type SshHost = { host: string; key?: string }
+
+// The switches, and the allowed SSH hosts: like a switch, the nearest layer with a list of its own wins.
+export type PermissionSwitches = Partial<Record<PermissionSwitch, boolean>> & { sshHosts?: SshHost[] }
+
+export const sshHostsOf = (...layers: PermissionSwitches[]) => layers.find((layer) => layer.sshHosts !== undefined)?.sshHosts ?? []
 
 export const switchedOn = (name: PermissionSwitch, ...layers: PermissionSwitches[]) =>
   layers.find((layer) => layer[name] !== undefined)?.[name] ?? PERMISSION_DEFAULTS[name]
@@ -662,6 +670,8 @@ export type ClientMessage =
   // thinking level of its own, or none to take the list's.
   | { type: 'chat.setModel'; chatId: string; engine?: string; model?: string; thinking?: ThinkingLevel }
   | { type: 'chat.setPermission'; chatId: string; name: PermissionSwitch; enabled?: boolean }
+  // The chat's own allowed SSH hosts, or none to take its space's or Settings' again.
+  | { type: 'chat.setSshHosts'; chatId: string; hosts?: SshHost[] }
   // steer: hand it to the running turn if its engine can steer; otherwise, or without it, it waits for the turn to end.
   | { type: 'chat.send'; chatId: string; text: string; attachments?: Upload[]; steer?: boolean }
   | { type: 'chat.unqueue'; chatId: string; id: string }
@@ -705,6 +715,7 @@ export type ClientMessage =
   | { type: 'instructions.write'; text: string }
   | { type: 'workFolder.set'; path: string }
   | { type: 'permission.setDefault'; name: PermissionSwitch; enabled: boolean }
+  | { type: 'permission.setSshHosts'; hosts: SshHost[] }
   | { type: 'extension.setEnabled'; extensionId: string; enabled: boolean }
   | { type: 'extension.setValue'; extensionId: string; key: string; value: string | number | boolean }
   // Saves the user's edit of one of an extension's prompts; without text (or with the default), back to the default.

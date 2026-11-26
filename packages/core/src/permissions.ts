@@ -5,12 +5,15 @@ import type { PermissionRequest, PermissionVerdict } from '@kothar/extension-api
 import { editableOf, placeOf, refusedEditWhy, type FolderPlace } from './folder-modes.ts'
 import { realPath } from './machine.ts'
 import { isReadOnlyCommand, isSecret, mentionsSecret, searchReachesSecret, secretPathsOf } from './read-only.ts'
-import { ASK_FIRST_COMMANDS, switchedOn, type PermissionSwitch, type PermissionSwitches } from './shared.ts'
+import { sshHostsOf, switchedOn, type PermissionSwitch, type PermissionSwitches } from './shared.ts'
+import { ASKS_FIRST, trustsSshHosts } from './ssh-hosts.ts'
 import { within } from './util.ts'
 
 export const OUTSIDE_EDIT_ADVICE =
   "Work there, or ask the user to add the folder in the chat's Context panel and set its mode to Edit in place."
-export const ASKS_FIRST = new RegExp(`\\b(?:${ASK_FIRST_COMMANDS.map((c) => c.replaceAll(' ', '\\s+')).join('|')})\\b`)
+export { ASKS_FIRST }
+// The rule of an answer for a command that reaches only allowed SSH hosts.
+export const SSH_HOSTS_RULE = 'Allowed SSH hosts'
 
 export type PermissionContext = {
   // Where the session runs: relative paths start here.
@@ -108,6 +111,8 @@ export const decide = (request: PermissionRequest, context: PermissionContext): 
   if (request.kind !== 'shell' || request.command === undefined) return
   if (on('autoRead') && isReadOnlyCommand(request.command, reading)) return { allow: true, rule: `${switchRule('autoRead')} (a command that only reads)` }
   if (!sandboxed || !on('autoRunCommands')) return
+  // ssh, scp, sftp and rsync to allowed hosts, with their listed keys, run even while network commands ask.
+  if (trustsSshHosts(request.command, sshHostsOf(...switches), sandboxedReading)) return { allow: true, rule: SSH_HOSTS_RULE }
   if (!on('autoNetworkCommands') && ASKS_FIRST.test(request.command)) return
   if (mentionsSecret(request.command, sandboxedReading)) return
   return { allow: true, rule: envFiles && /\.env\b/.test(request.command) ? switchRule('autoRunCommands', 'autoEnvCommands') : switchRule('autoRunCommands') }

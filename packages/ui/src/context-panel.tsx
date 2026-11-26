@@ -6,6 +6,7 @@ import {
   FOLDER_MODES,
   GLOBAL_CONTEXT,
   PERMISSION_SWITCHES,
+  sshHostsOf,
   switchedOn,
   type ClientMessage,
   type CommandInfo,
@@ -28,6 +29,7 @@ import { PanelTabs, type TabEntry } from './panel-tabs.tsx'
 import { revealLater } from './search.tsx'
 import { ExtensionViewer, whileStale } from './extension-view.tsx'
 import { SETUP_HINT } from './setups-page.tsx'
+import { SSH_HOSTS_ABOUT, SSH_HOSTS_LABEL, SshHostsEditor } from './ssh-hosts.tsx'
 import { choosePanelTab, extensionTabId, usePanelTab } from './panel-tab.ts'
 import { folderName, lineOf, panelKey, terminalKey, type ChatView, type State } from './state.ts'
 
@@ -100,7 +102,7 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
 }
 // While Allow all is on, the other switches are folded away: kept, but not used.
 export const switchesShown = (allowAll: boolean) => (allowAll ? (['allowAll'] as PermissionSwitch[]) : PERMISSION_SWITCHES)
-export const FOLDED_SWITCHES = `${PERMISSION_SWITCHES.length - 1} more switches, not used while Allow all is on`
+export const FOLDED_SWITCHES = `${PERMISSION_SWITCHES.length - 1} more switches and the allowed SSH hosts, not used while Allow all is on`
 const PERMISSIONS_HINT =
   'Each shows Settings → Work folder until you pick, or for a worker, its space. A pick is for this chat only.'
 const EMPTY_SECTION: Record<ContextSection, string> = {
@@ -624,7 +626,10 @@ function Permissions({ chat, above, workFolder, disabled, send }: {
   return (
     <section className="flex flex-col gap-8" aria-label="Permissions">
       <h3 className="font-semibold">Permissions</h3>
-      <About intro={PERMISSIONS_HINT} notes={PERMISSION_SWITCHES.map((name) => PERMISSIONS[name])} />
+      <About
+        intro={PERMISSIONS_HINT}
+        notes={[...PERMISSION_SWITCHES.map((name) => PERMISSIONS[name]), { label: SSH_HOSTS_LABEL, about: SSH_HOSTS_ABOUT }]}
+      />
       {switchesShown(switchedOn('allowAll', chat, ...above, workFolder)).map((name) => {
         const { label, amberWhileOn } = PERMISSIONS[name]
         const on = switchedOn(name, chat, ...above, workFolder)
@@ -650,7 +655,20 @@ function Permissions({ chat, above, workFolder, disabled, send }: {
           </div>
         )
       })}
-      {switchedOn('allowAll', chat, ...above, workFolder) && <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>}
+      {switchedOn('allowAll', chat, ...above, workFolder) ? (
+        <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>
+      ) : (
+        <SshHostsEditor
+          hosts={sshHostsOf(chat, ...above, workFolder)}
+          disabled={disabled}
+          onChange={(hosts) => send({ type: 'chat.setSshHosts', chatId: chat.id, hosts })}
+          inherited={{
+            from: above.some((c) => c.sshHosts !== undefined) ? `its ${CHAT_NOUN.one}` : 'Settings',
+            own: chat.sshHosts !== undefined,
+            reset: () => send({ type: 'chat.setSshHosts', chatId: chat.id }),
+          }}
+        />
+      )}
     </section>
   )
 }

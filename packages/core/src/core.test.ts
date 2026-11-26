@@ -1293,6 +1293,25 @@ describe('commands', () => {
     expect(resolved(t).map((e) => e.auto)).toEqual([true])
   })
 
+  it('runs ssh to an allowed host without asking, from Settings or the chat, and saves both lists', async () => {
+    const t = setup(commandScript('ssh build.example.com make'))
+    expect(await turn(t)).toBe('waiting')
+    t.handle({ type: 'permission.setSshHosts', hosts: [{ host: ' build.example.com ' }] })
+    expect(t.core.workFolder()).toMatchObject({ sshHosts: [{ host: 'build.example.com' }] })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).sshHosts).toEqual([{ host: 'build.example.com' }])
+    expect(await turn(t)).toBe('idle')
+    expect(resolved(t).map((e) => e.auto)).toEqual([true])
+    // A chat's own list, even an empty one, stands over Settings'; none takes Settings' again.
+    t.handle({ type: 'chat.setSshHosts', chatId: 'main', hosts: [] })
+    expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8')).sshHosts).toEqual([])
+    expect(await turn(t)).toBe('waiting')
+    t.handle({ type: 'chat.setSshHosts', chatId: 'main' })
+    expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8'))).not.toHaveProperty('sshHosts')
+    expect(() => t.handle({ type: 'permission.setSshHosts', hosts: [{ host: 'not a host' }] })).toThrow(/isn't a host/)
+    t.handle({ type: 'permission.setSshHosts', hosts: [] })
+    expect(t.core.workFolder()).not.toHaveProperty('sshHosts')
+  })
+
   it('asks before every command once the default is off, and saves the default in settings.json', async () => {
     const t = setup(commandScript('npm test'))
     t.handle({ type: 'permission.setDefault', name: 'autoRunCommands', enabled: false })

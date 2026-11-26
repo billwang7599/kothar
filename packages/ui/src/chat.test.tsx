@@ -407,10 +407,45 @@ test('while Allow all is on, the Permissions section folds the other switches aw
   expect(PERMISSION_SWITCHES[0]).toBe('allowAll')
   render({ allowAll: true, autoNetworkCommands: true }, () => {}, { contextOpen: true })
   expect(shown()).toEqual(['allowAll'])
-  expect(section()).toContain(`${PERMISSION_SWITCHES.length - 1} more switches, not used while Allow all is on`)
+  expect(section()).toContain(`${PERMISSION_SWITCHES.length - 1} more switches and the allowed SSH hosts, not used while Allow all is on`)
+  expect(container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]')).toBeNull()
   render({ allowAll: false, autoNetworkCommands: true }, () => {}, { contextOpen: true })
   expect(shown()).toEqual(PERMISSION_SWITCHES)
   expect(section()).not.toContain('not used while Allow all is on')
+  expect(container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]')).not.toBeNull()
+})
+
+test("the Permissions section adds and removes a chat's allowed SSH hosts, over Settings' list", () => {
+  localStorage.setItem('kothar.panelTab', 'general')
+  const sent: ClientMessage[] = []
+  const group = () => container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]') as HTMLElement
+  const input = (label: string) => group().querySelector(`input[aria-label="${label}"]`) as HTMLInputElement
+  const buttonOf = (text: string) => [...group().querySelectorAll('button')].find((b) => b.textContent === text)
+  const typeInto = (target: HTMLInputElement, value: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(target, value)
+      target.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  const settings = [{ host: 'build.example.com' }]
+  render({}, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
+  expect(group().textContent).toContain('build.example.com')
+  expect(group().textContent).toContain('From Settings')
+  expect(buttonOf('Reset')).toBeUndefined()
+  typeInto(input('SSH host'), ' b36wang@linux.student.cs.uwaterloo.ca ')
+  typeInto(input('SSH key (optional)'), '~/.ssh/keys/uwstudent')
+  act(() => buttonOf('Add')!.click())
+  expect(sent.at(-1)).toEqual({
+    type: 'chat.setSshHosts',
+    chatId: 'c1',
+    hosts: [...settings, { host: 'b36wang@linux.student.cs.uwaterloo.ca', key: '~/.ssh/keys/uwstudent' }],
+  })
+  const own = [{ host: 'a.example.com' }, { host: 'b.example.com', key: '~/.ssh/b' }]
+  render({ sshHosts: own }, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
+  expect(group().textContent).not.toContain('build.example.com')
+  act(() => (group().querySelector('button[aria-label="Remove a.example.com"]') as HTMLButtonElement).click())
+  expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1', hosts: [own[1]] })
+  act(() => buttonOf('Reset')!.click())
+  expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1' })
 })
 
 const hintOf = async (element: Element) => {

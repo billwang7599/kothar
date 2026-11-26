@@ -173,6 +173,18 @@ Why some things are the way they are. Add one when you make a choice the next co
   unchanged when it's turned off, so turning it on is never a one-way door. The chat header shows an amber **Allow
   all** chip, like Edits anywhere, so an unguarded chat is easy to spot.
 
+- **Allowed SSH hosts trust a server and one key, not ssh in general.** A user who copies files from the same server
+  all day shouldn't need Allow all or Run network commands without asking. `sshHosts` is a list, layered like a switch
+  (the nearest chat with a list of its own wins, an empty one included). `trustsSshHosts` (`ssh-hosts.ts`) approves a
+  sandboxed command only when every ssh, scp, sftp and rsync in it reaches a listed host, any `-i` key is the one listed
+  for it, and nothing else in it would ask (another network command, any other login or key). It reads the command with
+  `read-only.ts`'s parser, which now expands plain `$NAME`/`${NAME}` set earlier in the same command (`K=~/.ssh/k`,
+  `for f in a b; do ...`), because that's how agents write these commands. It fails closed: options that run programs or
+  reach other hosts (`-o ProxyCommand`, `-J`, `-S`, `-F` other than `~/.ssh/config`, forwarding), rsync daemons, `$(...)`,
+  unset or splitting variables and `FOO=bar ssh` all ask as before. Unsandboxed chats still ask for every command. The
+  macOS sandbox only limits writes, so a trusted ssh reaches the network and reads its key; it can't add a new host to
+  `~/.ssh/known_hosts` or open a ControlMaster socket there.
+
 - **Space groups are core sidebar code, not an extension.** Groups are visual folders of spaces in the left sidebar.
   They live where spaces are ordered: a space's `group` sits in its chat.json beside `pinned` and `order`, `chat.move`
   places it, and the groups themselves (names and order) are `<garage>/groups.json`. The public extension API can add

@@ -254,7 +254,7 @@ function assembleCore(options: {
     !(chat && setupOf(chat)?.extensionsOff?.includes(extension.id) && !ownsChat(extension, chat))
   const chatsDir = join(garage, 'chats')
   mkdirSync(chatsDir, { recursive: true })
-  const { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setTerminal, setEditor } = openAppSettings({
+  const { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setSshHostsDefault, setTerminal, setEditor } = openAppSettings({
     garage,
     home,
     settings,
@@ -1063,6 +1063,7 @@ function assembleCore(options: {
     setEngineEnabled,
     setWorkFolder,
     setPermissionDefault,
+    setSshHostsDefault,
     setTerminal,
     setMemory,
     workers,
