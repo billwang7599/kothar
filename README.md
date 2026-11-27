@@ -193,3 +193,5 @@ To try a build beside your own Kothar, run it on a throwaway garage:
   licence they like.
 
 Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Website and user docs: [website/](website/README.md).
