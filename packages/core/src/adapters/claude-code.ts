@@ -265,6 +265,7 @@ export function createClaudeCode(user: UserEnv = processUserEnv()): Adapter {
   return {
     id: 'claude-code',
     name: 'Claude Code',
+    install: 'curl -fsSL https://claude.ai/install.sh | bash',
     imageInput: true,
     kotharMcp: true,
     steering: true,

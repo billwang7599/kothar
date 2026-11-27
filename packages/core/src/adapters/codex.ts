@@ -386,6 +386,7 @@ export function createCodex(user: UserEnv = processUserEnv()): Adapter {
   return {
     id: 'codex',
     name: 'Codex',
+    install: 'npm install -g @openai/codex',
     imageInput: true,
     kotharMcp: true,
     steering: true,

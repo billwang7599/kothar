@@ -118,6 +118,8 @@ export type EngineInfo = Omit<EngineStatus, 'models'> & {
   steering?: boolean
   // An agent the user added (Settings → Engines → Add ACP agent), with what they typed, to edit or remove it.
   acp?: AcpAgent
+  // The adapter's command that installs the engine (Adapter.install), shown while it isn't installed.
+  install?: string
 }
 
 export type SessionOptions = {
@@ -228,6 +230,8 @@ export interface Adapter {
   kotharMcp?: boolean
   // Its sessions have steer, so the UI can say Enter steers.
   steering?: boolean
+  // A terminal command that installs the engine, for Get started to show while detect finds none.
+  install?: string
   // The engine's built-in tools it knows, which Kothar can switch on and off per session (SessionOptions.tools,
   // noTools). Without it, the engine's tools can't be switched.
   tools?: EngineToolSpec[]
@@ -721,6 +725,8 @@ export type ChatWait = ExtensionWait & { extension: string }
 
 export type ClientMessage =
   | { type: 'engine.setEnabled'; engine: string; enabled: boolean }
+  // Runs every adapter's detect again (Get started → Check again); each engine's new status comes as engine.updated.
+  | { type: 'engines.detect' }
   // Adds an ACP agent (no id) or edits one (its id); the core answers with engines.updated.
   | { type: 'acpAgent.save'; agent: Omit<AcpAgent, 'id'> & { id?: string } }
   | { type: 'acpAgent.remove'; engine: string }

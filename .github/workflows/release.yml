@@ -132,6 +132,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # Run in the desktop package: through the root script, npm swallows --publish and electron-builder gets a bare
+        # 'never'.
+        working-directory: packages/desktop
         run: npm run package -- --publish never
 
       - name: Verify the app and the DMG
