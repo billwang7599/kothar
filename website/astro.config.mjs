@@ -18,6 +18,11 @@ export default defineConfig({
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/billwang7599/kothar' }],
       editLink: { baseUrl: 'https://github.com/billwang7599/kothar/edit/main/website/' },
       customCss: ['@fontsource-variable/inter', './src/styles/theme.css'],
+      // The same tabs, GitHub link and Download pill as the Overview and Features pages.
+      components: {
+        Header: './src/components/StarlightHeader.astro',
+        MobileMenuFooter: './src/components/StarlightMobileMenuFooter.astro',
+      },
       // Fails the build on a broken internal link.
       plugins: [starlightLinksValidator()],
       sidebar: [

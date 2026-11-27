@@ -5,7 +5,7 @@ description: Install Kothar, turn on an engine and make your first space.
 
 ## Install
 
-Kothar runs on macOS on Apple Silicon.
+Kothar runs on macOS 13 or later on Apple silicon.
 
 1. Download the latest `Kothar-<version>-arm64.dmg` from
    [GitHub Releases](https://github.com/billwang7599/kothar/releases).
@@ -13,8 +13,8 @@ Kothar runs on macOS on Apple Silicon.
 3. Open Kothar from Applications.
 
 :::note
-Kothar is in early development, and releases may not be published yet. Until then you can
-[run it from source](#run-from-source).
+Kothar is in early development. Builds are signed and notarized by Apple, but there's no auto-update yet: download new
+versions from Releases. You can also [run it from source](#run-from-source).
 :::
 
 ## Pick a work folder

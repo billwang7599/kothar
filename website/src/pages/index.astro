@@ -1,463 +1,175 @@
 ---
-import '@fontsource-variable/inter'
-import logo from '../assets/logo.svg?raw'
+import Site from '../layouts/Site.astro'
+import { githubMark } from '../lib/icons'
+import { latestRelease, REPO, RELEASES } from '../lib/release'
 
-const RELEASES = 'https://github.com/billwang7599/kothar/releases'
-const REPO = 'https://github.com/billwang7599/kothar'
+const release = await latestRelease()
+const releaseNote = [release.version, 'macOS 13+', 'Apple silicon'].filter(Boolean).join(' · ')
 
-const engines = ['Claude Code', 'Codex', 'OpenCode', 'pi', 'Any ACP agent']
-
-const features = [
+const sections = [
   {
-    title: 'Every engine, one app',
-    body: 'Bring the coding agents you already use. Kothar drives Claude Code, Codex, OpenCode, pi and any agent that speaks the Agent Client Protocol, each with your own logins.',
+    title: 'Bring your own agents.',
+    body: 'Claude Code, Codex, OpenCode, pi and any ACP agent, each signed in with your own account.',
+    link: { label: 'Engines', href: '/docs/engines/' },
   },
   {
-    title: 'Extensions that work everywhere',
-    body: 'An extension is written once and works with every engine: panels, commands, tools, permission rules. Notes, Plan, Artifacts, MCP servers, Browser and more come built in.',
+    title: 'Extend it once.',
+    body: 'An extension is written once and works with every engine. Notes, Plan, Artifacts and MCP servers come built in.',
+    link: { label: 'Extensions', href: '/docs/extensions/' },
   },
   {
-    title: 'Spaces',
-    body: 'A folder becomes a space. Its agent streams replies, tool calls and permission requests live, and every chat survives a restart.',
-  },
-  {
-    title: 'Workers',
-    body: 'An agent hands tasks to workers that run beside it, each in its own git worktree. Review what a worker changed, then merge, squash, keep or discard it.',
-  },
-  {
-    title: 'Memory',
-    body: 'Every chat remembers its whole conversation. Older messages become short summaries that agents can open back up when they need the detail.',
-  },
-  {
-    title: 'You stay in charge',
-    body: 'Agents work in a sandboxed folder on macOS. Switches decide what runs without asking, and you approve the rest from a card in the chat.',
+    title: 'Stay in charge.',
+    body: 'Agents work in a sandboxed folder. You approve the rest from a card in the chat.',
+    link: { label: 'Permissions', href: '/docs/permissions/' },
   },
 ]
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Kothar: a desktop app for running coding agents</title>
-    <meta
-      name="description"
-      content="Drive Claude Code, Codex, OpenCode, pi and any ACP agent from one desktop app, with extensions that work with every engine."
-    />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="canonical" href={new URL('/', Astro.site)} />
-    <script is:inline>
-      // Shares the docs' theme choice (Starlight keeps it under this key): 'light', 'dark' or '' for the system's.
-      const pick = localStorage.getItem('starlight-theme')
-      const dark = pick ? pick === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
-      document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-    </script>
-  </head>
-  <body>
-    <header class="bar">
-      <a class="brand" href="/" aria-label="Kothar home"><span class="mark" set:html={logo} />Kothar</a>
-      <nav>
-        <a href="/docs/">Docs</a>
-        <a href={REPO}>GitHub</a>
-        <button id="theme" type="button" aria-label="Switch between light and dark">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M12 3a9 9 0 1 0 9 9A9 9 0 0 0 12 3Zm0 16V5a7 7 0 0 1 0 14Z"
-            />
-          </svg>
-        </button>
-      </nav>
-    </header>
+<Site
+  title="Kothar: a desktop app for running coding agents"
+  description="Drive Claude Code, Codex, OpenCode, pi and any ACP agent from one desktop app, with extensions that work with every engine."
+  current="overview"
+>
+  <section class="hero wrap">
+    <h1 data-hero>One app for every coding agent.</h1>
+    <p class="sub" data-hero>Run Claude Code, Codex and more side by side, with extensions you write once.</p>
+    <div class="actions" data-hero>
+      <a class="button primary" href={release.href} data-download>Download for Mac</a>
+      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+    </div>
+    <p class="fine" data-hero>{releaseNote} · <a href={RELEASES}>All releases</a></p>
+  </section>
 
-    <main>
-      <section class="hero">
-        <span class="mark big" set:html={logo} />
-        <h1>Drive every coding agent from one place.</h1>
-        <p class="lede">
-          Kothar is a desktop app for running coding agents. Bring your own engines, give each task a space, and extend
-          it once for all of them.
-        </p>
-        <div class="actions">
-          <a class="button primary" href={RELEASES}>Download for Mac</a>
-          <a class="button" href="/docs/getting-started/">Get started</a>
-        </div>
-        <p class="fine">macOS on Apple Silicon. Early development: builds are published on GitHub Releases.</p>
-        <ul class="engines" aria-label="Engines Kothar drives">
-          {engines.map((name) => <li>{name}</li>)}
-        </ul>
+  <div class="wrap stage" data-hero>
+    <!-- PLACEHOLDER: replace with a real screenshot of a space (light and dark), 16:10, about 2400×1500. -->
+    <figure class="frame glass" data-shot>
+      <div class="placeholder">Screenshot: a space with a streaming reply, tool calls and the right panel</div>
+    </figure>
+  </div>
+
+  {
+    sections.map((s) => (
+      <section class="beat wrap" data-reveal>
+        <h2>{s.title}</h2>
+        <p>{s.body}</p>
+        <a href={s.link.href}>{s.link.label} ›</a>
       </section>
-
-      <!-- PLACEHOLDER: replace with a real screenshot of a space (light and dark), 16:10, about 2400×1500. -->
-      <figure class="shot placeholder" aria-label="Screenshot placeholder">
-        <span>Screenshot placeholder: a space with a streaming reply, tool calls and the right panel</span>
-      </figure>
-
-      <section class="grid" aria-label="Features">
-        {
-          features.map((feature) => (
-            <article>
-              <h2>{feature.title}</h2>
-              <p>{feature.body}</p>
-            </article>
-          ))
-        }
-      </section>
-
-      <section class="split">
-        <div>
-          <h2>Write an extension once</h2>
-          <p>
-            Extensions live inside individual harnesses today, so each one works with only that harness. Kothar moves
-            them up a layer. An extension touches engines only through what every engine shares: sessions, prompts,
-            streamed output, permission requests and MCP servers. So the same extension runs on Claude Code, Codex,
-            OpenCode, pi and any ACP agent.
-          </p>
-          <a href="/docs/writing-an-extension/">Writing an extension →</a>
-        </div>
-        <!-- PLACEHOLDER: replace with a screenshot of Settings → Built-in extensions, or an extension's panel. -->
-        <figure class="shot small placeholder" aria-label="Screenshot placeholder">
-          <span>Screenshot placeholder: Settings → Built-in extensions</span>
-        </figure>
-      </section>
-
-      <section class="split reverse">
-        <div>
-          <h2>Workers in their own worktrees</h2>
-          <p>
-            A space's agent plans and hands work to workers that run beside it. In a git folder each worker gets a
-            worktree on a branch of its own, so workers never edit the same files. When one reports, its changes wait
-            under the report for you: Merge, Squash, Keep or Discard.
-          </p>
-          <a href="/docs/workers/">How workers work →</a>
-        </div>
-        <!-- PLACEHOLDER: replace with a screenshot of a worker's report with its Merge / Squash / Keep / Discard row. -->
-        <figure class="shot small placeholder" aria-label="Screenshot placeholder">
-          <span>Screenshot placeholder: a worker's report waiting for review</span>
-        </figure>
-      </section>
-
-      <section class="cta">
-        <h2>Try Kothar</h2>
-        <div class="actions">
-          <a class="button primary" href={RELEASES}>Download for Mac</a>
-          <a class="button" href={REPO}>Run from source</a>
-        </div>
-      </section>
-    </main>
-
-    <footer>
-      <span>Kothar is source-available under FSL-1.1-ALv2. The extension API is MIT.</span>
-      <span><a href="/docs/">Docs</a> · <a href={REPO}>GitHub</a> · <a href="/docs/faq/">FAQ</a></span>
-    </footer>
-
-    <script is:inline>
-      document.getElementById('theme').addEventListener('click', () => {
-        const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
-        document.documentElement.dataset.theme = next
-        localStorage.setItem('starlight-theme', next)
-      })
-    </script>
-  </body>
-</html>
-
-<style is:global>
-  :root {
-    --bg: #ffffff;
-    --panel: #f6f6f7;
-    --raised: #ececee;
-    --border: #dfe0e3;
-    --text: #1d1e21;
-    --muted: #5f626a;
-    --accent: #2563d9;
-    --on-accent: #ffffff;
-    color-scheme: light;
+    ))
   }
-  :root[data-theme='dark'] {
-    --bg: #111214;
-    --panel: #17181b;
-    --raised: #1f2024;
-    --border: #2b2d32;
-    --text: #e7e7ea;
-    --muted: #9b9ea6;
-    --accent: #5b8def;
-    --on-accent: #ffffff;
-    color-scheme: dark;
-  }
-  * {
-    box-sizing: border-box;
-  }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 16px/1.55 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  a {
-    color: var(--accent);
-    text-decoration: none;
-  }
-  a:hover {
-    text-decoration: underline;
-  }
-  h1,
-  h2 {
-    letter-spacing: -0.02em;
-    line-height: 1.15;
-  }
-</style>
+
+  <section class="beat wrap more" data-reveal>
+    <a href="/features/">See every feature ›</a>
+  </section>
+
+  <section class="cta wrap" data-reveal>
+    <h2>Try Kothar.</h2>
+    <p class="sub">Free to download. Signed and notarized for macOS.</p>
+    <div class="actions">
+      <a class="button primary" href={release.href} data-download>Download for Mac</a>
+      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+    </div>
+    <p class="fine">{releaseNote} · <a href={RELEASES}>All releases</a></p>
+  </section>
+</Site>
 
 <style>
-  .bar,
-  main,
-  footer {
-    max-width: 1120px;
-    margin: 0 auto;
-    padding-inline: 24px;
-  }
-  .bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 64px;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--text);
-    font-weight: 650;
-    font-size: 18px;
-  }
-  .brand:hover {
-    text-decoration: none;
-  }
-  .mark {
-    display: inline-flex;
-    width: 26px;
-    height: 26px;
-    color: var(--accent);
-  }
-  .mark :global(svg) {
-    width: 100%;
-    height: 100%;
-  }
-  .mark :global(style) {
-    display: none;
-  }
-  nav {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-  }
-  nav a {
-    color: var(--muted);
-  }
-  nav a:hover {
-    color: var(--text);
-    text-decoration: none;
-  }
-  #theme {
-    display: inline-flex;
-    border: 0;
-    padding: 6px;
-    border-radius: 8px;
-    background: none;
-    color: var(--muted);
-    cursor: pointer;
-  }
-  #theme:hover {
-    background: var(--raised);
-    color: var(--text);
-  }
-
   .hero {
     text-align: center;
-    padding: 72px 0 40px;
-  }
-  .mark.big {
-    width: 72px;
-    height: 72px;
-    margin-bottom: 20px;
+    padding: 120px 0 56px;
   }
   h1 {
-    font-size: clamp(34px, 6vw, 60px);
+    font-size: clamp(40px, 7vw, 80px);
     font-weight: 700;
-    margin: 0 auto 18px;
-    max-width: 17ch;
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    max-width: 13ch;
+    margin: 0 auto 20px;
   }
-  .lede {
-    font-size: clamp(17px, 2.2vw, 20px);
+  .sub {
+    font-size: clamp(19px, 2.4vw, 24px);
+    line-height: 1.35;
+    letter-spacing: -0.015em;
     color: var(--muted);
-    max-width: 38em;
-    margin: 0 auto 28px;
+    max-width: 30em;
+    margin: 0 auto 36px;
   }
-  .actions {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-  .button {
-    display: inline-flex;
-    align-items: center;
-    height: 44px;
-    padding: 0 20px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-weight: 550;
-    background: var(--panel);
-  }
-  .button:hover {
-    text-decoration: none;
-    background: var(--raised);
-  }
-  .button.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--on-accent);
-  }
-  .button.primary:hover {
-    background: color-mix(in srgb, var(--accent) 88%, black);
-  }
-  .fine {
-    color: var(--muted);
-    font-size: 14px;
-    margin: 14px 0 0;
-  }
-  .engines {
-    list-style: none;
-    padding: 0;
-    margin: 32px 0 0;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
-  }
-  .engines li {
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 4px 14px;
-    font-size: 14px;
-    color: var(--muted);
+  .hero .fine,
+  .cta .fine {
+    margin-top: 18px;
   }
 
-  .shot {
-    margin: 24px 0 72px;
+  .stage {
+    margin-bottom: 160px;
+  }
+  .frame {
+    margin: 0;
+    padding: 10px;
+    border-radius: 22px;
     aspect-ratio: 16 / 10;
+    transform-origin: 50% 0;
+  }
+  .frame .placeholder {
     border-radius: 14px;
-    border: 1px solid var(--border);
-    background: var(--panel);
-    box-shadow: 0 28px 60px -12px rgb(0 0 0 / 0.28);
   }
-  .shot.small {
-    margin: 0;
-    aspect-ratio: 4 / 3;
-    box-shadow: none;
-  }
-  .placeholder {
-    display: grid;
-    place-items: center;
-    border-style: dashed;
-    border-width: 2px;
-    background: repeating-linear-gradient(
-      -45deg,
-      var(--panel),
-      var(--panel) 14px,
-      color-mix(in srgb, var(--accent) 6%, var(--panel)) 14px,
-      color-mix(in srgb, var(--accent) 6%, var(--panel)) 28px
-    );
-  }
-  .placeholder span {
-    color: var(--muted);
-    font-size: 14px;
-    padding: 0 24px;
+
+  .beat {
     text-align: center;
+    max-width: 720px;
+    margin-bottom: 140px;
   }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 16px;
-    margin-bottom: 96px;
+  .beat h2 {
+    font-size: clamp(32px, 5vw, 56px);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    margin-bottom: 18px;
   }
-  .grid article {
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 22px;
-    background: var(--panel);
-  }
-  .grid h2 {
-    font-size: 18px;
-    margin: 0 0 8px;
-  }
-  .grid p {
-    margin: 0;
+  .beat p {
+    font-size: clamp(18px, 2.2vw, 21px);
     color: var(--muted);
+    margin: 0 auto 18px;
+    max-width: 32em;
   }
-
-  .split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    align-items: center;
-    margin-bottom: 96px;
+  .beat a {
+    font-size: 17px;
   }
-  .split.reverse > div {
-    order: 2;
-  }
-  .split h2,
-  .cta h2 {
-    font-size: clamp(26px, 3.4vw, 34px);
-    margin: 0 0 14px;
-  }
-  .split p {
-    color: var(--muted);
-    margin: 0 0 16px;
+  .more {
+    margin-top: -60px;
   }
 
   .cta {
     text-align: center;
-    padding: 56px 24px;
-    border-radius: 16px;
-    background: color-mix(in srgb, var(--accent) 9%, var(--panel));
-    margin-bottom: 64px;
+    padding: 96px 0 120px;
+    border-top: 1px solid var(--hair);
+  }
+  .cta h2 {
+    font-size: clamp(36px, 5.5vw, 64px);
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    margin-bottom: 14px;
+  }
+  .cta .sub {
+    margin-bottom: 32px;
   }
 
-  footer {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 12px;
-    padding-block: 28px 40px;
-    border-top: 1px solid var(--border);
-    color: var(--muted);
-    font-size: 14px;
-  }
-
-  @media (max-width: 760px) {
+  @media (max-width: 600px) {
     .hero {
-      padding-top: 40px;
+      padding-top: 72px;
     }
-    .split {
-      grid-template-columns: 1fr;
-      gap: 24px;
-      margin-bottom: 64px;
+    .stage {
+      margin-bottom: 100px;
     }
-    .split.reverse > div {
-      order: 0;
+    .frame {
+      padding: 6px;
+      border-radius: 16px;
     }
-    .shot {
-      margin-bottom: 48px;
+    .frame .placeholder {
+      border-radius: 11px;
     }
-    .grid {
-      margin-bottom: 64px;
+    .beat {
+      margin-bottom: 96px;
     }
-    nav {
-      gap: 14px;
+    .more {
+      margin-top: -40px;
     }
   }
 </style>

@@ -1,5 +1,5 @@
 ---
-title: Kothar docs
+title: Kothar wiki
 description: What Kothar is and where to start.
 ---
 

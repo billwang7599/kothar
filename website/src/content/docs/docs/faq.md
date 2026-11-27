@@ -15,8 +15,9 @@ only, so there every command asks before it runs.
 
 ## Is there a released build?
 
-Kothar is in early development. Builds are published on
-[GitHub Releases](https://github.com/billwang7599/kothar/releases) when there is one. Until then,
+Yes. Signed and notarized builds for macOS 13+ on Apple silicon are on
+[GitHub Releases](https://github.com/billwang7599/kothar/releases). Kothar is in early development and doesn't
+update itself yet, so download new versions from there. You can also
 [run it from source](/docs/getting-started/#run-from-source).
 
 ## Where does Kothar keep my data?
