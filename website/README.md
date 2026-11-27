@@ -39,8 +39,10 @@ Create a Pages project connected to `billwang7599/kothar` with these settings:
 | Build output directory | `dist` |
 | Environment variable | `NODE_VERSION` = `24` |
 
-No adapter or Functions are needed: the output is static. `site` in `astro.config.mjs` is `https://kothar.dev`, a
-placeholder until the domain is confirmed; change it when you add the custom domain, since canonical links and the
-sitemap use it.
+No adapter or Functions are needed: the output is static. `site` in `astro.config.mjs` is `https://kothar.sh`;
+canonical links and the sitemap use it, so change it if the domain ever changes.
+
+Then, in the Pages project, open **Custom domains** and add `kothar.sh` (and `www.kothar.sh` if wanted). With the
+domain's nameservers on Cloudflare, Pages creates the DNS records itself.
 
 To skip builds when only the app changed, set **Build watch paths** to include `website/*`.

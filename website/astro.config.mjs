@@ -4,8 +4,8 @@ import starlight from '@astrojs/starlight'
 import starlightLinksValidator from 'starlight-links-validator'
 
 export default defineConfig({
-  // Placeholder until the domain is confirmed. Used for canonical URLs and the sitemap.
-  site: 'https://kothar.dev',
+  // Used for canonical URLs and the sitemap.
+  site: 'https://kothar.sh',
   // Static files only: no SSR adapter, nothing Cloudflare-specific.
   output: 'static',
   trailingSlash: 'ignore',
