@@ -177,6 +177,7 @@ function kothar(follow: (url: string) => void | Promise<void> = (url) => void fe
   })
   clients = openClients({
     store,
+    home: tmpdir(),
     now: () => clock,
     record: (event) => events.push(event),
     idleMs: () => 60_000,

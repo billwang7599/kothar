@@ -9,7 +9,9 @@ import {
   type Sandbox,
   type SessionOptions,
   type ThinkingLevel,
+  type Usage,
 } from '../shared.ts'
+import { cleanUsage } from '../usage.ts'
 import { onJsonLines } from './jsonl.ts'
 import { rpcClient } from './rpc.ts'
 import { processUserEnv, type UserEnv } from './user-env.ts'
@@ -39,6 +41,36 @@ const THINKING: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'xhigh', 'max
 const levelFrom = (native: unknown): ThinkingLevel | undefined =>
   native === 'none' ? 'off' : native === 'off' ? undefined : THINKING.find((level) => level === native)
 const effortOf = (level: ThinkingLevel) => (level === 'off' ? 'none' : level)
+
+// Codex's token counts (app-server's TokenUsageBreakdown, or exec's snake_case usage) in Kothar's words. Codex counts
+// cached input inside its input, as OpenAI does; Kothar's inputTokens leave it out. No cost: Codex doesn't report one.
+export function codexUsage(u: any, model?: string): Usage | undefined {
+  if (!u || typeof u !== 'object') return undefined
+  const num = (...keys: string[]) => {
+    for (const key of keys) if (typeof u[key] === 'number') return u[key] as number
+    return 0
+  }
+  const input = num('inputTokens', 'input_tokens')
+  const cacheRead = num('cachedInputTokens', 'cached_input_tokens')
+  const cacheWrite = num('cacheWriteInputTokens', 'cache_write_input_tokens')
+  return cleanUsage({
+    inputTokens: Math.max(0, input - cacheRead - cacheWrite),
+    outputTokens: num('outputTokens', 'output_tokens'),
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+    ...(model && { model }),
+  })
+}
+
+// What a thread used since `before`, from two of its running totals (tokenUsage.total).
+function usageSince(total: any, before: any) {
+  if (!total) return undefined
+  const delta: Record<string, number> = {}
+  for (const [key, value] of Object.entries(total)) {
+    if (typeof value === 'number') delta[key] = value - (typeof before?.[key] === 'number' ? before[key] : 0)
+  }
+  return delta
+}
 
 // A turn's error that means the account is out of usage, for Codex versions that don't say so in codexErrorInfo.
 const LIMIT_ERROR = /usage limit|hit your (?:[\w-]+ )?limit|rate[_ ]limit|out of (?:extra )?(?:usage|credits)|quota/i
@@ -400,7 +432,7 @@ export function createCodex(user: UserEnv = processUserEnv()): Adapter {
       apiKeys: true,
     },
 
-    async complete(machine, { cwd, system, prompt, schema, model, timeoutMs, accountDir, apiKey, sandbox }) {
+    async complete(machine, { cwd, system, prompt, schema, model, timeoutMs, accountDir, apiKey, sandbox, onUsage }) {
       const config = withoutTools(configOf({ developerInstructions: system }))
       const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '-C', cwd]
       args.push('--model', model, '-c', 'model_reasoning_effort="low"')
@@ -424,6 +456,10 @@ export function createCodex(user: UserEnv = processUserEnv()): Adapter {
         }
         if (event.type === 'item.completed' && event.item?.type === 'agent_message') reply = String(event.item.text ?? '')
         if (event.type === 'turn.failed') failure = String(event.error?.message ?? 'Codex failed')
+        if (event.type === 'turn.completed') {
+          const usage = codexUsage(event.usage, model)
+          if (usage) onUsage?.(usage)
+        }
       }
       if (failure || code !== 0 || reply === undefined) {
         throw new Error(failure || stderr.trim().split('\n').at(-1) || `Codex exited with code ${code}`)
@@ -468,6 +504,10 @@ export function createCodex(user: UserEnv = processUserEnv()): Adapter {
       let limited = false
       let lastError: { message: string; info?: unknown } | undefined
       let rateLimits: any
+      // The thread's running token totals (thread/tokenUsage/updated), and where they stood when the last turn ended.
+      let usageTotal: any
+      let usageReported: any
+      let usedModel = model
       // Turns Codex started on its own (input left over from a turn that ended); Kothar stops them and ignores them.
       const foreign = new Set<string>()
       const items = new Map<string, any>()
@@ -515,6 +555,9 @@ export function createCodex(user: UserEnv = processUserEnv()): Adapter {
         for (const { id } of unsent.splice(0)) emit({ type: 'steer.returned', id })
         const limitHit = typeof info === 'string' && LIMIT_INFO.has(info)
         if (error && error !== 'Interrupted' && (limitHit || LIMIT_ERROR.test(error))) limit(error)
+        const usage = codexUsage(usageSince(usageTotal, usageReported), usedModel)
+        usageReported = usageTotal
+        if (usage) emit({ type: 'turn.usage', usage })
         emit({ type: 'turn.completed', ...withKind(error, CODEX_ERRORS) })
       }
 
@@ -571,6 +614,10 @@ export function createCodex(user: UserEnv = processUserEnv()): Adapter {
             return
           case 'account/rateLimits/updated':
             rateLimits = params.rateLimits
+            return
+          // Counted for any turn of the thread, a foreign one too: its calls were made all the same.
+          case 'thread/tokenUsage/updated':
+            if (params?.threadId === undefined || params.threadId === threadId) usageTotal = params?.tokenUsage?.total ?? usageTotal
             return
           // A request Codex no longer waits on, answered or not: its command, if any, may now run.
           case 'serverRequest/resolved':
@@ -682,6 +729,7 @@ export function createCodex(user: UserEnv = processUserEnv()): Adapter {
           ephemeral: true,
         })
         threadId = String(started.thread.id)
+        if (typeof started.model === 'string' && started.model) usedModel = started.model
       })()
       ready.catch(() => {})
 

@@ -22,9 +22,9 @@ export function usePanelTab() {
     },
     () => {
       const saved = localStorage.getItem(KEY)
-      // Permissions was a tab of its own; its switches now live in General. Extensions' tabs were saved as `mod:`.
+      // Permissions was a tab of its own; its switches now live in General.
       if (saved === 'permissions') return 'general'
-      return saved?.startsWith('mod:') ? `extension:${saved.slice(4)}` : (saved ?? 'context')
+      return saved ?? 'context'
     },
   )
 }

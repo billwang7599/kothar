@@ -1,8 +1,7 @@
 import {
+  CORE_MODEL_ROLES,
   isThinkingLevel,
   levelsOf,
-  MODEL_ROLES,
-  ROLE_NAMES,
   THINKING_LEVELS,
   type ChatInfo,
   type CoreMessage,
@@ -17,6 +16,7 @@ import {
   type ThinkingLevel,
 } from './shared.ts'
 import type { Chat } from './chat.ts'
+import { CORE_ROLES, type ModelRoles } from './model-roles.ts'
 
 // Model choice, in one place. Settings keep one priority list per role, each an ordered list of {engine, model,
 // thinking} rows that can mix engines; this module reads and writes them and decides what every chat, worker and
@@ -46,6 +46,7 @@ export function openModels({
   engines,
   defaultEngine,
   broadcast,
+  roles = CORE_ROLES,
 }: {
   settings: ModelSettings
   save: () => void
@@ -53,10 +54,14 @@ export function openModels({
   engines: () => EngineInfo[]
   defaultEngine: string
   broadcast: (message: CoreMessage) => void
+  // Which roles exist (Kothar's own and extensions' declared ones, model-roles.ts); Kothar's own alone by default.
+  roles?: Pick<ModelRoles, 'known' | 'live' | 'label'>
 }) {
   const engineOf = (id: string) => engines().find((e) => e.id === id)
-  const lists = (): ModelLists =>
-    Object.fromEntries(MODEL_ROLES.map((role) => [role, rowsOf(settings.models?.[role])])) as ModelLists
+  // Every saved list, an extension's whether it's on or not (so it's kept while it's off), and Kothar's own.
+  const lists = (): ModelLists => listsOf(settings.models)
+  // The list a chat on `role` runs on: its role's, if the role is live and its list has models, else Chat's.
+  const listOf = (role?: ModelRole) => listFor(lists(), role !== undefined && roles.live(role) ? role : undefined)
   const ids = engines().map((e) => e.id)
   const migrated = migrateModels(settings.models, settings.defaultThinking, [
     ...(settings.engines[defaultEngine] ? [defaultEngine] : []),
@@ -97,7 +102,7 @@ export function openModels({
    * chat's own pick or a setup's that can't run doesn't fall back to the list.
    */
   const runOf = (chat: Chooses): Run | undefined => {
-    const list = listFor(lists(), chat.role)
+    const list = listOf(chat.role)
     const pinned = chat.model !== undefined ? { engine: chat.engine, model: chat.model } : setupRow(chat.setup, list)
     const row = pinned
       ? { ...pinned, ...list.find((r) => r.engine === pinned.engine && r.model === pinned.model) }
@@ -120,7 +125,7 @@ export function openModels({
     /** A chat's own pick on `engine`: the first model of its list there, else the engine's default model. */
     pinOn(engine: string, role?: ModelRole): Pick<ChatInfo, 'model' | 'thinking'> | undefined {
       const info = engineOf(engine)
-      const row = listFor(lists(), role).find((r) => r.engine === engine && canRun(info, r.model))
+      const row = listOf(role).find((r) => r.engine === engine && canRun(info, r.model))
       if (row) return { model: row.model, ...(row.thinking && { thinking: row.thinking }) }
       const model = info?.defaultModel ?? info?.models?.[0]?.id
       return model ? { model } : undefined
@@ -175,12 +180,12 @@ export function openModels({
       if (chat.model !== undefined) {
         return `Engine "${chat.engine}" no longer offers "${chat.model}". Pick another model for this chat.`
       }
-      const list = chat.role && lists()[chat.role].length ? ROLE_NAMES[chat.role] : 'Chat'
+      const list = chat.role && roles.live(chat.role) && lists()[chat.role]?.length ? roles.label(chat.role) : 'Chat'
       return `Nothing in the ${list} model list can run. Add a model or turn its engine on in Settings → Models.`
     },
 
     setList(role: unknown, models: unknown) {
-      if (!MODEL_ROLES.includes(role as ModelRole)) throw new Error(`Unknown model role "${role}"`)
+      if (!roles.known(role)) throw new Error(`Unknown model role "${role}"`)
       if (!Array.isArray(models) || !models.every(isRow)) {
         throw new Error('A model list must be a list of models, each with its engine and a thinking level')
       }
@@ -189,7 +194,7 @@ export function openModels({
       if (role === 'chat' && !rows.length && engines().some((e) => e.models?.length)) {
         throw new Error('The Chat list needs at least one model')
       }
-      setLists({ ...lists(), [role as ModelRole]: rows })
+      setLists({ ...lists(), [role]: rows })
     },
 
     /**
@@ -200,7 +205,7 @@ export function openModels({
     settle() {
       const before = lists()
       const settled = Object.fromEntries(
-        MODEL_ROLES.map((role) => [role, before[role].map((row) => settledRow(engineOf(row.engine), row))]),
+        Object.entries(before).map(([role, rows]) => [role, rows.map((row) => settledRow(engineOf(row.engine), row))]),
       ) as ModelLists
       if (!settled.chat.some((row) => canRun(engineOf(row.engine), row.model))) {
         const preferred = [defaultEngine, ...engines().map((e) => e.id)].flatMap((id) => engineOf(id) ?? [])
@@ -218,6 +223,13 @@ export function openModels({
       return { engine: engine?.id, model: saved.model ?? summaryModelOf(engine) }
     },
   }
+}
+
+/** The saved lists as rows: Kothar's own roles always, then every other role saved, in the order saved. */
+function listsOf(saved: unknown): ModelLists {
+  const old = typeof saved === 'object' && saved !== null ? (saved as Record<string, unknown>) : {}
+  const roles = [...new Set([...CORE_MODEL_ROLES, ...Object.keys(old).filter((role) => Array.isArray(old[role]))])]
+  return Object.fromEntries(roles.map((role) => [role, rowsOf(old[role])])) as ModelLists
 }
 
 /** A role's list, or the Chat list while the role's own is empty. */
@@ -281,7 +293,7 @@ export function migrateModels(
   const old = typeof saved === 'object' && saved !== null ? (saved as Record<string, unknown>) : {}
   const perEngine = Object.values(old).some((value) => typeof value === 'object' && value !== null && !Array.isArray(value))
   if (!perEngine && defaultThinking === undefined) return undefined
-  if (!perEngine) return Object.fromEntries(MODEL_ROLES.map((role) => [role, rowsOf(old[role])])) as ModelLists
+  if (!perEngine) return listsOf(old)
   const engines = [...new Set([...engineOrder, ...Object.keys(old)])].filter((id) => id in old)
   const level = (value: unknown) => (isThinkingLevel(value) ? value : undefined)
   const rowsFor = (role: ModelRole) =>
@@ -292,7 +304,11 @@ export function migrateModels(
         return typeof model === 'string' && model ? [{ engine, model, ...(runsAt && { thinking: runsAt }) }] : []
       }),
     )
-  return Object.fromEntries(MODEL_ROLES.map((role) => [role, rowsOf(rowsFor(role))])) as ModelLists
+  // Every role any engine saved a list for, Plan's and Deep Research's among them, keeps its id.
+  const roles = [
+    ...new Set([...CORE_MODEL_ROLES, ...engines.flatMap((engine) => Object.entries((old[engine] as OldLists) ?? {}).flatMap(([role, rows]) => (Array.isArray(rows) ? [role] : [])))]),
+  ]
+  return Object.fromEntries(roles.map((role) => [role, rowsOf(rowsFor(role))])) as ModelLists
 }
 
 // A chat that follows its model list sits on the engine the list picks, so its engine, accounts and notes are right;

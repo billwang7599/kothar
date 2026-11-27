@@ -1,5 +1,4 @@
 // First, so preferences saved before the rename move to their new keys before any module reads them.
-import './renamed-storage.ts'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SettingsLinkContext } from './extension-view.tsx'
@@ -16,13 +15,14 @@ import { ResizeHandle, usePanelWidths } from './panel-width.tsx'
 import { ChatNav, NameDialog, SidebarFooter, type NameRequest } from './sidebar.tsx'
 import { nthSpace, stepSpace } from './nav.ts'
 import { collapsedGroups } from './collapsed-groups.ts'
-import { SearchPalette } from './search.tsx'
+import { revealLater, SearchPalette } from './search.tsx'
 import { ExtensionPopup, launcherEntries, usePanelShortcuts } from './extension-popups.tsx'
 import { placedLaunchers, useLauncherPlace } from './launchers.ts'
 import { choosePanelTab, currentDock, currentPopup, extensionTabId, openDock, openPopup, panelOverDock, rightColumn, selectDockChat, showsFor, useDock } from './panel-tab.ts'
 import { useOpenDock } from './extension-dock.tsx'
 import type { PanelTab } from '@kothar/core/shared'
 import { changesText, RestartButton } from './restart.tsx'
+import { lastChat, visit } from './recent-chats.ts'
 import { panelShortcuts, useBindings, useShortcuts, type ShortcutHandlers } from './shortcuts.ts'
 import { setInstalledThemes, startAppearance } from './themes.tsx'
 import { isLooking, useLooking, useMarkRead } from './unread.ts'
@@ -31,6 +31,7 @@ import { folderName, folderOf, initialState, reduce, type Action, storedFlag } f
 import { dockedPanels, MIN_WINDOW_PX, storedColumn } from './layout.ts'
 import { fileLinksChecked } from './file-links.tsx'
 import { receiveCopyChanges } from './folder-copies.tsx'
+import { wantComposerFocus } from './composer-focus.ts'
 import './styles.css'
 
 const SELECTED_KEY = 'kothar.selectedChat'
@@ -112,6 +113,14 @@ function App() {
           choosePanelTab(id)
           showTabRef.current()
         }
+        return
+      }
+      // An extension's panel row clicked (host.openChat): its chat opens, scrolled to the entry, with the dock beside it.
+      if (action.type === 'extension.chat.open') {
+        if (!seenRef.current.chats.some((c) => c.id === action.chatId)) return
+        if (action.panel !== undefined) openDock(extensionTabId(action.extension, action.panel), action.chatId)
+        openRef.current(action.chatId)
+        if (action.entry !== undefined) revealLater({ chatId: action.chatId, entry: action.entry })
         return
       }
       if (action.type === 'extension.panel.close') {
@@ -219,6 +228,7 @@ function App() {
   useMarkRead(selected, looking && state.connected, send)
   const select = useCallback((chatId: string) => {
     dispatch({ type: 'select', chatId })
+    wantComposerFocus(chatId)
     setOverlay((open) => (open === 'sidebar' ? null : open))
   }, [])
   // A notification clicked: its chat opens, if it's still there.
@@ -250,6 +260,11 @@ function App() {
   const [marketplace, setMarketplace] = useState(false)
   const openMarketplace = useCallback(() => setMarketplace(true), [])
   const goTo = (chatId: string | undefined) => chatId && select(chatId)
+  // The chats opened, newest first, for Last chat (Ctrl+Tab).
+  const recentRef = useRef<string[]>([])
+  useEffect(() => {
+    recentRef.current = visit(recentRef.current, state.selectedId)
+  }, [state.selectedId])
   const navGroups = () => ({ groups: state.groups, collapsed: collapsedGroups() })
   // The open chat's extension panels: popups, their keys and left-sidebar launchers.
   const panels = (selected && state.extensionUi?.chatId === selected.id && state.extensionUi.panels) || []
@@ -265,6 +280,7 @@ function App() {
   const shortcuts: ShortcutHandlers = {
     previousSpace: () => goTo(stepSpace(state.chats, state.selectedId, -1, navGroups())),
     nextSpace: () => goTo(stepSpace(state.chats, state.selectedId, 1, navGroups())),
+    lastChat: () => goTo(lastChat(recentRef.current, state.chats, state.selectedId)),
     ...Object.fromEntries(
       Array.from({ length: 9 }, (_, i) => [`jump${i + 1}`, () => goTo(nthSpace(state.chats, i + 1, navGroups()))]),
     ),

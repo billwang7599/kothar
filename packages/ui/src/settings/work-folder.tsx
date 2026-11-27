@@ -2,8 +2,8 @@
 import { useState, type FormEvent } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog } from 'radix-ui'
-import { sshHostsOf, switchedOn, type ClientMessage, type WorkFolder } from '@kothar/core/shared'
-import { FOLDED_SWITCHES, PERMISSIONS, switchesShown } from '../context-panel.tsx'
+import { sshHostsOf, switchedOn, type ClientMessage, type PermissionSwitch, type WorkFolder } from '@kothar/core/shared'
+import { FOLDED_SWITCHES, MORE_SWITCHES, MoreSwitches, PERMISSIONS, switchesShown } from '../context-panel.tsx'
 import { Button, CHAT_NOUN, ErrorText, GROUP, Hint, MOTION, Select, Switch, useReturnFocus } from '../controls.tsx'
 import { SettingRow } from './rows.tsx'
 import { SSH_HOSTS_ABOUT, SshHostsEditor } from '../ssh-hosts.tsx'
@@ -28,6 +28,25 @@ export const WORK_FOLDER_INTRO = `${WORK_FOLDER_HINT} ${PERMISSION_DEFAULT_HINT}
 // The work folder itself, the terminal Open in Terminal uses, what file links open with, and the default permission
 // switches for every chat.
 export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }: PageProps) {
+  const allowAll = switchedOn('allowAll', workFolder)
+  const row = (name: PermissionSwitch) => {
+    const { label, about, amberWhileOn } = PERMISSIONS[name]
+    const on = switchedOn(name, workFolder)
+    return (
+      <SettingRow
+        key={name}
+        name={<span className={amberWhileOn && on ? 'text-amber' : ''}>{label}</span>}
+        description={about}
+      >
+        <Switch
+          label={label}
+          checked={on}
+          disabled={!connected}
+          onChange={(enabled) => send({ type: 'permission.setDefault', name, enabled })}
+        />
+      </SettingRow>
+    )
+  }
   return (
     <div className={GROUP}>
       <SettingRow
@@ -53,25 +72,9 @@ export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }
         </SettingRow>
       )}
       <EditorRow workFolder={workFolder} connected={connected} send={send} />
-      {switchesShown(switchedOn('allowAll', workFolder)).map((name) => {
-        const { label, about, amberWhileOn } = PERMISSIONS[name]
-        const on = switchedOn(name, workFolder)
-        return (
-          <SettingRow
-            key={name}
-            name={<span className={amberWhileOn && on ? 'text-amber' : ''}>{label}</span>}
-            description={about}
-          >
-            <Switch
-              label={label}
-              checked={on}
-              disabled={!connected}
-              onChange={(enabled) => send({ type: 'permission.setDefault', name, enabled })}
-            />
-          </SettingRow>
-        )
-      })}
-      {switchedOn('allowAll', workFolder) ? (
+      {switchesShown(allowAll).map(row)}
+      {!allowAll && <MoreSwitches on={MORE_SWITCHES.filter((name) => switchedOn(name, workFolder)).length}>{MORE_SWITCHES.map(row)}</MoreSwitches>}
+      {allowAll ? (
         <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>
       ) : (
         <div className="border-t py-12">

@@ -55,6 +55,7 @@ const hostsWith = (chat: HostChat, overrides: Partial<HostDeps<HostChat>> = {}) 
     allChats: () => [chat],
     detailOf: unused,
     spaceOf: unused,
+    usage: unused,
     reachable: () => true,
     createChat: unused,
     createChild: unused,

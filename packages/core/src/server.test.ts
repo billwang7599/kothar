@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -37,7 +38,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
-async function start(port = 0) {
+async function start(port = 0, cliToken?: string) {
   const garage = mkdtempSync(join(tmpdir(), 'kothar-test-'))
   const project = mkdtempSync(join(tmpdir(), 'kothar-test-'))
   const core = openCore({
@@ -57,6 +58,7 @@ async function start(port = 0) {
     port,
     uiOrigin: origin,
     token,
+    cliToken,
   })
   cleanups.push(() => server.close())
   const base = `ws://127.0.0.1:${server.port}`
@@ -83,6 +85,29 @@ it('rejects other origins', async () => {
     )
     expect(status).toBe(403)
   }
+})
+
+it("takes the CLI's token only from a socket with no Origin, and the UI's only from the UI's origin", async () => {
+  const cliToken = 'cli-token-0123456789'
+  const { base } = await start(0, cliToken)
+  const closeOf = (query: string, headers: { origin?: string }) => {
+    const { socket, messages } = connect(`${base}/?token=${query}`, headers)
+    return new Promise<{ code: number; messages: CoreMessage[] }>((resolve) =>
+      socket.on('close', (code) => resolve({ code, messages })),
+    )
+  }
+  // The wrong token for each kind of client is refused before anything is sent.
+  for (const [query, headers] of [[token, {}], [cliToken, { origin }]] as const) {
+    expect(await closeOf(query, headers)).toEqual({ code: BAD_TOKEN_CLOSE_CODE, messages: [] })
+  }
+  // Another origin is still refused outright, whichever token it brings.
+  const evil = connect(`${base}/?token=${cliToken}`, { origin: 'http://evil.example' })
+  expect(
+    await new Promise<number>((resolve) => evil.socket.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0))),
+  ).toBe(403)
+  const cli = connect(`${base}/?token=${cliToken}`, {})
+  await until(() => cli.messages.length > 0)
+  expect(cli.messages[0]?.type).toBe('snapshot')
 })
 
 it('rejects with a readable error when the port is taken, leaving nothing uncaught', async () => {
@@ -122,7 +147,7 @@ it('sends a snapshot, then broadcasts to every client', async () => {
     engines: [{ id: 'fake', enabled: false }],
     chats: [],
     accounts: [{ engine: 'fake', active: 'default' }],
-    modelLists: { chat: [], planning: [], searching: [], workers: [] },
+    modelLists: { chat: [], workers: [] },
     memory: {},
     extensions: [],
     workers: { start: true, limit: 4, instructions: { id: 'instructions', text: WORKER_INSTRUCTIONS, default: WORKER_INSTRUCTIONS } },
@@ -502,8 +527,10 @@ it('lets every user chat spawn workers while agents may start them, up to the li
   const subchat = core.chats().find((c) => c.id !== 'main')!
   const offered = send(subchat.id, 'hi').options
   expect(offered.instructions).not.toContain(WORKER_INSTRUCTIONS)
-  // No tool to offer it, so no Kothar MCP server at all.
-  expect(offered.kotharMcp).toBeUndefined()
+  // Only forget, which every chat gets: no spawn_worker.
+  expect((await (await post(offered.kotharMcp!.token, 'spawn_worker', { task: 'x' })).json()).error.message).toBe(
+    'Tool spawn_worker not found',
+  )
 
   workersOn(core, 1)
   handle({ type: 'chat.interrupt', chatId: subchat.id, force: true })
@@ -547,7 +574,14 @@ it('tells a chat that can spawn workers the saved worker instructions, or the de
 })
 
 it("starts a worker on the Workers list, else the Chat list, or its role's list, not its parent's model", async () => {
-  const { core, garage, json, send, sessionOf } = await startHeld()
+  const plans: Extension = {
+    id: 'planner',
+    name: 'Planner',
+    description: '',
+    enabledByDefault: true,
+    modelRoles: [{ id: 'planning', label: 'Planning' }],
+  }
+  const { core, garage, json, send, sessionOf } = await startHeld({ extensions: [mainExtension, plans] })
   const handle = handleOn(core)
   await core.refreshEngines()
   workersOn(core, -1)
@@ -770,6 +804,7 @@ const childExtension: Extension = {
   name: 'Kids',
   description: '',
   enabledByDefault: true,
+  modelRoles: [{ id: 'searching', label: 'Searching' }],
   tools: [
     {
       name: 'delegate',
@@ -786,7 +821,7 @@ const childExtension: Extension = {
 }
 
 it("lets an extension start a child chat as spawn_worker does, with agents kept from starting workers: frozen view, report, removal", async () => {
-  const { core, garage, json, tool, send, sessionOf } = await startHeld({ extensions: [mainExtension, childExtension] })
+  const { core, garage, json, tool, post, send, sessionOf } = await startHeld({ extensions: [mainExtension, childExtension] })
   handleOn(core)({ type: 'workers.set', start: false })
   const parent = send('main', 'Plan the release')
   const token = parent.options.kotharMcp!.token
@@ -795,8 +830,10 @@ it("lets an extension start a child chat as spawn_worker does, with agents kept 
   const child = sessionOf(chatId)
   expect(child.prompt).toBe('Check the changelog')
   expect(child.options.instructions).toContain('<message id="0" kind="user">\nPlan the release\n</message>')
-  // Its tool isn't offered to a child, and no memory extension is on, so the child has no Kothar MCP server at all.
-  expect(child.options.kotharMcp).toBeUndefined()
+  // Its tool isn't offered to a child, and no memory extension is on: Kothar's MCP server gives it only forget.
+  expect((await (await post(child.options.kotharMcp!.token, 'delegate', { task: 'x' })).json()).error.message).toBe(
+    'Tool delegate not found',
+  )
 
   // A child takes its folders from its space. An extension can start one below it (so research a worker runs doesn't
   // wait for the slot that worker holds), but no deeper.
@@ -868,7 +905,7 @@ it("tells an extension's tool who called it and what that caller may reach, by t
 })
 
 it("gives a worker its parent's latest messages frozen at launch when no memory extension is on", async () => {
-  const { core, garage, json, send, sessionOf } = await startHeld()
+  const { core, garage, json, post, send, sessionOf } = await startHeld()
   workersOn(core, -1)
   const parent = send('main', 'Plan the release')
   const { chatId } = await json(parent.options.kotharMcp!.token, 'spawn_worker', { task: 'Check the changelog' })
@@ -880,7 +917,7 @@ it("gives a worker its parent's latest messages frozen at launch when no memory 
   expect(chatIn(core, chatId).parentMessages).toBe(1)
   expect(JSON.parse(readFileSync(join(garage, 'chats', chatId, 'chat.json'), 'utf8')).parentMessages).toBe(1)
   expect(first.options.instructions).not.toContain('zoom')
-  expect(first.options.kotharMcp).toBeUndefined()
+  expect((await (await post(first.options.kotharMcp!.token, 'zoom', { id: 0 })).json()).error.message).toBe('Tool zoom not found')
   first.end('Checked')
   expect(core.chats().some((c) => c.id === chatId)).toBe(false)
 })
@@ -1018,4 +1055,46 @@ it('records a message steered into a running turn against that turn', async () =
   await waitUntil(() => sent.length === 2)
   expect(sent[1]).toMatchObject({ kind: 'steer', turn: sent[0]!.turn, sections: [{ source: 'you', text: 'and this' }] })
   session.end('ok')
+})
+
+it("lets a lead review a worker's changes with review_worker, but merges only once the user says so on a card", async () => {
+  const { core, garage, json, tool, send, sessionOf } = await startHeld()
+  workersOn(core, -1)
+  const repo = join(garage, 'repo')
+  mkdirSync(repo, { recursive: true })
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8' }).trim()
+  git('init', '-q', '-b', 'main')
+  writeFileSync(join(repo, 'README.md'), 'hi\n')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'first')
+  core.handle({ type: 'chat.create', name: 'App', folders: [repo] }, () => {})
+  const spaceId = core.chats().find((c) => c.name === 'App')!.id
+
+  // The lead's session starts once its checkout is made.
+  send(spaceId, 'Fix it')
+  await until(() => !!sessionOf(spaceId))
+  const token = sessionOf(spaceId).options.kotharMcp!.token
+  const { chatId } = await json(token, 'spawn_worker', { task: 'Fix the bug' })
+  await until(() => !!sessionOf(chatId))
+  const worker = sessionOf(chatId)
+  expect(worker.options.cwd).toContain(join('workers', chatId))
+  writeFileSync(join(worker.options.cwd, 'fix.txt'), 'fixed\n')
+  worker.end('Fixed')
+  await until(() => chatIn(core, spaceId).workerBranches?.[chatId]?.state === 'review')
+  expect(chatIn(core, spaceId).queue).toMatchObject([{ report: { chatId, changes: [expect.stringContaining('1 file changed')] } }])
+
+  // Keep needs no card; Merge waits for the user's answer.
+  expect(await tool(token, 'review_worker', { workerId: chatId, action: 'keep' })).toMatchObject({ isError: false })
+  const merging = tool(token, 'review_worker', { workerId: chatId, action: 'merge' })
+  await until(() => chatIn(core, spaceId).entries.some((e) => e.type === 'permission.requested'))
+  const card = chatIn(core, spaceId).entries.findLast((e) => e.type === 'permission.requested')!
+  expect(card).toMatchObject({ name: `Merge worker "Fix the bug"'s changes`, buttons: { allow: 'Merge', deny: 'Cancel' } })
+  if (card.type !== 'permission.requested') throw new Error('no card')
+  core.handle({ type: 'permission.respond', chatId: spaceId, requestId: card.requestId, allow: true }, () => {})
+  expect((await merging).text).toMatch(/^Merged worker "Fix the bug"'s changes into kothar\/app/)
+  const checkout = chatIn(core, spaceId).worktrees![repo]!.path
+  expect(readFileSync(join(checkout, 'fix.txt'), 'utf8')).toBe('fixed\n')
+  expect(chatIn(core, spaceId).workerBranches).toBeUndefined()
+  sessionOf(spaceId).end('Done')
 })

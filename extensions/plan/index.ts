@@ -375,6 +375,9 @@ export function createPlanExtension(): Extension {
     // Engines' own plan modes (Claude Code's EnterPlanMode and ExitPlanMode) work out of Kothar's sight; Plan first is
     // Kothar's, on every engine.
     replaces: ['plan-mode'],
+    // Its own model list in Settings → Models, which turns run on while Plan first works out a plan (turnOptions).
+    // The id predates declared roles: users' saved Planning lists are under it.
+    modelRoles: [{ id: 'planning', label: 'Planning', description: 'Turns that work out a plan, and workers started to plan.' }],
     prompts: PROMPTS,
     settings: [
       {

@@ -8,6 +8,7 @@ import { modelKey, type ChatView, type modelMenu } from '../state.ts'
 import { FILE_CHIP, FileLabel, PaperclipIcon, type Pending } from './attachments.tsx'
 import { ModePicker } from './mode-picker.tsx'
 import { withQuote } from './quote.tsx'
+import { takeComposerFocus } from '../composer-focus.ts'
 
 const SEND_HINT = 'Enter to send · Shift+Enter for a new line'
 const QUEUE_HINT = 'Enter to queue · ⌘Enter to interrupt and send'
@@ -65,6 +66,8 @@ export function Composer(props: ComposerProps) {
     node.setSelectionRange(caret.current, caret.current)
     caret.current = undefined
   }, [text])
+  // After a chat switch, the cursor goes in here (composer-focus.ts).
+  useEffect(() => takeComposerFocus(chat.id, () => box.current, () => touched.current), [chat.id])
   useLayoutEffect(() => {
     const ref = props.quoteRef
     if (!ref) return
@@ -103,6 +106,7 @@ export function Composer(props: ComposerProps) {
   }
   return (
     <div
+      data-composer
       className={`@container mx-auto max-w-column rounded-lg border transition-[border-color,box-shadow] has-[textarea:focus]:border-accent ${canSend || canQueue ? 'bg-panel shadow-raised has-[textarea:focus]:shadow-floating' : 'bg-bg'}`}
     >
       {pending.length > 0 && (

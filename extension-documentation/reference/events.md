@@ -206,9 +206,11 @@ const lookOnly: Extension = {
   description: 'A switch in the composer that makes the chat read only.',
   enabledByDefault: false,
   composerToggles: [{ id: 'look', label: 'Look only' }],
+  // Its own model list in Settings → Models (see Model roles in extension.md).
+  modelRoles: [{ id: 'look-only', label: 'Look only', description: 'Turns while Look only is on.' }],
   turnOptions(chat, { host }) {
     if (!host.toggled(chat.id, 'look')) return undefined
-    return { readOnly: true, reason: 'Look only is on: read and explain, change nothing.', role: 'planning' }
+    return { readOnly: true, reason: 'Look only is on: read and explain, change nothing.', role: 'look-only' }
   },
 }
 
@@ -226,7 +228,8 @@ export default lookOnly
     tools. pi never asks before using a tool, so outside the sandbox (Edits anywhere on) nothing stops it writing.
 - `reason` is what the agent is told when a request is refused for being read only.
 - `role` runs the turn on that model list (Settings → Models) when the user has put models in it, and on the chat's own
-  model otherwise. The chat's saved engine and model don't change.
+  model otherwise. The chat's saved engine and model don't change. It's `chat`, `workers`, or a role an extension
+  that's on declares ([`modelRoles`](extension.md#model-roles)); any other shows as the extension's error.
 - Every extension that's on for the chat is asked. The turn is read only if any of them says so, with the first one's
   `reason`, and runs on the first `role` given.
 - Keep it quick and synchronous. If it throws, its error shows and the turn runs as if it had returned nothing.
@@ -272,6 +275,37 @@ nothing unless an extension that's on has this hook.
 running then, if any (as in `SentTurn`). Long texts are cut at 100,000 characters (a section) or 20,000 (a result).
 
 List `readChats` in the manifest's `uses`.
+
+## onUsage
+
+`onUsage({ usage, chat? }, context)` gets each report of what an engine's model calls used, as Kothar saves it in the
+chat's `usage.jsonl` (a [`UsageRecord`](types.md#usage)): a turn's (`source: 'turn'`, once per model, with the turn's id
+as in `SentTurn`) and each `host.complete` call's, whichever extension made it (`source: 'complete'`). `chat` is absent
+for a one-shot call no chat asked for. Read totals with [`host.usage`](host.md#reading-chats). Together they're enough
+for a budget:
+
+```ts
+import type { Extension } from '@kothar/extension-api'
+
+const LIMIT_USD = 5
+
+const budget: Extension = {
+  id: 'budget',
+  name: 'Budget',
+  description: 'Stops a space’s turns once it has cost $5.',
+  enabledByDefault: false,
+  onUsage({ chat }, { host }) {
+    if (!chat || host.usage(chat.id).space.costUsd < LIMIT_USD) return
+    if (host.chat(chat.id)?.status === 'running') host.interrupt(chat.id)
+    host.note(chat.id, `This space has cost over $${LIMIT_USD}.`)
+  },
+}
+
+export default budget
+```
+
+Costs are what engines report at API prices, so read them as a guide: a subscription is billed its own way, and Codex
+reports no cost (`unpriced` counts those reports). List `readChats` in the manifest's `uses`.
 
 ## Transforms
 

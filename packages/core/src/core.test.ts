@@ -21,7 +21,11 @@ import { createFakeAdapter, FAKE_DEFAULTS, FAKE_MODELS, FAKE_THINKING, type Fake
 import { sandboxingMachine } from './adapters/test-machine.ts'
 import { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
 import { LOCK_FILE } from './garage-lock.ts'
+import { CUT_OFF_BY_RESTART } from './chat-lifecycle.ts'
+import { QUEUE_FILE } from './queue-store.ts'
+import { PROCESSES_FILE } from './process-records.ts'
 import { openModels, snapLevel, SUMMARY_MODELS } from './models.ts'
+import { openModelRoles } from './model-roles.ts'
 import { localMachine } from './machine.ts'
 import { WINDOW_MAX_CHARS } from './memory.ts'
 import {
@@ -43,7 +47,7 @@ import {
   type SessionOptions,
   type ThinkingLevel,
 } from './shared.ts'
-import { cantSandbox, cantWriteTmp, needs } from './test-env.ts'
+import { cantPs, cantSandbox, cantWriteTmp, needs } from './test-env.ts'
 import { until as waitUntil } from './test-wait.ts'
 
 const TEST_STOP_GRACE_MS = 30
@@ -372,59 +376,144 @@ describe('chats', () => {
     expect(JSON.parse(readFileSync(chatFile(t, 'aaaa0001'), 'utf8'))).not.toHaveProperty('parentId')
   })
 
-  it('reads what an older Kothar saved about subagents as workers, and saves it back under the new names', () => {
-    const garage = tempDir()
-    const save = (info: { id: string } & Record<string, unknown>, log: object[] = []) => {
-      mkdirSync(join(garage, 'chats', info.id), { recursive: true })
-      writeFileSync(join(garage, 'chats', info.id, 'chat.json'), JSON.stringify(info))
-      writeFileSync(join(garage, 'chats', info.id, 'log.jsonl'), log.map((e) => JSON.stringify(e) + '\n').join(''))
+  describe('workers left over from before a restart', () => {
+    // A space, and workers below it saved as a quit or crash left them.
+    const leftOver = (workers: { id: string; log?: object[]; quiet?: boolean }[], leadLog: object[] = []) => {
+      const first = setup(textScript)
+      const space = createChat(first, { name: 'Space' })
+      first.core.close()
+      const dirOf = (id: string) => join(first.garage, 'chats', id)
+      for (const { id, log, quiet } of workers) {
+        mkdirSync(dirOf(id), { recursive: true })
+        const saved = { id, name: `Worker ${id}`, parentId: space.id, worker: true, engine: 'fake', createdAt: at, ...(quiet && { quiet }) }
+        writeFileSync(join(dirOf(id), 'chat.json'), JSON.stringify(saved))
+        if (log) writeFileSync(join(dirOf(id), 'log.jsonl'), log.map((e) => JSON.stringify(e) + '\n').join(''))
+      }
+      appendFileSync(join(dirOf(space.id), 'log.jsonl'), leadLog.map((e) => JSON.stringify(e) + '\n').join(''))
+      return { garage: first.garage, space, dirOf }
     }
-    const base = { engine: 'fake', archived: false, createdAt: at }
-    const report = { at, type: 'subagent.report', chatId: 'aaaa0003', name: 'Sub', text: 'Done' }
-    save({ id: 'aaaa0001', name: 'Space', ...base }, [{ at, type: 'user.message', text: 'go' }, report])
-    save({ id: 'aaaa0003', name: 'Sub', parentId: 'aaaa0001', subagent: true, role: 'subagents', ...base })
-    const lists = { chat: [], planning: [], searching: [], subagents: [{ engine: 'fake', model: FAKE_DEFAULTS.defaultModel }] }
-    writeFileSync(
-      join(garage, 'settings.json'),
-      JSON.stringify({ mods: { subagents: { enabled: false, limit: 2 } }, models: lists }),
-    )
-    // Extensions were mods too, and kept their own files in <garage>/mods/.
-    mkdirSync(join(garage, 'mods', 'git'), { recursive: true })
-    writeFileSync(join(garage, 'mods', 'git', 'state.json'), '{}')
-    const t = setup(textScript, garage)
-    expect(existsSync(join(garage, 'mods'))).toBe(false)
-    expect(readFileSync(join(garage, 'extensions', 'git', 'state.json'), 'utf8')).toBe('{}')
-    expect(chatOf(t.core, 'aaaa0003')).toMatchObject({ parentId: 'aaaa0001', worker: true, role: 'workers' })
-    expect(chatOf(t.core, 'aaaa0003')).not.toHaveProperty('subagent')
-    expect(t.core.modelLists().workers).toMatchObject([{ engine: 'fake', model: FAKE_DEFAULTS.defaultModel }])
-    // The Subagents switch became the Workers extension's, which is Settings → Workers now: off lets no agent start one.
-    expect(t.core.workers()).toMatchObject({ start: false, limit: 2 })
-    const settings = JSON.parse(readFileSync(join(garage, 'settings.json'), 'utf8'))
-    expect(settings.extensions).toEqual({})
-    expect(settings.workers).toEqual({ start: false, limit: 2 })
-    expect(settings).not.toHaveProperty('mods')
-    expect(settings.models).not.toHaveProperty('subagents')
-    const lead = chatOf(t.core, 'aaaa0001')!
-    expect(JSON.stringify(lead)).not.toContain('subagent.report')
-    expect(JSON.stringify(lead)).toContain('Done')
+    const halfway = [
+      { at, type: 'user.message', text: 'Go' },
+      { at, type: 'turn.started' },
+      { at, type: 'text.completed', text: 'Half done' },
+    ]
+    const queueOf = (t: { core: Core }, id: string) => chatOf(t.core, id)?.queue ?? []
+
+    it('keeps one cut off mid-task, and its report wakes the lead once Kothar resumes', async () => {
+      const { garage, space, dirOf } = leftOver([{ id: 'cut', log: halfway }])
+      const t = setup(textScript, garage)
+      expect(chatOf(t.core, 'cut')).toMatchObject({ status: 'idle', worker: true })
+      expect(entriesOf(t.core, 'cut').at(-1)).toMatchObject({ type: 'turn.completed', error: expect.any(String) })
+      expect(queueOf(t, space.id)).toMatchObject([
+        { text: 'Half done', report: { chatId: 'cut', name: 'Worker cut', error: CUT_OFF_BY_RESTART } },
+      ])
+      // Saved with the lead, so a second quit before it runs keeps it.
+      expect(JSON.parse(readFileSync(join(dirOf(space.id), QUEUE_FILE), 'utf8'))).toHaveLength(1)
+      expect(t.calls).toHaveLength(0)
+
+      t.core.resume()
+      await until(() => statusOf(t.core, space.id) === 'idle' && t.calls.length === 1)
+      expect(t.calls[0]!.prompt).toContain('Report from worker "Worker cut" (cut)')
+      expect(t.calls[0]!.prompt).toContain('Half done')
+      expect(t.calls[0]!.prompt).toContain('cut off')
+      expect(existsSync(join(dirOf(space.id), QUEUE_FILE))).toBe(false)
+      // The lead can carry it on: it's still there until the lead's read its report and a start finds it unchanged.
+      expect(chatOf(t.core, 'cut')).toBeDefined()
+      await t.core.close()
+
+      const again = setup(textScript, garage)
+      expect(chatOf(again.core, 'cut')).toBeUndefined()
+      expect(existsSync(dirOf('cut'))).toBe(false)
+      expect(queueOf(again, space.id)).toEqual([])
+    })
+
+    it('keeps one whose report its lead has not read yet, without reporting it twice', async () => {
+      const { garage, space } = leftOver([{ id: 'cut', log: halfway }])
+      await setup(textScript, garage).core.close()
+      const t = setup(textScript, garage)
+      expect(chatOf(t.core, 'cut')).toBeDefined()
+      expect(queueOf(t, space.id)).toHaveLength(1)
+    })
+
+    it('reports one that finished as Kothar quit, as it would have, and removes it', () => {
+      const done = [...halfway, { at, type: 'turn.completed' }]
+      const { garage, space, dirOf } = leftOver([{ id: 'done', log: done }])
+      const t = setup(textScript, garage)
+      expect(chatOf(t.core, 'done')).toBeUndefined()
+      expect(existsSync(dirOf('done'))).toBe(false)
+      expect(queueOf(t, space.id)).toMatchObject([{ text: 'Half done', report: { chatId: 'done', name: 'Worker done' } }])
+      expect(queueOf(t, space.id)[0]!.report).not.toHaveProperty('error')
+    })
+
+    it('removes one its lead already has the report of, and a quiet one, with their folders', () => {
+      // Logged after Kothar closed the worker's cut-off turn on the start before.
+      const report = { at: '2999-01-01T00:00:00.000Z', type: 'worker.report', chatId: 'read', name: 'Worker read', text: 'ok' }
+      const { garage, space, dirOf } = leftOver(
+        [
+          { id: 'read', log: halfway },
+          { id: 'quiet', log: halfway, quiet: true },
+          { id: 'fresh' },
+        ],
+        [{ at, type: 'user.message', text: 'go' }, report, { at: report.at, type: 'turn.started' }, { at: report.at, type: 'turn.completed' }],
+      )
+      const t = setup(textScript, garage)
+      for (const id of ['read', 'quiet']) {
+        expect(chatOf(t.core, id)).toBeUndefined()
+        expect(existsSync(dirOf(id))).toBe(false)
+      }
+      expect(queueOf(t, space.id)).toEqual([])
+      // One that never started (it waited for a slot) stays with whatever is queued for it.
+      expect(chatOf(t.core, 'fresh')).toBeDefined()
+    })
   })
 
-  it('removes a worker left over from before, once it has worked, with its folder', () => {
-    const first = setup(textScript)
-    const space = createChat(first, { name: 'Space' })
-    first.core.close()
-    for (const id of ['done', 'fresh']) {
-      mkdirSync(join(first.garage, 'chats', id), { recursive: true })
-      const saved = { id, name: id, parentId: space.id, worker: true, engine: 'fake', createdAt: at }
-      writeFileSync(join(first.garage, 'chats', id, 'chat.json'), JSON.stringify(saved))
-    }
-    const entry = { at, type: 'user', text: 'Go' }
-    writeFileSync(join(first.garage, 'chats', 'done', 'log.jsonl'), JSON.stringify(entry) + '\n')
-    const t = setup(textScript, first.garage)
-    expect(chatOf(t.core, 'done')).toBeUndefined()
-    expect(existsSync(join(t.garage, 'chats', 'done'))).toBe(false)
-    expect(chatOf(t.core, 'fresh')).toBeDefined()
-    expect(chatOf(t.core, space.id)).toBeDefined()
+  it('stops an engine a crashed Kothar left running, as it opens the garage', async (context) => {
+    needs(context, cantPs)
+    const garage = tempDir()
+    const left = spawn('/bin/sleep', ['30'], { detached: true, stdio: 'ignore' })
+    const exited = new Promise((resolve) => left.on('exit', resolve))
+    // What the crashed Kothar recorded, under a pid that isn't this process's.
+    const record = { pgid: left.pid, command: '/bin/sleep', startedAt: Date.now(), owner: process.pid + 1 }
+    writeFileSync(join(garage, PROCESSES_FILE), JSON.stringify([record]))
+    setup(textScript, garage)
+    await exited
+    expect(existsSync(join(garage, PROCESSES_FILE))).toBe(false)
+  })
+
+  describe('queued messages across a restart', () => {
+    it('keeps what was queued when Kothar quit, and sends it once Kothar resumes', async () => {
+      const t = setup(permissionScript)
+      const chat = folderChat(t)
+      t.handle({ type: 'chat.send', chatId: chat.id, text: 'first' })
+      await until(() => statusOf(t.core, chat.id) === 'waiting')
+      t.handle({ type: 'chat.send', chatId: chat.id, text: 'then this' })
+      expect(chatOf(t.core, chat.id)?.queue).toMatchObject([{ text: 'then this' }])
+      const file = join(t.garage, 'chats', chat.id, QUEUE_FILE)
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject([{ text: 'then this' }])
+      await t.core.close(true)
+
+      const reopened = setup(textScript, t.garage)
+      expect(chatOf(reopened.core, chat.id)?.queue).toMatchObject([{ text: 'then this' }])
+      expect(reopened.calls).toHaveLength(0)
+      reopened.core.resume()
+      await until(() => reopened.calls.length === 1 && statusOf(reopened.core, chat.id) === 'idle')
+      expect(reopened.calls[0]!.prompt).toContain('then this')
+      expect(chatOf(reopened.core, chat.id)?.queue).toEqual([])
+      expect(existsSync(file)).toBe(false)
+    })
+
+    it('leaves an archived chat\'s queue for when it comes back', async () => {
+      const t = setup(textScript)
+      const chat = createChat(t, { name: 'Later' })
+      const dir = join(t.garage, 'chats', chat.id)
+      writeFileSync(join(dir, QUEUE_FILE), JSON.stringify([{ id: 'q1', text: 'hold on' }]))
+      t.handle({ type: 'chat.archive', chatId: chat.id, archived: true })
+      await t.core.close()
+      const reopened = setup(textScript, t.garage)
+      reopened.core.resume()
+      expect(reopened.calls).toHaveLength(0)
+      expect(chatOf(reopened.core, chat.id)?.queue).toMatchObject([{ id: 'q1', text: 'hold on' }])
+    })
   })
 
   it('renames a chat and saves it', () => {
@@ -1301,15 +1390,162 @@ describe('commands', () => {
     expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).sshHosts).toEqual([{ host: 'build.example.com' }])
     expect(await turn(t)).toBe('idle')
     expect(resolved(t).map((e) => e.auto)).toEqual([true])
-    // A chat's own list, even an empty one, stands over Settings'; none takes Settings' again.
+    // A chat's own list adds to Settings', never hides it: with one of its own (even empty), Settings' host still runs.
+    t.handle({ type: 'chat.setSshHosts', chatId: 'main', hosts: [{ host: 'other.example.com' }] })
+    expect(await turn(t)).toBe('idle')
     t.handle({ type: 'chat.setSshHosts', chatId: 'main', hosts: [] })
     expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8')).sshHosts).toEqual([])
-    expect(await turn(t)).toBe('waiting')
+    expect(await turn(t)).toBe('idle')
     t.handle({ type: 'chat.setSshHosts', chatId: 'main' })
     expect(JSON.parse(readFileSync(chatFile(t, 'main'), 'utf8'))).not.toHaveProperty('sshHosts')
     expect(() => t.handle({ type: 'permission.setSshHosts', hosts: [{ host: 'not a host' }] })).toThrow(/isn't a host/)
     t.handle({ type: 'permission.setSshHosts', hosts: [] })
     expect(t.core.workFolder()).not.toHaveProperty('sshHosts')
+  })
+
+  describe('Always allow on an SSH card', () => {
+    const HOST = 'linux.student.cs.uwaterloo.ca'
+    const COPY = `scp -i ~/.ssh/keys/uwstudent notes.txt ${HOST}:a5/`
+    const ENTRY = { host: HOST, key: '~/.ssh/keys/uwstudent' }
+    // Starts a turn and leaves it waiting on the card: the request as logged.
+    const ask = async (t: ReturnType<typeof setup>, chatId: string) => {
+      t.handle({ type: 'chat.send', chatId, text: 'run' })
+      await until(() => statusOf(t.core, chatId) !== 'running')
+      expect(statusOf(t.core, chatId)).toBe('waiting')
+      const request = entriesOf(t.core, chatId).findLast((e) => e.type === 'permission.requested')
+      if (request?.type !== 'permission.requested') throw new Error('no request')
+      return request
+    }
+    const trust = async (t: ReturnType<typeof setup>, chatId: string, trustHost: 'space' | 'global') => {
+      const request = await ask(t, chatId)
+      expect(request.sshHost).toEqual(ENTRY)
+      t.handle({ type: 'permission.respond', chatId, requestId: request.requestId, allow: true, trustHost })
+      await until(() => settled(t.core, chatId))
+      expect(resolved(t, chatId).at(-1)).toMatchObject({ allow: true })
+      expect(resolved(t, chatId).at(-1)).not.toHaveProperty('auto')
+    }
+    const settingsHosts = (t: { garage: string }) => JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).sshHosts
+
+    it('offers the one host a copy reaches, and nothing for one it cannot pin down', async () => {
+      for (const command of [`scp a.txt one.example.com:x two.example.com:y`, 'ssh $(cat host) ls', `ssh -J jump.example.com ${HOST}`]) {
+        const t = setup(commandScript(command))
+        const request = await ask(t, 'main')
+        expect(request.sshHost, command).toBeUndefined()
+        t.handle({ type: 'chat.interrupt', chatId: 'main', force: true })
+        await until(() => settled(t.core, 'main'))
+      }
+      for (const command of [`ssh ${HOST} make`, `rsync -a out/ me@${HOST}:out/`]) {
+        const t = setup(commandScript(command))
+        expect((await ask(t, 'main')).sshHost, command).toEqual({ host: HOST })
+        t.handle({ type: 'chat.interrupt', chatId: 'main', force: true })
+        await until(() => settled(t.core, 'main'))
+      }
+    })
+
+    it("This space adds the host to the space's list only; All spaces to Settings'; removing it asks again", async () => {
+      const t = setup(commandScript(COPY))
+      const a = createChat(t, { name: 'A' })
+      const b = createChat(t, { name: 'B' })
+      await trust(t, a.id, 'space')
+      expect(JSON.parse(readFileSync(chatFile(t, a.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      expect(settingsHosts(t)).toBeUndefined()
+      // The next copy in A runs without asking; B still asks.
+      expect(await turn(t, a.id)).toBe('idle')
+      expect(resolved(t, a.id).at(-1)).toMatchObject({ allow: true, auto: true })
+      expect(await turn(t, b.id)).toBe('waiting')
+      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8'))).not.toHaveProperty('sshHosts')
+
+      await trust(t, b.id, 'global')
+      expect(settingsHosts(t)).toEqual([ENTRY])
+      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8'))).not.toHaveProperty('sshHosts')
+      expect(await turn(t, b.id)).toBe('idle')
+      expect(await turn(t, 'main')).toBe('idle')
+
+      // Removed in Settings and in A's Permissions tab, it asks again.
+      t.handle({ type: 'permission.setSshHosts', hosts: [] })
+      t.handle({ type: 'chat.setSshHosts', chatId: a.id })
+      expect(await turn(t, a.id)).toBe('waiting')
+      expect(await turn(t, b.id)).toBe('waiting')
+    })
+
+    it("This space adds only the host to the space's list; All spaces reaches a space with a list of its own", async () => {
+      const t = setup(commandScript(COPY))
+      t.handle({ type: 'permission.setSshHosts', hosts: [{ host: 'build.example.com' }] })
+      const a = createChat(t, { name: 'A' })
+      await trust(t, a.id, 'space')
+      // Settings' host isn't copied in: the lists add up.
+      expect(JSON.parse(readFileSync(chatFile(t, a.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      expect(settingsHosts(t)).toEqual([{ host: 'build.example.com' }])
+
+      const b = createChat(t, { name: 'B' })
+      t.handle({ type: 'chat.setSshHosts', chatId: b.id, hosts: [{ host: 'other.example.com' }] })
+      await trust(t, b.id, 'global')
+      expect(settingsHosts(t)).toEqual([{ host: 'build.example.com' }, ENTRY])
+      // B's own list is left alone, and Settings' host runs there anyway.
+      expect(JSON.parse(readFileSync(chatFile(t, b.id), 'utf8')).sshHosts).toEqual([{ host: 'other.example.com' }])
+      expect(await turn(t, b.id)).toBe('idle')
+      expect(resolved(t, b.id).at(-1)).toMatchObject({ allow: true, auto: true })
+    })
+
+    it("a worker trusts its space's hosts and Settings' together", async () => {
+      const first = setup(textScript)
+      const space = createChat(first, { name: 'Space' })
+      first.core.close()
+      mkdirSync(join(first.garage, 'chats', 'sub'), { recursive: true })
+      const saved = { id: 'sub', name: 'Sub', parentId: space.id, worker: true, engine: 'fake', createdAt: at }
+      writeFileSync(join(first.garage, 'chats', 'sub', 'chat.json'), JSON.stringify(saved))
+      // The copy reaches HOST with its key and nothing else: listed in Settings, with the space holding another host.
+      const t = setup(commandScript(COPY), first.garage)
+      t.handle({ type: 'chat.setSshHosts', chatId: space.id, hosts: [{ host: 'build.example.com' }] })
+      t.handle({ type: 'permission.setSshHosts', hosts: [ENTRY] })
+      t.handle({ type: 'chat.send', chatId: 'sub', text: 'run' })
+      await until(() => settled(t.core, 'sub'))
+      const sent = t.messages.flatMap((m) => (m.type === 'chat.entry' && m.chatId === 'sub' ? [m.entry] : []))
+      expect(sent.findLast((e) => e.type === 'permission.resolved')).toMatchObject({ allow: true, auto: true })
+      expect(sent.findLast((e) => e.type === 'tool.completed')).toMatchObject({ output: 'ran' })
+    })
+
+    it("a worker's This space lands on its space", async () => {
+      const first = setup(textScript)
+      const space = createChat(first, { name: 'Space' })
+      first.core.close()
+      mkdirSync(join(first.garage, 'chats', 'sub'), { recursive: true })
+      const saved = { id: 'sub', name: 'Sub', parentId: space.id, worker: true, engine: 'fake', createdAt: at }
+      writeFileSync(join(first.garage, 'chats', 'sub', 'chat.json'), JSON.stringify(saved))
+      const t = setup(commandScript(COPY), first.garage)
+      const request = await ask(t, 'sub')
+      expect(request.sshHost).toEqual(ENTRY)
+      t.handle({ type: 'permission.respond', chatId: 'sub', requestId: request.requestId, allow: true, trustHost: 'space' })
+      await until(() => settled(t.core, 'sub'))
+      // A worker is removed once its turn ends: its answer as the window got it.
+      const sent = t.messages.flatMap((m) => (m.type === 'chat.entry' && m.chatId === 'sub' ? [m.entry] : []))
+      expect(sent.findLast((e) => e.type === 'permission.resolved')).toMatchObject({ allow: true })
+      expect(sent.findLast((e) => e.type === 'tool.completed')).toMatchObject({ output: 'ran' })
+      expect(JSON.parse(readFileSync(chatFile(t, space.id), 'utf8')).sshHosts).toEqual([ENTRY])
+      expect(settingsHosts(t)).toBeUndefined()
+    })
+
+    it('refuses Always allow with Deny, an unknown scope, or a request with no host', async () => {
+      const t = setup(commandScript(COPY))
+      const request = await ask(t, 'main')
+      const respond = (allow: boolean, trustHost: unknown) => () =>
+        t.handle({ type: 'permission.respond', chatId: 'main', requestId: request.requestId, allow, trustHost } as never)
+      expect(respond(false, 'space')).toThrow(/approves/)
+      expect(respond(true, 'everywhere')).toThrow(/"space" or "global"/)
+      expect(statusOf(t.core, 'main')).toBe('waiting')
+      const other = setup(commandScript('curl example.com'))
+      const plain = await ask(other, 'main')
+      expect(plain.sshHost).toBeUndefined()
+      expect(() =>
+        other.handle({ type: 'permission.respond', chatId: 'main', requestId: plain.requestId, allow: true, trustHost: 'space' }),
+      ).toThrow(/no SSH host/)
+    })
+
+    it('offers nothing where Allowed SSH hosts would not count: commands asking, or unsandboxed', async () => {
+      const t = setup(commandScript(COPY))
+      t.handle({ type: 'permission.setDefault', name: 'autoRunCommands', enabled: false })
+      expect((await ask(t, 'main')).sshHost).toBeUndefined()
+    })
   })
 
   it('asks before every command once the default is off, and saves the default in settings.json', async () => {
@@ -1350,25 +1586,6 @@ describe('commands', () => {
     t.handle({ type: 'permission.setDefault', name: 'autoNetworkCommands', enabled: true })
     t.handle({ type: 'chat.setPermission', chatId: 'main', name: 'autoNetworkCommands', enabled: false })
     expect(await turn(t)).toBe('waiting')
-  })
-
-  it('reads an old saved ask-before-network-commands default and chat pick flipped, and saves them under the new name', async () => {
-    const first = setup(textScript)
-    const space = createChat(first, { name: 'Space' })
-    first.core.close()
-    const settingsFile = join(first.garage, 'settings.json')
-    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), askNetworkCommands: false }))
-    const saved = JSON.parse(readFileSync(chatFile(first, space.id), 'utf8'))
-    writeFileSync(chatFile(first, space.id), JSON.stringify({ ...saved, askNetworkCommands: true }))
-    const t = setup(commandScript(`${ASK_FIRST_COMMANDS[0]} origin`), first.garage)
-    expect(t.core.workFolder()).toMatchObject({ autoNetworkCommands: true })
-    expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).toMatchObject({ autoNetworkCommands: true })
-    expect(JSON.parse(readFileSync(settingsFile, 'utf8'))).not.toHaveProperty('askNetworkCommands')
-    const chat = JSON.parse(readFileSync(chatFile(t, space.id), 'utf8'))
-    expect(chat).toMatchObject({ autoNetworkCommands: false })
-    expect(chat).not.toHaveProperty('askNetworkCommands')
-    expect(await turn(t, 'main')).toBe('idle')
-    expect(await turn(t, space.id)).toBe('waiting')
   })
 
   const fetchScript: FakeStep[] = [
@@ -3846,13 +4063,21 @@ describe('models', () => {
   }
 
   const row = (model: string, thinking?: ThinkingLevel, engine = 'fake') => ({ engine, model, ...(thinking && { thinking }) })
-  const seeded = { chat: [row(defaultModel, defaultThinking)], planning: [], searching: [], workers: [] }
+  const seeded = { chat: [row(defaultModel, defaultThinking)], workers: [] }
+  // An extension with a model list of its own, as Plan has.
+  const planner: Extension = {
+    id: 'planner',
+    name: 'Planner',
+    description: '',
+    enabledByDefault: true,
+    modelRoles: [{ id: 'planning', label: 'Planning', description: 'Plans.' }],
+  }
 
   it('fills an empty Chat list from what the engine runs by default, once the engines are detected', async () => {
     const garage = tempDir()
     writeFileSync(join(garage, 'settings.json'), JSON.stringify({ theme: 'dark' }))
     const t = setup(textScript, garage)
-    expect(t.core.modelLists()).toEqual({ chat: [], planning: [], searching: [], workers: [] })
+    expect(t.core.modelLists()).toEqual({ chat: [], workers: [] })
     await t.core.refreshEngines()
     expect(t.core.modelLists()).toEqual(seeded)
     expect(t.messages).toContainEqual({ type: 'models.updated', lists: seeded })
@@ -3863,7 +4088,7 @@ describe('models', () => {
 
   it('saves one list per role in settings.json, tells every client and keeps it after a restart', async () => {
     const garage = tempDir()
-    const t = setup(textScript, garage)
+    const t = setup(textScript, garage, TEST_STOP_GRACE_MS, [mainExtension, planner])
     await t.core.refreshEngines()
     const planning = [row(older, 'low'), row(newest, 'high')]
     t.handle({ type: 'models.setList', role: 'planning', models: [...planning, planning[0]!] })
@@ -3877,7 +4102,23 @@ describe('models', () => {
     }
     expect(() => t.handle({ type: 'models.setList', role: 'chat', models: [] })).toThrow(/Chat list needs/)
     t.core.close()
-    expect(setup(textScript, garage).core.modelLists()).toEqual(lists)
+    expect(setup(textScript, garage, TEST_STOP_GRACE_MS, [mainExtension, planner]).core.modelLists()).toEqual(lists)
+    // Without the extension that declares it, its list is kept, but can't be set.
+    const without = setup(textScript, garage)
+    expect(without.core.modelLists()).toEqual(lists)
+    expect(() => without.handle({ type: 'models.setList', role: 'planning', models: [] })).toThrow(/Unknown model role/)
+  })
+
+  it("lists an extension's roles while it's on, and shows why a role was left out on the extension", async () => {
+    const clash: Extension = { ...planner, id: 'clash', name: 'Clash', modelRoles: [{ id: 'planning', label: 'Mine' }] }
+    const t = setup(textScript, tempDir(), TEST_STOP_GRACE_MS, [mainExtension, planner, clash])
+    const info = (id: string) => t.core.extensions().find((e) => e.id === id)!
+    expect(info('planner').modelRoles).toEqual([{ id: 'planning', label: 'Planning', description: 'Plans.' }])
+    expect(info('clash').modelRoles).toBeUndefined()
+    expect(info('clash').loadError).toBe('Model role "planning" was left out: Planner declares it')
+    t.handle({ type: 'extension.setEnabled', extensionId: 'planner', enabled: false })
+    expect(info('planner').modelRoles).toBeUndefined()
+    expect(t.messages.findLast((m) => m.type === 'extension.updated')).toMatchObject({ extension: { id: 'planner', enabled: false } })
   })
 
   it("migrates per-engine lists and default thinking into one list per role without losing a row", async () => {
@@ -3973,15 +4214,22 @@ describe('models', () => {
   it("runs a role's list, else the Chat list while the role's own is empty", async () => {
     const t = setup(textScript)
     await t.core.refreshEngines()
+    let plannerOn = true
+    let planning: ReturnType<typeof row>[] = []
     const runs = (role: 'planning' | 'workers') => {
-      const settings = { engines: {}, models: t.core.modelLists() }
-      const options = { settings, save: () => {}, engines: t.core.engines, defaultEngine: 'fake', broadcast: () => {} }
+      const settings = { engines: {}, models: { ...t.core.modelLists(), planning } }
+      const roles = openModelRoles([planner], () => plannerOn)
+      const options = { settings, save: () => {}, engines: t.core.engines, defaultEngine: 'fake', broadcast: () => {}, roles }
       return openModels(options).runOf({ engine: 'fake', role })
     }
     expect(runs('workers')).toMatchObject({ model: defaultModel, thinking: defaultThinking })
-    t.handle({ type: 'models.setList', role: 'planning', models: [row(newest, 'low')] })
+    expect(runs('planning')).toMatchObject({ model: defaultModel })
+    planning = [row(newest, 'low')]
     expect(runs('planning')).toMatchObject({ model: newest, thinking: 'low' })
     expect(runs('workers')).toMatchObject({ model: defaultModel })
+    // With the extension that declares the role off, a chat on it runs the Chat list.
+    plannerOn = false
+    expect(runs('planning')).toMatchObject({ model: defaultModel })
   })
 
   it("runs at the row's level unless the chat picked its own, and picking the row's level follows it again", async () => {

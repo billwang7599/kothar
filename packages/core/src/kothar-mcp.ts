@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { ChatSummary, ExtensionHost, ExtensionTool, ExtensionValues } from '@kothar/extension-api'
+import type { ChatSummary, ExtensionHost, ExtensionModelRole, ExtensionTool, ExtensionValues } from '@kothar/extension-api'
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node'
 import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server'
 import * as z from 'zod'
@@ -14,12 +14,18 @@ type Hub = {
   chats(): ChatState[]
   seesAll(chatId: string): boolean
   // A worker below parentId: the same call an extension's host.createChat makes with a parentId.
-  createChild(parentId: string, spec: { name: string; role?: ModelRole }): ChatInfo
+  createChild(parentId: string, spec: { name: string; role?: ModelRole; checkout?: 'own' | 'shared' }): ChatInfo
+  // The model roles extensions on for this chat declare (Extension.modelRoles): what its spawn_worker may name.
+  roles(chatId: string): ExtensionModelRole[]
   send(chatId: string, text: string): void
   // A message for a chat that may be mid-turn, as its composer sends one: steered in, queued or sent.
   deliver(chatId: string, text: string): 'sent' | 'steered' | 'queued'
   // What the chat's Stop button does.
   stop(chatId: string): void
+  // The forget tool: asks the user, then removes the messages from the chat (message-edits.ts forget).
+  forget(chatId: string, ids: unknown): Promise<string>
+  // review_worker: Keep, or Merge, Squash or Discard on the user's say (core.ts reviewWorkerFor).
+  reviewWorker(chatId: string, workerId: string, action: 'merge' | 'squash' | 'discard' | 'keep'): Promise<string>
   // Whether that chat's agent may start workers (Settings → Workers, and its setup), and how many of its children may
   // run at once (-1: no limit).
   workers(chatId: string): { enabled: boolean; limit: number }
@@ -56,13 +62,32 @@ function messages(chat: ChatState) {
 type Context = { hub: Hub; caller: ChatState; reachable: (chatId: string) => ChatState }
 
 type Tool = {
-  for: 'reach' | 'workers'
+  // all: every chat, its own chat being what it acts on.
+  // review: as workers, but not for an extension's own chat (Home), whose workers never get checkouts of their own.
+  for: 'reach' | 'workers' | 'review' | 'all'
   description: string
-  input: z.ZodObject
+  // Or made for each chat, as its session lists the tools, from what's on for it.
+  input: z.ZodObject | ((hub: Hub, caller: ChatState) => z.ZodObject)
   run(context: Context, input: any): unknown
 }
 
 const TOOLS: Record<string, Tool> = {
+  forget: {
+    for: 'all',
+    description:
+      'Permanently remove messages from this chat and its memory, only when the user asks you to forget or remove ' +
+      'something. ids are message ids from your memory: numbers, memory lines such as "120+8", or ranges such as ' +
+      '"120-127". A reply goes whole, with its tool calls. The user is shown each message and confirms first; the ' +
+      "turn that's running can't be forgotten. reason: a few words for yourself, never logged. Don't repeat what you " +
+      'forgot.',
+    input: z.object({
+      ids: z.array(z.union([z.number().int(), z.string()])).min(1),
+      reason: z.string().max(200).optional(),
+    }),
+    run({ hub, caller }: Context, { ids }: { ids: unknown }) {
+      return hub.forget(caller.id, ids)
+    },
+  },
   list_chats: {
     for: 'reach',
     description: 'List the chats this one can reach, with their status.',
@@ -108,19 +133,43 @@ const TOOLS: Record<string, Tool> = {
       return `Stopping chat "${chatId}"`
     },
   },
+  review_worker: {
+    for: 'review',
+    description:
+      "Act on a finished worker's changes, which wait on its own branch after its report: merge or squash them into " +
+      "your space's branch, discard them (worktree and branch removed), or keep them for later. Merge, squash and " +
+      'discard ask the user first; a merge that conflicts is undone and reported, its branch left waiting. Give the ' +
+      "worker's id from its report.",
+    input: z.object({ workerId: z.string(), action: z.enum(['merge', 'squash', 'discard', 'keep']) }),
+    run({ hub, caller }: Context, { workerId, action }: { workerId: string; action: 'merge' | 'squash' | 'discard' | 'keep' }) {
+      return hub.reviewWorker(caller.id, workerId, action)
+    },
+  },
   spawn_worker: {
     for: 'workers',
     description:
       'Start a worker: a new chat below this one that works on the task, in this folder, on the models the ' +
       'user picked for workers. Its final reply comes back to you as a message when its turn ends, so ' +
-        "don't poll it. Give a role to run it on that role's models instead. It uses this chat's setup and gets the same " +
+        "don't poll it. Give a role, if any are listed, to run it on that role's models instead. It uses this chat's setup and gets the same " +
       'tools as this chat (deep research, notes, MCP servers and the rest), so it can run any of them for you. Returns ' +
-      'its id.',
-    input: z.object({
-      task: z.string().min(1),
-      role: z.enum(['planning', 'searching']).optional(),
-    }),
-    run({ hub, caller }: Context, { task, role }: { task: string; role?: ModelRole }) {
+      'its id. In a space with git folders it works on a branch and worktree of its own by default, and its changes ' +
+      'wait in its report for review (review_worker); give checkout "shared" for a task that only reads, so it works in ' +
+      'your checkout instead.',
+    // The roles are the ones extensions on for this chat declare (Plan's planning, Deep Research's searching); with
+    // none, there's no role to give.
+    input: (hub, caller) => {
+      const roles = hub.roles(caller.id)
+      const [first, ...rest] = roles.map((role) => role.id)
+      const checkout = z.enum(['own', 'shared']).optional()
+      if (first === undefined) return z.object({ task: z.string().min(1), checkout })
+      const about = roles.map((role) => `${role.id}: ${role.label}${role.description ? ` (${role.description})` : ''}`)
+      return z.object({
+        task: z.string().min(1),
+        role: z.enum([first, ...rest]).optional().describe(`Which models it runs on. ${about.join('; ')}.`),
+        checkout,
+      })
+    },
+    run({ hub, caller }: Context, { task, role, checkout }: { task: string; role?: ModelRole; checkout?: 'own' | 'shared' }) {
       // Every running child counts, an extension's too (Deep Research's searches), so the user's limit holds.
       const { limit } = hub.workers(caller.id)
       const running = hub.chats().filter((c) => c.parentId === caller.id && c.worker && c.status !== 'idle').length
@@ -131,7 +180,7 @@ const TOOLS: Record<string, Tool> = {
         )
       }
       const name = workerName(task)
-      const chat = hub.createChild(caller.id, { name, ...(role && { role }) })
+      const chat = hub.createChild(caller.id, { name, ...(role && { role }), ...(checkout && { checkout }) })
       hub.send(chat.id, task)
       return { chatId: chat.id }
     },
@@ -163,10 +212,14 @@ export function openKotharMcp(hub: Hub) {
 
   const offers = (caller: ChatState, tool: Tool) => {
     const spawns = !caller.worker && hub.workers(caller.id).enabled
+    if (tool.for === 'all') return true
     if (tool.for === 'workers') return spawns
+    if (tool.for === 'review') return spawns && !caller.extension
     return spawns || hub.seesAll(caller.id)
   }
   const extensionToolsFor = (caller: ChatState) => hub.extensionTools(caller.id).filter(({ tool }) => tool.offered(summaryOf(caller)))
+
+  const inputOf = (tool: Tool, caller: ChatState) => (typeof tool.input === 'function' ? tool.input(hub, caller) : tool.input)
 
   const serverFor = (callerId: string) => {
     const server = new McpServer({ name: 'kothar', version: '0.0.0' })
@@ -188,7 +241,7 @@ export function openKotharMcp(hub: Hub) {
     }
     for (const [name, tool] of Object.entries(TOOLS)) {
       if (!offers(caller, tool)) continue
-      server.registerTool(name, { description: tool.description, inputSchema: tool.input }, (input: any) =>
+      server.registerTool(name, { description: tool.description, inputSchema: inputOf(tool, caller) }, (input: any) =>
         answer((caller, chats) => {
           const reachable = (chatId: string) => {
             const chat = chats.find((c) => c.id === chatId)
@@ -236,7 +289,7 @@ export function openKotharMcp(hub: Hub) {
       return [
         ...Object.entries(TOOLS)
           .filter(([, tool]) => offers(chat, tool))
-          .map(([name, tool]) => ({ name, description: tool.description, schema: z.toJSONSchema(tool.input) })),
+          .map(([name, tool]) => ({ name, description: tool.description, schema: z.toJSONSchema(inputOf(tool, chat)) })),
         ...extensionToolsFor(chat).map(({ tool, extension }) => ({
           name: tool.name,
           description: tool.description,

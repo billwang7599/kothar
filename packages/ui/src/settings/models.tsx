@@ -1,35 +1,29 @@
-// The Models page: one ordered list of models per role.
+// The Models page: one ordered list of models per role, Kothar's own (Chat, Workers) and each one an extension that's on
+// declares (Extension.modelRoles).
 import {
-  MODEL_ROLES,
   levelsOf,
-  ROLE_NAMES,
   THINKING_LABELS,
   type ClientMessage,
   type EngineInfo,
+  type ExtensionInfo,
   type ModelLists,
-  type ModelRole,
   type ModelRow,
   type ThinkingLevel,
 } from '@kothar/core/shared'
 import { Button, GROUP, Select } from '../controls.tsx'
-import { engineName, engineProblem, modelChoices, modelKey, fromModelKey } from '../state.ts'
+import { engineName, engineProblem, modelChoices, modelKey, fromModelKey, modelRolesOf } from '../state.ts'
 import { SettingRow } from './rows.tsx'
-
-const ROLE_ABOUT: Record<ModelRole, string> = {
-  chat: 'Chats you start.',
-  planning: 'Workers started to plan.',
-  searching: 'Workers started to search.',
-  workers: 'Every other worker.',
-}
 
 type ModelListsProps = {
   engines: EngineInfo[]
   lists: ModelLists
+  // For the roles extensions that are on declare.
+  extensions?: ExtensionInfo[]
   connected: boolean
   send: (m: ClientMessage) => void
 }
 
-export function ModelListsSection({ engines, lists, connected, send }: ModelListsProps) {
+export function ModelListsSection({ engines, lists, extensions, connected, send }: ModelListsProps) {
   const choices = modelChoices(engines)
   const quiet = engines.filter((e) => e.enabled && !e.models?.length)
   const engineOf = (id: string) => engines.find((e) => e.id === id)
@@ -41,9 +35,9 @@ export function ModelListsSection({ engines, lists, connected, send }: ModelList
         </p>
       ))}
       <div className={GROUP}>
-        {MODEL_ROLES.map((role) => {
-          const list = lists[role]
-          const [name, about] = [ROLE_NAMES[role], ROLE_ABOUT[role]]
+        {modelRolesOf(extensions).map(({ id: role, label: name, description, extension }) => {
+          const list = lists[role] ?? []
+          const about = [description, extension && `From ${extension}.`].filter(Boolean).join(' ')
           const setList = (models: ModelRow[]) => send({ type: 'models.setList', role, models })
           const move = (from: number, to: number) => {
             const next = [...list]

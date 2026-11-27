@@ -1,8 +1,8 @@
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ChatDetail, Extension, ExtensionContext, SentTurn, SpaceDetail } from '@kothar/extension-api'
-import { randomUUID } from 'node:crypto'
+import type { ChatDetail, ChatUsage, Extension, ExtensionContext, SentTurn, SpaceDetail, Usage, UsageRecord } from '@kothar/extension-api'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { openAccounts } from './accounts.ts'
 import { openChatSetups, openSetups } from './setups.ts'
 import { openGroupActions, openGroups } from './groups.ts'
@@ -19,8 +19,10 @@ import { type Fetch, openMarketplace } from './marketplace.ts'
 import { readApprovals } from './approvals.ts'
 import { type CommunityExtension, type ExtensionHook, valuesOf } from './extensions.ts'
 import { gatherExtensions } from './community-load.ts'
+import { checkSshHosts } from './ssh-hosts.ts'
 import {
   editsAnywhere,
+  type SshHost,
   type Adapter,
   type ChatEntry,
   type ChatInfo,
@@ -35,7 +37,7 @@ import {
   type Setup,
 } from './shared.ts'
 import { followModels as followChatModels, nameModels, openModels } from './models.ts'
-import { moveExtensionsDir } from './vocab-move.ts'
+import { openModelRoles } from './model-roles.ts'
 import { openProtocol } from './protocol.ts'
 import { openExtensionSwitches } from './extension-switches.ts'
 import { migrateExtensionSettings, openExtensionSettings } from './extension-settings.ts'
@@ -49,25 +51,39 @@ import type { Chat } from './chat.ts'
 import { pageOf } from './history.ts'
 import { reaches } from './reach.ts'
 import { lockGarage } from './garage-lock.ts'
+import { recordingMachine, stopLeftovers } from './process-records.ts'
 import { openFolderAccess, realOr } from './folder-access.ts'
 import { openFileLinks } from './file-links.ts'
-import { openCheckouts } from './checkouts.ts'
+import { openCheckouts, type Checkout } from './checkouts.ts'
+import {
+  changesText,
+  hasChanges,
+  openWorkerCheckouts,
+  reviewText,
+  totalsOf,
+  workerWorkDirOf,
+  type MergeResult,
+  type ReviewAction,
+} from './worker-checkouts.ts'
 import { openFolderCopies } from './folder-copies.ts'
 import { placeAccess, placesOf } from './folder-modes.ts'
 import { extensionPicture, extensionStorageDir } from './extension-files.ts'
 import { openExtensionHosts } from './extension-host.ts'
 import { appendEntry, openSettings, saveChatFile } from './chat-store.ts'
 import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
+import { QUEUE_FILE } from './queue-store.ts'
 import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
+import { addUsage, appendUsage, carryUsage, cleanUsage, sumTotals, totalsOf as usageTotalsOf, USAGE_FILE, usedText } from './usage.ts'
 import { openMessageEdits } from './message-edits.ts'
+import { openAcpAgents } from './acp-agents.ts'
 
 // Kept here too, for code that imports them from the core.
 export { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
 
 export const STOP_GRACE_MS = 60_000
 // A chat's own files, which extensions' chat storage can't touch.
-const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, 'attachments', TOOL_IMAGES_DIR]
+const CHAT_OWN_FILES = ['chat.json', 'log.jsonl', 'AGENTS.md', PARENT_VIEW_FILE, QUEUE_FILE, 'attachments', TOOL_IMAGES_DIR, USAGE_FILE]
 
 
 export type Core = ReturnType<typeof openCore>
@@ -78,10 +94,17 @@ type CoreOptions = Parameters<typeof assembleCore>[0]
 // same garage fails here and changes nothing.
 export function openCore(options: CoreOptions) {
   mkdirSync(options.garage, { recursive: true })
-  const release = lockGarage(realpathSync(options.garage))
+  const garage = realpathSync(options.garage)
+  const release = lockGarage(garage)
   let core: ReturnType<typeof assembleCore>
   try {
-    core = assembleCore(options)
+    // What a core that crashed left running stops before anything loads (process-records.ts); this core's own
+    // processes are recorded from here on.
+    const stopped = stopLeftovers(garage)
+    if (stopped.length) {
+      console.warn(`Kothar stopped ${stopped.length} process${stopped.length === 1 ? '' : 'es'} an earlier Kothar left running: ${stopped.map((r) => `${r.command} (${r.pgid})`).join(', ')}`)
+    }
+    core = assembleCore({ ...options, machine: recordingMachine(garage, options.machine) })
   } catch (error) {
     release()
     throw error
@@ -127,10 +150,12 @@ function assembleCore(options: {
   home?: string
   now?: () => Date
 }) {
-  const { adapters, defaultEngine, machine, stopGraceMs = STOP_GRACE_MS, home = homedir(), now = () => new Date() } = options
+  const { defaultEngine, machine, stopGraceMs = STOP_GRACE_MS, home = homedir(), now = () => new Date() } = options
   mkdirSync(options.garage, { recursive: true })
   // Context paths are saved resolved, so attachment paths must be too for a pin to match its file.
   const garage = realpathSync(options.garage)
+  // Kept in place: the ACP agents the user adds join and leave it (acp-agents.ts), and every module holds this list.
+  const adapters = [...options.adapters]
   const adapterFor = (engine: string) => adapters.find((adapter) => adapter.id === engine)
   const checkEngine = (engine: string) => {
     if (!adapterFor(engine)) {
@@ -149,13 +174,19 @@ function assembleCore(options: {
     fetch: options.fetch,
   })
   const { settings, save: saveSettings } = openSettings(garage)
-  moveExtensionsDir(garage)
   // What the user turned on, per community extension (approvals.ts). One whose files aren't those didn't start; its
   // switch goes off, so turning it on again is the user reviewing the new files.
   const savedApprovals = readApprovals(garage) ?? {}
   const heldOn = [...community].filter(([id, c]) => c.held && settings.extensions?.[id]?.enabled === true)
   for (const [id] of heldOn) settings.extensions = { ...settings.extensions, [id]: { ...settings.extensions?.[id], enabled: false } }
-  if (heldOn.length) saveSettings()
+  // An always-on extension's switch from when it had one (Home could be turned off) is dropped, so Settings never
+  // holds an "off" that does nothing.
+  const switchless = extensions.filter((e) => e.alwaysOn && !community.has(e.id) && settings.extensions?.[e.id]?.enabled !== undefined)
+  for (const { id } of switchless) {
+    const { enabled: _, ...rest } = settings.extensions![id]!
+    settings.extensions = { ...settings.extensions, [id]: rest }
+  }
+  if (heldOn.length || switchless.length) saveSettings()
   const brokenExtensions = options.brokenExtensions ?? []
   // Extensions whose saved settings failed to migrate at load, and why; shown on the extension like a load error.
   const settingsErrors = new Map<string, string>()
@@ -172,6 +203,7 @@ function assembleCore(options: {
   const switchedOn = (extension: Extension) => {
     const saved = settings.extensions?.[extension.id]?.enabled
     if (community.has(extension.id)) return communityOn() && saved === true
+    if (extension.alwaysOn) return true
     return typeof saved === 'boolean' ? saved : extension.enabledByDefault
   }
   // Whether an extension runs: its switch is on (switchedOn), and so is every extension it requires, all the way down.
@@ -204,9 +236,38 @@ function assembleCore(options: {
   const engineInfo = (id: string): EngineInfo => {
     const status = detected.get(id) ?? { installed: false, signedIn: false }
     const { name, steering } = adapterFor(id) ?? {}
-    return { id, ...(name && { name }), enabled: isEnabled(id), ...status, ...(steering && { steering }) }
+    const acp = acpAgents.agentOf(id)
+    return { id, ...(name && { name }), enabled: isEnabled(id), ...status, ...(steering && { steering }), ...(acp && { acp }) }
   }
   const engineInfos = () => adapters.map((adapter) => engineInfo(adapter.id))
+  const detectEngine = async (adapter: Adapter) => {
+    try {
+      detected.set(adapter.id, nameModels(await adapter.detect(machine)))
+    } catch (error) {
+      detected.set(adapter.id, { installed: false, signedIn: false, detail: messageOf(error) })
+    }
+    broadcast({ type: 'engine.updated', engine: engineInfo(adapter.id) })
+  }
+  // The user's ACP agents; detection and chats come in through functions, as they open further down.
+  const acpAgents = openAcpAgents({
+    settings,
+    saveSettings,
+    adapters,
+    home,
+    isBusy: (engine) => [...chats.values()].some((chat) => chat.info.engine === engine && chat.status !== 'idle'),
+    async detect(adapter) {
+      await detectEngine(adapter)
+      models.settle()
+      followModels()
+    },
+    forget(engine) {
+      detected.delete(engine)
+      models.settle()
+      followModels()
+    },
+    engineInfos,
+    broadcast: (message) => broadcast(message),
+  })
   const listeners: ((message: CoreMessage) => void)[] = []
   const broadcast = (message: CoreMessage) => listeners.forEach((listener) => listener(message))
   // Every window hears what's installed now, and the themes it can show.
@@ -215,7 +276,10 @@ function assembleCore(options: {
     broadcast({ type: 'market.installed', items: marketplace.installed() })
   }
   // Everything about which engine, model and thinking level runs lives here.
-  const models = openModels({ settings, save: saveSettings, engines: engineInfos, defaultEngine, broadcast })
+  // Model roles: Kothar's own and the ones extensions declare (Extension.modelRoles).
+  const modelRoles = openModelRoles(extensions, isOn)
+  for (const [id, problem] of modelRoles.problems) console.error(`Extension ${id}: ${problem}`)
+  const models = openModels({ settings, save: saveSettings, engines: engineInfos, defaultEngine, broadcast, roles: modelRoles })
   const offersModel = (engine: string, model?: string) => detected.get(engine)?.models?.some((m) => m.id === model) === true
   const checkEnabled = (engine: string) => {
     if (!isEnabled(engine)) throw new Error(`Engine "${engine}" is off. Turn it on in Settings.`)
@@ -332,6 +396,7 @@ function assembleCore(options: {
     community,
     approvalOf: (id) => approvalOf(id),
     settingsErrors,
+    modelRoles,
     isOn,
     ownSwitch,
     extensionValues,
@@ -353,14 +418,19 @@ function assembleCore(options: {
     chat.shownRun = JSON.stringify(run)
     return { ...chat.info, ...(run && { run }) }
   }
-  const state = (chat: Chat): ChatState => ({
-    ...withRun(chat),
-    status: chat.status,
-    entries: chat.entries,
-    draft: chat.unsavedText,
-    queue: chat.queue,
-    ...(chat.waits.size && { waits: waitsOf(chat) }),
-  })
+  const state = (chat: Chat): ChatState => {
+    const { own, carried } = usageOf(chat)
+    return {
+      ...withRun(chat),
+      status: chat.status,
+      entries: chat.entries,
+      draft: chat.unsavedText,
+      queue: chat.queue,
+      ...(chat.waits.size && { waits: waitsOf(chat) }),
+      ...(own.turns + own.calls > 0 && { usage: { ...own } }),
+      ...(carried.turns + carried.calls > 0 && { workersUsage: { ...carried } }),
+    }
+  }
   // A chat as the UI's views get it: only the latest page of its log, which the UI pages back through (chat.history).
   const shownState = (chat: Chat): ChatState => {
     const { from, entries } = pageOf(chat.entries)
@@ -405,13 +475,15 @@ function assembleCore(options: {
     const chatId = typeof request.chatId === 'string' && chats.has(request.chatId) ? request.chatId : undefined
     const { chatId: _chatId, ...call } = request
     const started = Date.now()
+    // What the call used, if the engine says, for its Activity line.
+    const used: Usage[] = []
     const record = (outcome: { result?: string; error?: unknown }) =>
       activity.emit(chatId, () => ({
         kind: 'model',
         ...(from && { by: from }),
         title: `Called ${model ?? 'a model'}${engine ? ` on ${adapterFor(engine)?.name ?? engine}` : ''}`,
         ...(model && { model }),
-        detail: `${((Date.now() - started) / 1000).toFixed(1)} s${request.schema ? ', asked for JSON' : ''}`,
+        detail: `${((Date.now() - started) / 1000).toFixed(1)} s${request.schema ? ', asked for JSON' : ''}${usedText(used)}`,
         sections: [
           { label: 'Instructions (system)', text: request.system },
           { label: 'Prompt', text: request.prompt },
@@ -426,7 +498,15 @@ function assembleCore(options: {
       const cwd = join(chosenWorkFolder(), 'home')
       mkdirSync(cwd, { recursive: true })
       const sandbox = sandboxIn(cwd)
-      const options = { ...call, cwd, model, ...accounts.sessionFor(adapter.id), ...(sandbox && { sandbox }) }
+      const onUsage = (usage: Usage) => {
+        used.push(usage)
+        recordUsage(chatId === undefined ? undefined : chats.get(chatId), { model, ...usage }, {
+          engine: adapter.id,
+          source: 'complete',
+          extension: from?.id,
+        })
+      }
+      const options = { ...call, cwd, model, ...accounts.sessionFor(adapter.id), ...(sandbox && { sandbox }), onUsage }
       const result = await adapter.complete(machine, options)
       record({ result })
       return result
@@ -508,7 +588,7 @@ function assembleCore(options: {
       ...(run && run.engine === chat.info.engine && { model: run.model }),
       status: chat.status,
       archived: chat.info.archived,
-      ...(chat.info.extension && { extension: chat.info.extension, mod: chat.info.extension }),
+      ...(chat.info.extension && { extension: chat.info.extension }),
       keepsContext: !chainOf(chat)[0]!.info.extension,
       folders: chat.info.folders,
       files: chat.info.files,
@@ -518,7 +598,10 @@ function assembleCore(options: {
   }
 
   const spaceOf = (chat: Chat): SpaceDetail => {
-    const { id, name, workDir, folders, worktrees = {} } = chainOf(chat)[0]!.info
+    const { id, name, workDir, folders, worktrees = {}, workerBranches = {} } = chainOf(chat)[0]!.info
+    const workerCheckouts = Object.entries(workerBranches).flatMap(([worker, entry]) =>
+      entry.repos.map(({ folder, path, branch, into }) => ({ folder, path, branch, from: into, worker, name: entry.name, state: entry.state })),
+    )
     return {
       id,
       name,
@@ -530,6 +613,7 @@ function assembleCore(options: {
         branch,
         ...(from && { from }),
       })),
+      ...(workerCheckouts.length && { workerCheckouts }),
     }
   }
 
@@ -548,6 +632,60 @@ function assembleCore(options: {
 
   // With a chat: only the extensions that shape its sessions (see isOnFor).
   const watchersOf = (hook: ExtensionHook, chat?: Chat) => extensions.filter((extension) => isOnFor(extension, chat) && extension[hook])
+
+  // Usage (usage.ts): a chat's totals, read from its usage.jsonl once and kept up to date as reports come in.
+  const usageOf = (chat: Chat) => (chat.usage ??= usageTotalsOf(chat.dir, chat.info.id))
+  // Saves what an engine reported, tells the UI the chat's new totals and the extensions that watch (onUsage). chat
+  // absent: a one-shot call no chat asked for, kept in the garage's usage.jsonl.
+  const recordUsage = (chat: Chat | undefined, reported: Usage, meta: Pick<UsageRecord, 'engine' | 'source' | 'turn' | 'extension'>) => {
+    const usage = cleanUsage(reported)
+    if (!usage) return
+    const record: UsageRecord = {
+      at: now().toISOString(),
+      ...(chat && { chatId: chat.info.id }),
+      ...Object.fromEntries(Object.entries(meta).filter(([, value]) => value !== undefined)),
+      ...usage,
+    } as UsageRecord
+    // Read before the file grows, or the new record would count twice.
+    const totals = chat && usageOf(chat)
+    try {
+      appendUsage(chat?.dir ?? garage, record)
+    } catch (error) {
+      console.error('Kothar could not save usage:', error)
+      return
+    }
+    if (chat && totals) {
+      addUsage(totals.own, record)
+      broadcast({ type: 'chat.usage', chatId: chat.info.id, usage: { ...totals.own } })
+    }
+    if (quitting) return
+    const report = { usage: record, ...(chat && { chat: detailOf(chat) }) }
+    for (const extension of watchersOf('onUsage', chat)) callExtension(extension, () => extension.onUsage!(report, contextOf(extension)))
+  }
+  // A chat's usage, its workers' (running and removed) and its space's: the top chat and every chat below it.
+  const chatUsage = (chat: Chat): ChatUsage => {
+    const everything = (c: Chat) => [usageOf(c).own, usageOf(c).carried]
+    return {
+      chat: { ...usageOf(chat).own },
+      workers: sumTotals([usageOf(chat).carried, ...familyOf(chat).slice(1).flatMap(everything)]),
+      space: sumTotals(familyOf(chainOf(chat)[0] ?? chat).flatMap(everything)),
+    }
+  }
+  // A worker's folder is about to go (removeChats): its usage, and that of any chat below it, moves to the chat above, so
+  // the space's total keeps it.
+  const keepUsage = (family: Chat[]) => {
+    const parent = family[0] && parentOf(family[0])
+    if (!parent || family.includes(parent)) return
+    try {
+      const totals = usageOf(parent)
+      const moved = carryUsage(family.map((c) => c.dir), parent.dir)
+      if (!moved.length) return
+      for (const record of moved) addUsage(totals.carried, record)
+      broadcast({ type: 'chat.usage', chatId: parent.info.id, usage: { ...totals.own }, workers: { ...totals.carried } })
+    } catch (error) {
+      console.error('Kothar could not keep a worker’s usage:', error)
+    }
+  }
   // What Kothar and its extensions do on their own, for extensions that watch (onActivity), such as the Inspector.
   const activity = openActivity<Chat>({
     now,
@@ -618,7 +756,8 @@ function assembleCore(options: {
     setQueue,
     canSteer,
     interrupt,
-    respond,
+    respond: respondTurn,
+    sshHostAsked,
     answer,
     retry,
     continueTurn,
@@ -628,7 +767,9 @@ function assembleCore(options: {
     whenAllStopped,
     requestPermission,
     startWaitingWorkers,
+    resumeQueues,
   } = openTurns({
+    liveRole: modelRoles.live,
     garage,
     home,
     now,
@@ -667,7 +808,8 @@ function assembleCore(options: {
     workDirOf: (chat) => workDirOf(chat),
     sandboxIn,
     attachmentsDirOf: (chat) => attachmentsDirOf(chat),
-    checkoutOf: (space, folder, workDir, sandboxed) => checkoutOf(space, folder, workDir, sandboxed),
+    checkoutOf: (space, folder, workDir, sandboxed, chat) => checkoutOf(space, folder, workDir, sandboxed, chat),
+    workerChanges: (chat) => workerChanges(chat),
     copyOf: (space, folder, workDir) =>
       copies.copyOf(space, folder, workDir).finally(() => broadcastContext(space)),
     viewOf,
@@ -677,6 +819,7 @@ function assembleCore(options: {
     workerLimit: () => workers.limit(),
     engineToolsFor: (chat, engine) => engineTools.sessionFor(engine, providedFor(chat)),
     toolsListed: (engine, names) => engineTools.record(engine, names),
+    usage: (chat, usage, engine, turn) => recordUsage(chat, usage, { engine, source: 'turn', turn }),
     modesTaken: (chat) => {
       if (shown(chat)) broadcast(extensionsOf(chat))
     },
@@ -727,6 +870,7 @@ function assembleCore(options: {
     accounts,
     run: () => runFor(),
     complete: completeFor,
+    usage: chatUsage,
     activity,
     promptText: prompts.textOf,
     broadcast,
@@ -758,6 +902,7 @@ function assembleCore(options: {
     })
 
   const { loadAll, createChat, createChild, renameChat, archiveChat, moveChat, removeChats, deleteChat } = openChatLifecycle({
+    keepUsage,
     chats,
     chatsDir,
     home,
@@ -765,6 +910,7 @@ function assembleCore(options: {
     broadcast,
     extensionChats,
     models,
+    liveRole: modelRoles.live,
     checkEngine,
     checkEnabled,
     chatFor,
@@ -785,7 +931,9 @@ function assembleCore(options: {
     stopSession,
     forgetChat,
     removeWorkDir: (chat) => removeWorkDir(chat),
+    queueMessage: (chat, message) => setQueue(chat, [...chat.queue, { id: randomUUID().slice(0, 8), ...message }]),
     hasGroup: spaceGroups.has,
+    ownCheckouts: () => workers.ownCheckouts(),
   })
   loadAll()
   const groupActions = openGroupActions({
@@ -860,6 +1008,25 @@ function assembleCore(options: {
     updateChat(chat, models.choose(choosesOf(chat), engine, model, thinking))
   }
 
+  // Approves or denies a request; with trust, first adds the SSH server its card offered (sshHostAsked) to Allowed SSH
+  // hosts: the space's own list ("This space") or Settings' ("All spaces"). The lists add up (sshHostsOf), so nothing
+  // else needs it. A worker's card writes to its space.
+  const respond = (chat: Chat, requestId: string, allow: boolean, trust?: unknown) => {
+    if (trust !== undefined) {
+      if (trust !== 'space' && trust !== 'global') throw new Error('Always allow takes "space" or "global"')
+      if (!allow) throw new Error('Always allow approves the request')
+      const host = sshHostAsked(chat, requestId)
+      if (!host) throw new Error('This request has no SSH host to always allow')
+      const add = (list: SshHost[]) => checkSshHosts(list.some((e) => e.host === host.host && e.key === host.key) ? list : [...list, host])
+      if (trust === 'global') setSshHostsDefault(add(settings.sshHosts ?? []))
+      else {
+        const space = chainOf(chat)[0]!
+        updateChat(space, { sshHosts: add(space.info.sshHosts ?? []) })
+      }
+    }
+    respondTurn(chat, requestId, allow)
+  }
+
   const checkActive = (chat: Chat) => {
     if (chat.info.archived) throw new Error('This chat is archived. Unarchive it first.')
   }
@@ -905,10 +1072,130 @@ function assembleCore(options: {
     return space.info.workDir!
   }
 
-  const { checkoutOf, gitAccess, removeWorkDir } = openCheckouts<Chat>({
+  const { checkoutOf: spaceCheckoutOf, gitAccess, removeWorkDir: removeSpaceWorkDir } = openCheckouts<Chat>({
     machine,
     saveWorktrees: (space, worktrees) => updateChat(space, { worktrees }),
   })
+
+  // Workers' own checkouts (worker-checkouts.ts): kept on their space, since a worker goes once it reports.
+  const workerCheckouts = openWorkerCheckouts<Chat>({
+    machine,
+    now,
+    saveBranches: (space, workerBranches) => {
+      if (chats.get(space.info.id) === space) updateChat(space, { workerBranches })
+    },
+  })
+  const ownsCheckouts = (chat: Chat) => !!chat.info.worker && chat.info.checkout === 'own'
+  // The space a worker's branches are kept on, while it's still there (not mid-delete with it).
+  const spaceOfWorker = (chat: Chat) => {
+    let at: Chat | undefined = chat
+    while (at?.info.parentId !== undefined) at = chats.get(at.info.parentId)
+    return at && at !== chat && !at.info.extension ? at : undefined
+  }
+
+  // A git folder checked out for a turn: the space's checkout, or for a worker with its own checkouts a worktree of
+  // its own made from it, with the space's setup script run in it once it's made. Its sandbox may not move the branch
+  // of the space's checkout or any other worker's.
+  const checkoutOf = async (space: Chat, folder: string, workDir: string, sandboxed: boolean, chat?: Chat): Promise<Checkout> => {
+    if (!chat || !ownsCheckouts(chat) || space.info.extension) return spaceCheckoutOf(space, folder, workDir, sandboxed)
+    const shared = await spaceCheckoutOf(space, folder, workDir, false)
+    const own = workerWorkDirOf(workDir, chat.info.id)
+    const { worktree, made } = await workerCheckouts.checkoutOf(space, chat, folder, shared.worktree, own)
+    const script = space.info.setupScript?.trim()
+    if (made && script) {
+      append(chat, { at: now().toISOString(), type: 'extension.note', text: `Running the space's setup script in ${worktree.path}…` })
+      const { ok, code, output } = await workerCheckouts.runSetup(script, worktree.path)
+      const shown = output ? `\n\n\`\`\`\n${output}\n\`\`\`` : ''
+      append(chat, {
+        at: now().toISOString(),
+        type: 'extension.note',
+        text: `${ok ? 'Setup script done' : `Setup script failed (exit ${code})`} in ${worktree.path}${shown}`,
+      })
+      if (!ok) throw new Error(`The space's setup script failed in ${worktree.path} (exit ${code})${output ? `: ${output.slice(-500)}` : ''}`)
+    }
+    const access = sandboxed ? await gitAccess(folder, own) : { writable: [], readOnly: [] }
+    return { folder, worktree, ...access, own: true }
+  }
+
+  // A chat goes: a space takes its workers' worktrees with it (their leftovers committed first), and a worker's own
+  // branches wait on its space for review, or go when it changed nothing.
+  const removeWorkDir = async (chat: Chat) => {
+    if (chat.info.worker) {
+      const space = ownsCheckouts(chat) ? spaceOfWorker(chat) : undefined
+      if (space) await workerCheckouts.settle(space, chat.info.id)
+      return
+    }
+    await workerCheckouts.removeAll(chat).catch((error) => broadcast({ type: 'error', message: messageOf(error) }))
+    await removeSpaceWorkDir(chat)
+  }
+
+  // A worker with its own checkouts reports: what it changed there, as lines for its lead. Undefined at once for a
+  // worker with none made (no git folders, or sharing the space's), so its report goes out as it always did.
+  const workerChanges = (chat: Chat) => {
+    const space = ownsCheckouts(chat) ? spaceOfWorker(chat) : undefined
+    if (!space?.info.workerBranches?.[chat.info.id]) return undefined
+    return workerCheckouts.summarize(space, chat.info.id).then((entry) => (entry && hasChanges(entry.changes) ? changesText(entry) : undefined))
+  }
+
+  // Review of a worker's changes once it's gone: Merge or Squash into the space's branches, Discard, or Keep. The note
+  // in the space's chat says what happened; the text is returned too, for the lead's tool. One at a time per worker.
+  const reviewing = new Set<string>()
+  const reviewWorker = async (space: Chat, workerId: string, action: ReviewAction) => {
+    const entry = space.info.workerBranches?.[workerId]
+    if (!entry) throw new Error('That worker has no changes waiting for review')
+    if (reviewing.has(workerId)) throw new Error(`Worker "${entry.name}"'s changes are already being reviewed`)
+    reviewing.add(workerId)
+    try {
+      const into = entry.repos.map((r) => r.into)
+      let result: MergeResult | undefined
+      if (action === 'merge' || action === 'squash') result = await workerCheckouts.merge(space, workerId, action)
+      else if (action === 'discard') await workerCheckouts.discard(space, workerId)
+      else workerCheckouts.keep(space, workerId)
+      const text = reviewText(entry.name, action, into, result)
+      append(space, { at: now().toISOString(), type: 'extension.note', text })
+      return text
+    } finally {
+      reviewing.delete(workerId)
+    }
+  }
+
+  // The lead's review_worker: Keep at once, anything else once the user says so on a card only they can answer.
+  const reviewWorkerFor = async (caller: Chat, workerId: string, action: ReviewAction) => {
+    const space = chainOf(caller)[0]!
+    const entry = space.info.workerBranches?.[workerId]
+    if (!entry) throw new Error(`No worker "${workerId}" has changes waiting for review in this space`)
+    if (entry.state === 'working') throw new Error(`Worker "${entry.name}" is still running`)
+    if (action !== 'keep') {
+      const verb = { merge: 'Merge', squash: 'Squash', discard: 'Discard' }[action]
+      const { uncommitted } = totalsOf(entry.changes)
+      const lines = changesText(entry)
+      if (action === 'discard' && uncommitted) lines.push(`Its ${uncommitted} uncommitted change${uncommitted === 1 ? '' : 's'} go too.`)
+      const { allow } = await requestPermission(
+        caller,
+        {
+          name: `${verb} worker "${entry.name}"'s changes`,
+          summary: lines.join('\n'),
+          kind: 'other',
+          input: { workerId, action },
+          buttons: { allow: verb, deny: 'Cancel' },
+        },
+        true,
+        { userOnly: true, requestId: `review-${randomBytes(6).toString('hex')}` },
+      )
+      if (!allow) return `The user said no: worker "${entry.name}"'s changes stay as they are, waiting for review.`
+    }
+    return reviewWorker(space, workerId, action)
+  }
+
+  // Workers whose branches were still `working` when Kothar last stopped (loadAll has run) are gone now, or will be:
+  // their changes wait for review.
+  for (const space of [...chats.values()]) {
+    for (const [id, entry] of Object.entries(space.info.workerBranches ?? {})) {
+      if (entry.state === 'working' && !chats.has(id)) {
+        workerCheckouts.settle(space, id).catch((error) => console.error(`Kothar couldn't settle worker ${id}'s branches:`, error))
+      }
+    }
+  }
 
   // Where a command an extension starts for a chat runs, and its sandbox: the chat's own, over the space's work folder
   // and the checkouts it has now. Nothing is checked out for it.
@@ -951,6 +1238,9 @@ function assembleCore(options: {
       return idle ? 'sent' : steers ? 'steered' : 'queued'
     },
     stop: (chatId) => interrupt(chatFor(chatId), false),
+    roles: (chatId) => modelRoles.for((extension) => isOnFor(extension, chats.get(chatId))),
+    forget: (chatId, ids) => forget(chatFor(chatId), ids),
+    reviewWorker: (chatId, workerId, action) => reviewWorkerFor(chatFor(chatId), workerId, action),
     workers: (chatId: string) => {
       const chat = chats.get(chatId)
       return { enabled: !!chat && agentStartsWorkers(chat, workers, setupOf(chat)), limit: workers.limit() }
@@ -980,7 +1270,7 @@ function assembleCore(options: {
       groups.push({
         name: 'Workers',
         about: 'hand a whole task to a new chat below this one, which works while you talk and reports back.',
-        tools: ['spawn_worker', ...(own.includes('stop_chat') ? ['stop_chat'] : [])],
+        tools: ['spawn_worker', ...['review_worker', 'stop_chat'].filter((name) => own.includes(name))],
       })
     }
     const reach = ['list_chats', 'read_chat', 'send_message', ...(starts ? [] : ['stop_chat'])].filter((name) => own.includes(name))
@@ -1013,7 +1303,7 @@ function assembleCore(options: {
     for (const extension of watchers) callExtension(extension, () => extension.onTurnSent!(sent, contextOf(extension)))
   }
 
-  const { deleteMessage, editMessage, undoMessage } = openMessageEdits({
+  const { deleteMessage, editMessage, undoMessage, forget } = openMessageEdits({
     broadcast,
     shownLog: (chat) => pageOf(chat.entries),
     attachmentsDirOf,
@@ -1023,6 +1313,8 @@ function assembleCore(options: {
     },
     enqueue,
     checkActive,
+    askUser: (chat, request, requestId) => requestPermission(chat, request, true, { userOnly: true, requestId }),
+    note: (chat, text) => append(chat, { at: now().toISOString(), type: 'extension.note', text }),
   })
 
   const handle = openProtocol({
@@ -1057,10 +1349,12 @@ function assembleCore(options: {
     setFolderMode,
     copyChanges,
     copyBack,
+    reviewWorker,
     writeContext,
     writeInstructions,
     setContextDefault,
     setEngineEnabled,
+    acpAgents,
     setWorkFolder,
     setPermissionDefault,
     setSshHostsDefault,
@@ -1116,16 +1410,7 @@ function assembleCore(options: {
   return {
     engines: engineInfos,
     async refreshEngines() {
-      await Promise.all(
-        adapters.map(async (adapter) => {
-          try {
-            detected.set(adapter.id, nameModels(await adapter.detect(machine)))
-          } catch (error) {
-            detected.set(adapter.id, { installed: false, signedIn: false, detail: messageOf(error) })
-          }
-          broadcast({ type: 'engine.updated', engine: engineInfo(adapter.id) })
-        }),
-      )
+      await Promise.all(adapters.map(detectEngine))
       enginesDetected = true
       models.settle()
       followModels()
@@ -1186,6 +1471,8 @@ function assembleCore(options: {
       })
       return 'error' in found ? undefined : found
     },
+    // Runs what was queued before Kothar last quit; startCore calls it once the server is up (turn.ts resumeQueues).
+    resume: resumeQueues,
     serveMcp(url: string) {
       mcpUrl = url
       return mcp.handle

@@ -1,5 +1,4 @@
 import { readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import type { Extension, ExtensionContext, ExtensionHost, ExtensionView } from '@kothar/extension-api'
 import { createLibrary, type ImportResult, type Library, type Skill } from './library.ts'
 import { engineSources, importAny, importEngine, ON_FROM_INTERNET, type Fetch } from './sources.ts'
@@ -49,10 +48,11 @@ export function sourceBadge(source: string) {
 
 const looksBinary = (data: Buffer) => data.subarray(0, 8000).includes(0)
 
+// home: the user's home folder, where engines keep their skills; host.home unless a test passes its own.
 export type SkillsOptions = { home?: string; env?: Record<string, string | undefined>; fetch?: Fetch }
 
 export function createSkillsExtension(options: SkillsOptions = {}): Extension {
-  const home = options.home ?? homedir()
+  const homeOf = (host: ExtensionHost) => options.home ?? host.home
   const env = options.env ?? process.env
   const fetcher: Fetch = options.fetch ?? ((url, init) => fetch(url, init))
   // The Settings page's state, while Kothar runs: the last import's outcome, and one running.
@@ -236,7 +236,7 @@ export function createSkillsExtension(options: SkillsOptions = {}): Extension {
       render({ host }) {
         const library = libraryOf(host)
         const skills = library.list()
-        const sources = engineSources(home, env).map((source) => ({ ...source, fresh: library.newIn(source.dir).length }))
+        const sources = engineSources(homeOf(host), env).map((source) => ({ ...source, fresh: library.newIn(source.dir).length }))
         return {
           type: 'stack',
           gap: 'loose',
@@ -306,10 +306,10 @@ export function createSkillsExtension(options: SkillsOptions = {}): Extension {
             return library.remove(String(value))
           case 'import': {
             const from = typeof value === 'string' ? value : value && typeof value === 'object' && !Array.isArray(value) ? String(value.from ?? '') : ''
-            return runImport(context, from.trim() || 'nothing', () => importAny(library, fetcher, home, from))
+            return runImport(context, from.trim() || 'nothing', () => importAny(library, fetcher, homeOf(context.host), from))
           }
           case 'engine': {
-            const source = engineSources(home, env).find((s) => s.id === value)
+            const source = engineSources(homeOf(context.host), env).find((s) => s.id === value)
             if (!source) throw new Error(`No skills folder ${String(value)}`)
             return runImport(context, `from ${source.label}`, () => importEngine(library, source))
           }

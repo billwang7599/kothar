@@ -7,7 +7,8 @@ import { createFakeAdapter, type FakeStep } from './adapters/fake.ts'
 import { sandboxingMachine } from './adapters/test-machine.ts'
 import { openCore } from './core.ts'
 import { messagesOf } from './memory.ts'
-import { entriesFrom, entriesToDelete } from './message-edits.ts'
+import { entriesFrom, entriesToDelete, forgetIds, planForget, scrubForgetCall } from './message-edits.ts'
+import { messageEntries } from './memory.ts'
 import type { Adapter, ChatEntry, ClientMessage, CoreMessage } from './shared.ts'
 import { until } from './test-wait.ts'
 
@@ -47,6 +48,46 @@ describe('what one Delete takes', () => {
 
   it('cuts from a message to the end for Edit and Undo, skipping what is gone', () => {
     expect(entriesFrom(log.with(6, { at: at(6), type: 'entry.removed' }), 5)).toEqual([5, 7])
+  })
+})
+
+describe('what one forget takes', () => {
+  const log: ChatEntry[] = [
+    { at: at(0), type: 'user.message', text: 'first' },
+    { at: at(1), type: 'turn.started' },
+    { at: at(3), type: 'tool.started', toolId: 't', name: 'Bash', kind: 'shell', summary: 'ls', input: {} },
+    { at: at(4), type: 'tool.completed', toolId: 't', output: 'a b', isError: false },
+    { at: at(5), type: 'text.completed', text: 'reply' },
+    { at: at(6), type: 'turn.completed' },
+    { at: at(7), type: 'user.message', text: 'second' },
+  ]
+  const seen = messageEntries(log)
+
+  it('reads numbers, memory lines and ranges', () => {
+    expect(forgetIds([3, '10+2', '5-6', '3'])).toEqual([3, 5, 6, 10, 11])
+    expect(() => forgetIds([])).toThrow('at least one')
+    expect(() => forgetIds(['10+0'])).toThrow("isn't a message id")
+    expect(() => forgetIds([-1])).toThrow("isn't a message id")
+  })
+
+  it('takes a whole reply for any of its messages, listed once, as Delete does', () => {
+    expect(seen).toEqual([0, 2, 3, 4, 6])
+    const plan = planForget(log, seen, [1, 2, 3], log.length)
+    expect(plan.taken).toEqual([2, 3, 4])
+    expect(plan.groups.map((g) => g.preview)).toEqual(['Reply: reply'])
+    expect(planForget(log, seen, [0], log.length).groups[0]!.preview).toBe('You: first')
+  })
+
+  it('refuses the running turn and what is gone', () => {
+    expect(() => planForget(log, seen, [4], 6)).toThrow("turn that's running")
+    expect(() => planForget(log, seen, [9], log.length)).toThrow('no message 9')
+    expect(() => planForget(log.with(0, { at: at(0), type: 'entry.removed' }), seen, [0], log.length)).toThrow('already gone')
+  })
+
+  it("keeps a forget call's ids, never its reason", () => {
+    const call = { type: 'tool.started' as const, toolId: 'f', name: 'mcp__kothar__forget', kind: 'mcp' as const, summary: 'secret', input: { ids: [1, '2+2'], reason: 'secret' } }
+    expect(scrubForgetCall(call)).toMatchObject({ input: { ids: [1, '2+2'] }, summary: 'forget 1, 2+2' })
+    expect(scrubForgetCall({ ...call, name: 'mcp__github__forget_me' })).toMatchObject({ summary: 'secret' })
   })
 })
 

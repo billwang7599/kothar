@@ -23,18 +23,19 @@ import type { ExtensionHook } from './extensions.ts'
 import { placeAccess, placesOf, type FolderPlace } from './folder-modes.ts'
 import { summaryOf } from './kothar-mcp.ts'
 import { instructionSections, type InstructionParts, type InstructionSection } from './instructions.ts'
-import { continuationParts, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
+import { scrubForgetCall } from './message-edits.ts'
+import { continuationParts, messageEntries, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
 import type { openModels } from './models.ts'
-import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, type RuledVerdict, type verdictOf } from './permissions.ts'
+import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, trustableSshHost, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
 import { runningChildren } from './workers.ts'
+import { saveQueue } from './queue-store.ts'
 import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
 import {
   editsAnywhere,
   IMAGE_TYPES,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_TOTAL_BYTES,
-  MODEL_ROLES,
   type Adapter,
   type Answers,
   type Attachment,
@@ -50,6 +51,8 @@ import {
   type Session,
   type SessionOptions,
   type Upload,
+  type SshHost,
+  type Usage,
 } from './shared.ts'
 import { saveToolImages } from './tool-image-files.ts'
 import { messageOf } from './util.ts'
@@ -60,6 +63,8 @@ export const UNSANDBOXED_NEEDS_EDIT_ANYWHERE = true
 type Sandbox = { writable: string[]; tmpDir: string; readOnly?: string[] }
 
 export type TurnDeps = {
+  // Whether a turn can run on this role: Kothar's own, or one an extension that's on declares (model-roles.ts).
+  liveRole: (role: unknown) => boolean
   garage: string
   /** The user's home folder, which permission answers keep secrets in. */
   home: string
@@ -108,7 +113,11 @@ export type TurnDeps = {
   workDirOf: (chat: Chat) => string
   sandboxIn: (dir: string) => Sandbox | undefined
   attachmentsDirOf: (chat: Chat) => string
-  checkoutOf: (space: Chat, folder: string, workDir: string, sandboxed: boolean) => Promise<Checkout>
+  // chat: the chat the turn is for; a worker with its own checkouts gets its own worktree (worker-checkouts.ts).
+  checkoutOf: (space: Chat, folder: string, workDir: string, sandboxed: boolean, chat: Chat) => Promise<Checkout>
+  // A worker with its own checkouts is reporting: its changes as lines for the lead, if it made any. Undefined (not a
+  // promise) for a worker with no checkouts of its own, whose report then goes at once.
+  workerChanges?: (chat: Chat) => Promise<string[] | undefined> | undefined
   copyOf: (space: Chat, folder: string, workDir: string) => Promise<{ path: string }>
 
   // What a session is told
@@ -124,6 +133,8 @@ export type TurnDeps = {
   engineToolsFor?: (chat: Chat, engine: string) => Pick<SessionOptions, 'tools' | 'noTools'>
   // The engine said which built-in tools its session has.
   toolsListed?: (engine: string, names: string[]) => void
+  // The engine reported what the turn's model calls used (turn.usage): saved in the chat's usage file.
+  usage?: (chat: Chat, usage: Usage, engine: string, turn?: string) => void
   // The user's message took the chat's composer mode, which went back off: the picker redraws.
   modesTaken?: (chat: Chat) => void
 }
@@ -154,6 +165,8 @@ export type SentInput =
       engineTools?: { off: string[]; none?: true }
     }
   | { kind: 'steer'; turn: string; text: string; engine: string }
+
+export type AskOptions = { userOnly?: boolean; requestId?: string }
 
 type TurnInput = { text: string; attachments: Attachment[]; reports: Report[]; continuation?: string }
 
@@ -198,7 +211,7 @@ export function sessionPlaceOf(
   const sections = instructionSections({
     ...parts,
     ...(sandbox && { workDir }),
-    checkouts: checkouts.map(({ folder, worktree }) => ({ folder, path: worktree.path, branch: worktree.branch })),
+    checkouts: checkouts.map(({ folder, worktree, own }) => ({ folder, path: worktree.path, branch: worktree.branch, ...(own && { own }) })),
     folders: places,
   })
   const instructions = sections.map((section) => section.text).join('\n\n')
@@ -358,10 +371,23 @@ export function openTurns(deps: TurnDeps) {
     finishTurn(chat, end.error)
   }
 
-  // What follows a turn that's over: a worker reports and goes, queued messages run.
+  // What follows a turn that's over: a worker reports and goes, queued messages run. A worker with its own checkouts
+  // first sums up what it changed there, for its report.
   const finishTurn = (chat: Chat, error?: string) => {
+    const reports = chat.info.worker && !chat.info.quiet && parentOf(chat)
+    const changes = reports ? deps.workerChanges?.(chat) : undefined
+    if (!changes) return finishWith(chat, error)
+    changes.then(
+      (changes) => finishWith(chat, error, changes),
+      () => finishWith(chat, error),
+    )
+  }
+
+  const finishWith = (chat: Chat, error?: string, changes?: string[]) => {
+    // Deleted while its changes were summed up: it's gone, as a worker deleted mid-turn is.
+    if (!chats.has(chat.info.id) || isQuitting()) return
     const parent = chat.info.worker && !chat.info.quiet ? parentOf(chat) : undefined
-    if (parent) reportErrors(() => enqueue(parent, reportOf(chat, error)))
+    if (parent) reportErrors(() => enqueue(parent, reportOf(chat, error, changes)))
     showReport(chat, error)
     if (chat.queue.length) reportErrors(() => sendQueue(chat))
     // Workers are there for one task: once the lead has their reply, they go. The reply lives on in the lead's log.
@@ -415,11 +441,11 @@ export function openTurns(deps: TurnDeps) {
     reportErrors(() => append(parent, { at: now().toISOString(), type: 'worker.report', text, ...report, quiet: true }))
   }
 
-  const reportOf = (chat: Chat, error?: string) => {
+  const reportOf = (chat: Chat, error?: string, changes?: string[]) => {
     const asked = chat.entries.findLastIndex((e) => e.type === 'user.message')
     const reply = chat.entries.slice(asked + 1).findLast((e) => e.type === 'text.completed')
     const text = reply?.type === 'text.completed' ? reply.text : ''
-    return { text, report: { chatId: chat.info.id, name: chat.info.name, ...(error && { error }) } }
+    return { text, report: { chatId: chat.info.id, name: chat.info.name, ...(error && { error }), ...(changes?.length && { changes }) } }
   }
 
   const limitWatchers = () => extensions.filter((extension) => isOn(extension) && extension.onLimitReached)
@@ -511,8 +537,12 @@ export function openTurns(deps: TurnDeps) {
 
   // Requests left to the user, by id, so their answer is recorded with what was asked.
   const asked = new Map<string, PermissionRequest>()
+  // The SSH server each request left to the user could be always allowed by (trustableSshHost), by id.
+  const sshHostsAsked = new Map<string, SshHost>()
   // Permission requests an extension raised (host.requestPermission), by id: answered here, not by the engine.
   const extensionAsks = new Map<string, { chat: Chat; resolve: (verdict: RuledVerdict) => void }>()
+  // Requests only the user may answer (AskOptions.userOnly), by id, until they're raised.
+  const userOnly = new Set<string>()
   // Each chat's live session events, for an extension's request to go through as an engine's does.
   const liveEvents = new WeakMap<Chat, ReturnType<typeof sessionEvents>>()
   const respondTo = (session: Session | undefined, requestId: string, verdict: RuledVerdict) => {
@@ -602,7 +632,7 @@ export function openTurns(deps: TurnDeps) {
           by.readOnly = extension.id
         }
         if (role === undefined && options.role !== undefined) {
-          if (!MODEL_ROLES.includes(options.role)) throw new Error(`Unknown model role "${String(options.role)}"`)
+          if (!deps.liveRole(options.role)) throw new Error(`Unknown model role "${String(options.role)}"`)
           role = options.role
           by.role = extension.id
         }
@@ -694,7 +724,7 @@ export function openTurns(deps: TurnDeps) {
     // Checkouts and copies are made once, before the first session that needs them, and kept.
     const prepare = async () => {
       const checkouts: Checkout[] = []
-      for (const folder of repos) checkouts.push(await checkoutOf(space, folder, workDir, sandbox !== undefined))
+      for (const folder of repos) checkouts.push(await checkoutOf(space, folder, workDir, sandbox !== undefined, chat))
       const copies: Record<string, string> = {}
       for (const folder of copied) copies[folder] = (await copyOf(space, folder, workDir)).path
       return { checkouts, copies }
@@ -714,7 +744,7 @@ export function openTurns(deps: TurnDeps) {
     if (isQuitting()) throw new Error('Kothar is quitting')
     if (chat.status !== 'idle') throw new Error('A turn is already running in this chat')
     checkActive(chat)
-    const roleRun = role && models.lists()[role].length ? models.runOf({ engine: chat.info.engine, role }) : undefined
+    const roleRun = role && models.lists()[role]?.length ? models.runOf({ engine: chat.info.engine, role }) : undefined
     const run = roleRun ?? models.runOf(choosesOf(chat))
     if (run && !roleRun && run.engine !== chat.info.engine) updateChat(chat, { engine: run.engine })
     const cant = run ? undefined : models.whyNot(choosesOf(chat))
@@ -734,6 +764,7 @@ export function openTurns(deps: TurnDeps) {
     const message = withAttachments(rewrite, attachments)
     const zoomable = takesMcp(adapter.id)
     const view = viewOf(chat, messagesOf(chat.entries), zoomable)
+    chat.seen = messageEntries(chat.entries)
     const parts = continuation ? continuationParts(view, continuation) : seededParts(view, message, reports)
     const prompt = parts.map((part) => part.text).join('\n\n')
     const at = now().toISOString()
@@ -874,10 +905,13 @@ export function openTurns(deps: TurnDeps) {
               const saved = saveToolImages(chat.dir, sent.toolId, images ?? [])
               return saved.length ? { ...rest, images: saved } : rest
             })(sent)
-          : sent
+          : sent.type === 'tool.started'
+            ? scrubForgetCall(sent)
+            : sent
       const at = now().toISOString()
       for (const extension of watchersOf('onEvent')) callExtension(extension, () => extension.onEvent!(detailOf(chat), event, contextOf(extension)))
       if (event.type === 'tools.listed') return deps.toolsListed?.(engine, event.names)
+      if (event.type === 'turn.usage') return deps.usage?.(chat, event.usage, engine, chat.sentTurn)
       if (event.type === 'tool.started') {
         const { name, kind, summary, path } = event
         chat.turn?.tools.push({ name, kind, summary, ...(path !== undefined && { path }) })
@@ -904,7 +938,12 @@ export function openTurns(deps: TurnDeps) {
         chat.unsavedText = ''
         return completeText(chat, at, event.text)
       }
-      append(chat, { at, ...event })
+      if (event.type === 'permission.requested') {
+        // The server the card may offer to always allow; kept with the request, so respond can save it.
+        const sshHost = trustableSshHost(event, permissionsOf())
+        append(chat, { at, ...event, ...(sshHost && { sshHost }) })
+        if (sshHost) sshHostsAsked.set(event.requestId, sshHost)
+      } else append(chat, { at, ...event })
       if (event.type === 'limit.reached') {
         const { message, resetsAt } = event
         chat.limit ??= { message, ...(resetsAt && { resetsAt }) }
@@ -929,11 +968,14 @@ export function openTurns(deps: TurnDeps) {
           return setStatus(chat, 'waiting')
         }
         chat.pendingRequests.delete(requestId)
+        sshHostsAsked.delete(requestId)
         const resolvedAt = now().toISOString()
         append(chat, { at: resolvedAt, type: 'permission.resolved', requestId, allow: verdict.allow, auto: true })
         recordPermission(chat, event, verdict.allow, verdict.rule, verdict.message)
         respondTo(ref.session, requestId, verdict)
       }
+      // Asked of the user alone (forget): no rule, switch or extension answers it.
+      if (userOnly.delete(requestId)) return settle(undefined)
       const own = decide(event, permissionsOf())
       // The core's denials stand, and so does Allow all; otherwise an extension's policy goes first.
       if (own?.allow === false || own?.rule === ALLOW_ALL_RULE) return settle(own)
@@ -950,11 +992,14 @@ export function openTurns(deps: TurnDeps) {
     // An extension's request (host.requestPermission), raised in this session as if the engine had: the core's rules,
     // extensions' policies, else the user's card, and the Activity record. changes: what it does may change something,
     // so a read-only turn refuses it.
-    const ask = (request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean) =>
+    // ask.userOnly: only the user answers it, read-only turn or not (forget); requestId: the caller's own id for it.
+    const ask = (request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean, options: AskOptions = {}) =>
       new Promise<RuledVerdict>((resolve) => {
-        const event = { type: 'permission.requested' as const, requestId: `x-${randomBytes(6).toString('hex')}`, ...request }
+        const requestId = options.requestId ?? `x-${randomBytes(6).toString('hex')}`
+        const event = { type: 'permission.requested' as const, ...request, requestId }
         const readOnly = permissionsOf().readOnly
-        if (readOnly && changes) {
+        if (options.userOnly) userOnly.add(requestId)
+        else if (readOnly && changes) {
           const message = readOnly.reason?.trim() || READ_ONLY_REASON
           recordPermission(chat, event, false, 'Read-only turn', message)
           return resolve({ allow: false, message, rule: 'Read-only turn' })
@@ -1006,9 +1051,17 @@ export function openTurns(deps: TurnDeps) {
     setQueue(chat, [...plain, ...chat.queue.filter((q) => !back.includes(q))])
   }
 
+  // Kept on disk too (queue-store.ts), so a quit or a crash doesn't lose it. A chat whose folder is gone keeps it in
+  // memory only, and the user hears why.
   const setQueue = (chat: Chat, queue: QueuedMessage[]) => {
     chat.queue = queue
     broadcast({ type: 'chat.queue', chatId: chat.info.id, queue })
+    if (!queue.length && !existsSync(chat.dir)) return
+    try {
+      saveQueue(chat.dir, queue)
+    } catch (error) {
+      broadcast({ type: 'error', message: `"${chat.info.name}": its queue couldn't be saved (${messageOf(error)})` })
+    }
   }
 
   const sendQueue = (chat: Chat, message?: Omit<QueuedMessage, 'id'>) => {
@@ -1047,6 +1100,18 @@ export function openTurns(deps: TurnDeps) {
       if (isQuitting() || waitsForSlot(chat) || !chats.has(chat.info.id)) continue
       reportErrors(() => sendQueue(chat))
     }
+  }
+
+  // Once the core has started (main.ts startCore, after its server): what was queued when Kothar last quit runs now, as
+  // it would have once its turn ended, and workers waiting for a slot start as the limit allows. A lead woken by its
+  // cut-off workers' reports (chat-lifecycle.ts restartedWorker) runs here too. Archived chats keep theirs.
+  const resumeQueues = () => {
+    for (const chat of chats.values()) {
+      if (isQuitting()) return
+      if (chat.info.worker || chat.info.archived || chat.status !== 'idle' || !chat.queue.length) continue
+      reportErrors(() => sendQueue(chat))
+    }
+    if (!isQuitting()) startWaitingWorkers()
   }
 
   const enqueue = (chat: Chat, message: Omit<QueuedMessage, 'id'>) => {
@@ -1171,6 +1236,7 @@ export function openTurns(deps: TurnDeps) {
     respondTo(settle(chat, entry), requestId, { allow, rule: 'You' })
     const request = asked.get(requestId)
     asked.delete(requestId)
+    sshHostsAsked.delete(requestId)
     if (request) recordPermission(chat, request, allow, 'You')
   }
 
@@ -1190,21 +1256,25 @@ export function openTurns(deps: TurnDeps) {
     allStopped() ? Promise.resolve() : new Promise<void>((resolve) => allStoppedWaiters.push(resolve))
 
   // host.requestPermission: only while the chat has a session to ask in.
-  const requestPermission = (chat: Chat, request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean) => {
+  const requestPermission = (chat: Chat, request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean, options?: AskOptions) => {
     const events = liveEvents.get(chat)
     if (!chat.session || !events || events.ref.session !== chat.session) {
       return Promise.reject(new Error(`${chat.info.name} has no turn running to ask in`))
     }
-    return events.ask(request, changes)
+    return events.ask(request, changes, options)
   }
 
   return {
+    // The SSH server a pending request's card offers to always allow, if any.
+    sshHostAsked: (chat: Chat, requestId: string) =>
+      chat.pendingRequests.get(requestId) === 'permission' ? sshHostsAsked.get(requestId) : undefined,
     requestPermission,
     startWaitingWorkers,
     send,
     sendMessage,
     enqueue,
     setQueue,
+    resumeQueues,
     canSteer,
     interrupt,
     respond,

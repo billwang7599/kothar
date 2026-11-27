@@ -47,6 +47,23 @@ export type Question = {
 // Keyed by question text: the labels picked, then any text the user typed. Sent without answers, a question is declined.
 export type Answers = Record<string, string[]>
 
+// Tokens and cost an engine reported for model calls, in words every engine shares. Any field the engine doesn't report
+// is absent (Codex reports no cost; pi's one-shot calls report nothing).
+// - inputTokens: input read fresh, without cache reads or writes.
+// - outputTokens: what the model wrote, its thinking included.
+// - cacheReadTokens, cacheWriteTokens: input read from, and written to, the provider's prompt cache.
+// - costUsd: what the engine says the calls cost, in US dollars. An engine on a subscription still reports what the
+//   same calls would cost on the API, so read it as a guide, not a bill.
+// - model: the engine's own id for the model.
+export type Usage = {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  costUsd?: number
+  model?: string
+}
+
 export type EngineEvent =
   | { type: 'turn.started' }
   | { type: 'text.delta'; text: string }
@@ -75,6 +92,8 @@ export type EngineEvent =
       path?: string
       command?: string
       input: unknown
+      // The card's own button labels in place of Approve and Deny (Kothar's forget: Forget and Cancel).
+      buttons?: { allow: string; deny: string }
     }
   | { type: 'question.asked'; requestId: string; toolId?: string; questions: Question[] }
   // The account ran into a usage or rate limit; resetsAt (ISO) is when it lifts, if the engine says.
@@ -84,6 +103,9 @@ export type EngineEvent =
   | { type: 'steer.returned'; id: string }
   // The built-in tools the engine says the session has, by its own names (MCP servers' tools left out), as it starts.
   | { type: 'tools.listed'; names: string[] }
+  // What the turn's model calls used, sent before turn.completed (or session.ended), once per model the turn called. An
+  // engine that doesn't report usage never sends it.
+  | { type: 'turn.usage'; usage: Usage }
   // errorKind (here and on session.ended): why it failed, as the engine's adapter reads its error (see TurnErrorKind).
   | { type: 'turn.completed'; error?: string; errorKind?: TurnErrorKind }
   | { type: 'session.ended'; error?: string; errorKind?: TurnErrorKind }
@@ -108,8 +130,6 @@ export type ChatDetail = ChatSummary & {
   // and their workers; false for an extension's own chat, such as Home. Check this, not extension, before offering
   // anything that needs a space.
   keepsContext: boolean
-  /** @deprecated The same as `extension`, for extensions written when they were called mods. */
-  mod?: string
   folders: string[]
   files: string[]
   createdAt: string
@@ -122,14 +142,21 @@ export type ChatDetail = ChatSummary & {
 // the branch the folder was on when Kothar checked it out (absent for checkouts made before Kothar recorded it).
 export type Checkout = { folder: string; path: string; branch: string; from?: string }
 
+// A worker's own checkout of a git folder (Settings → Workers → Own worktree per worker): its worktree and branch, and
+// the space's branch it merges into as `from`. worker: the worker's id (gone once it reported), with its name and
+// whether it still runs ('working') or its changes wait for review ('review', or 'kept' by the user).
+export type WorkerCheckoutDetail = Checkout & { worker: string; name: string; state: 'working' | 'review' | 'kept' }
+
 // The space a chat belongs to: its work folder (absent until its first message picks one), its folders (git: has a
-// .git) and its checkouts.
+// .git) and its checkouts, then its workers' own checkouts. Kothar makes and removes those; an extension's cleanup
+// leaves them alone.
 export type SpaceDetail = {
   id: string
   name: string
   workDir?: string
   folders: { path: string; git: boolean }[]
   checkouts: Checkout[]
+  workerCheckouts?: WorkerCheckoutDetail[]
 }
 
 // A picture in a tool's result. An adapter sends it as data (base64); the core saves it in the chat's folder
@@ -144,7 +171,8 @@ export type ChatEntry = { at: string } & (
   | { type: 'user.message'; text: string; attachments?: Attachment[]; midTurn?: true }
   // quiet: a quiet child's report, logged for the user (NewChatSpec.showReport); it didn't start a turn.
   // from: an extension's report (ExtensionHost.report), by that extension's id; chatId is then the extension's id too.
-  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true; from?: string }
+  // changes: a worker with its own checkouts changed something there, one line per repo; it waits for review.
+  | { type: 'worker.report'; text: string; chatId: string; name: string; error?: string; quiet?: true; from?: string; changes?: string[] }
   | { type: 'permission.resolved'; requestId: string; allow: boolean; auto?: true }
   | { type: 'question.resolved'; requestId: string; answers?: Answers }
   // panel: clicking the note opens that panel of the extension's, then sends it action. card: drawn as a card.
@@ -161,7 +189,14 @@ export type ChatEntry = { at: string } & (
   // What's left of an entry the user deleted (a message, or a reply with its tool calls and thinking): only when it was
   // logged, so every later entry keeps its index and no index is used twice. Memory and the transcript skip it.
   | { type: 'entry.removed' }
-  | Exclude<EngineEvent, { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' }>
+  // sshHost: set by the core when the request is a command that reaches one SSH server, and listing that server (with
+  // its key) would let it run without asking. The card offers to add it to the space's or Settings' Allowed SSH hosts.
+  | (PermissionRequest & { sshHost?: { host: string; key?: string } })
+  | Exclude<
+      EngineEvent,
+      // Usage goes in the chat's usage.jsonl (UsageRecord), not its log.
+      { type: 'text.delta' | 'thinking.delta' | 'steer.landed' | 'steer.returned' | 'tools.listed' | 'turn.usage' | 'permission.requested' }
+    >
 )
 
 // A chat's log as memory reads it: the entries a conversation is made of, numbered from 0 in log order. user is the
@@ -299,8 +334,25 @@ export type ExtensionStorage = {
 
 export type ExtensionStoredFile = { name: string; size: number }
 
-// Which of the user's model lists (Settings → Models) a chat runs on.
-export type ModelRole = 'chat' | 'planning' | 'searching' | 'workers'
+// Which of the user's model lists (Settings → Models) a chat runs on: Kothar's own Chat and Workers, or a role an
+// extension declares (Extension.modelRoles), such as Plan's 'planning'. A role no extension that's on declares is
+// refused where a role is given (createChat, turnOptions); a chat already on one runs on the Chat list.
+export type CoreModelRole = 'chat' | 'workers'
+export type ModelRole = CoreModelRole | (string & {})
+
+// A model list an extension adds to Settings → Models while it's on, for the chats it starts (host.createChat's role)
+// or turns it runs (turnOptions' role), and for spawn_worker's role in chats it's on for.
+export type ExtensionModelRole = {
+  // Lowercase letters, digits and dashes, starting with a letter. Not 'chat' or 'workers', and not another
+  // extension's: the first to declare one keeps it, and a later one's is left out with an error. It's also the key
+  // the list is saved under (settings.json models.<id>), so changing it drops the user's list. A community extension
+  // should start it with its own id ('<extension id>-…') so it can't clash.
+  id: string
+  // Its name in Settings → Models and in spawn_worker's description: "Planning".
+  label: string
+  // What runs on it, shown under its name: "Workers started to plan."
+  description?: string
+}
 
 export type NewChatSpec = {
   // The chat's name in the sidebar. A worker started with a task may leave it out: it's named after its task, as
@@ -325,6 +377,10 @@ export type NewChatSpec = {
   // like any worker's, and in the parent's memory), so the user can read it, but it isn't queued for the parent's agent
   // and doesn't wake it. For quiet workers the user may want to see, such as research workers.
   showReport?: boolean
+  // Only with parentId, in a space with git folders: 'own' gives the child a branch and worktree of its own per git
+  // folder, made from the space's checkout, whose changes wait in its report for review (merge or discard); 'shared'
+  // has it work in the space's checkouts. Absent: Settings → Workers' default for a shown child, 'shared' for a quiet one.
+  checkout?: 'own' | 'shared'
 }
 
 // A result of an extension's background work, for ExtensionHost.report.
@@ -366,6 +422,9 @@ export type ExtensionHost = {
   // Every chat callerId may reach, by the same rule.
   reachable(callerId: string): ChatDetail[]
   chat(chatId: string): ChatDetail | undefined
+  // The usage engines reported for the chat, and for its space with every chat in it (ChatUsage), from the chats' usage
+  // files.
+  usage(chatId: string): ChatUsage
   // The chat's log, oldest first; `last` keeps only the newest entries.
   read(chatId: string, options?: { last?: number }): ChatEntry[]
   // The space the chat is in (the chat itself for a space).
@@ -441,6 +500,12 @@ export type ExtensionHost = {
   // stays. For a panel's own action that hands off elsewhere, such as a popup's Open beside chat; not to take a panel
   // away from the user unasked.
   closePanel(chatId: string, panel: string): void
+  // Opens a chat in the window, as clicking it in the sidebar does, and moves the user there. Only in answer to the
+  // user's own click in one of this extension's panels or cards, such as a row in a list of runs across chats; never
+  // unasked (use notify or note for that). entry: scrolls to that entry of the chat's log (host.read's index) and
+  // flashes it, such as the note that holds a run's card. panel: also opens one of this extension's dock panels beside
+  // it. Throws for a chat the user can't see, or a panel that isn't a dock of this extension's.
+  openChat(chatId: string, options?: { entry?: number; panel?: string }): void
   // Draws this extension's panels and commands for the chat again, and its open panels: call it when what they show
   // changed. Without a chat, for every chat.
   refresh(chatId?: string): void
@@ -608,6 +673,39 @@ export type TurnSummary = {
   tools: { name: string; kind: ToolKind; summary: string; path?: string; isError?: boolean }[]
   files: string[]
 }
+
+// One report of usage as Kothar keeps it, in usage.jsonl in the chat's folder (or the garage's, for a one-shot call no
+// chat asked for): a turn's model calls (source 'turn', with turn: the id the Inspector knows the turn by, SentTurn.turn)
+// or one host.complete call (source 'complete', with extension: whose call it was).
+export type UsageRecord = Usage & {
+  at: string
+  engine: string
+  source: 'turn' | 'complete'
+  chatId?: string
+  turn?: string
+  extension?: string
+}
+
+// Usage added up. turns and calls count the reports of each source; unpriced, those with tokens but no cost (Codex's),
+// so a total cost can say it leaves some out.
+export type UsageTotals = {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costUsd: number
+  turns: number
+  calls: number
+  unpriced: number
+}
+
+// A chat's usage: its own reports (chat), its workers' (workers: those running and those since removed, whose reports
+// move up to the chat as they go), and its space's (the space's own chat and every chat below it, removed workers
+// included). A deleted space takes its reports with it.
+export type ChatUsage = { chat: UsageTotals; workers: UsageTotals; space: UsageTotals }
+
+// What Extension.onUsage gets: the report, and the chat it's for (absent for a one-shot call no chat asked for).
+export type UsageReport = { usage: UsageRecord; chat?: ChatDetail }
 
 // message is shown to the agent when the request is denied.
 export type PermissionVerdict = { allow: boolean; message?: string }
@@ -1016,6 +1114,10 @@ export type Extension = {
   name: string
   description: string
   enabledByDefault: boolean
+  // Part of Kothar rather than an add-on, such as Home: always on, with no switch, and not listed among the
+  // extensions. Its page (settings, prompts) shows under Options instead. A saved "off" is ignored. Built-in
+  // extensions only: a community extension's is ignored, as those always start off.
+  alwaysOn?: boolean
   settings?: ExtensionSetting[]
   // Other extensions, by id, this one works with when they're there: features of its own turn on while they're on
   // (check with host.extensionEnabled) and it's told when they switch (onDependencyChanged). It runs without them.
@@ -1073,6 +1175,9 @@ export type Extension = {
   // Live cards in the transcript, put there with host.note (see ExtensionNoteView).
   noteViews?: ExtensionNoteView[]
   composerToggles?: ExtensionComposerToggle[]
+  // Model lists of its own in Settings → Models (see ExtensionModelRole), shown while it's on. A role with no models
+  // in its list runs on the Chat list.
+  modelRoles?: ExtensionModelRole[]
   memory?: ExtensionMemory
   // Kothar is ready for model calls (engines detected, a work folder chosen), or the extension was turned on after
   // that. For background work, such as summarizing chats.
@@ -1105,6 +1210,10 @@ export type Extension = {
   // Something Kothar or an extension did on its own (ActivityEvent), as it happens. Like onTurnSent, called only when
   // some extension that's on watches, so the core builds nothing otherwise.
   onActivity?(event: ActivityEvent, context: ExtensionContext): void
+  // Usage an engine reported, as Kothar saves it: each turn's (turn.usage) and each host.complete call's, whichever
+  // extension made it. With host.usage for totals, enough for a budget: interrupt a chat, or tell the user, past a
+  // limit. Keep it quick.
+  onUsage?(report: UsageReport, context: ExtensionContext): void
   // A policy for permission requests the core would otherwise ask the user about, or would allow on its own. Return a
   // verdict to answer it, or nothing to leave it. Extensions are asked in load order; the first verdict wins. The
   // core's own denials (edits outside the work folder in a sandbox) always stand.
@@ -1177,9 +1286,10 @@ export type ExtensionUse =
   | 'setup'
   // memory, and host.chatStorage, everyChatStorage
   | 'memory'
-  // Host calls: chats, chat, read, space, messages, message, reaches, reachable; and onTurnSent.
+  // Host calls: chats, chat, read, space, messages, message, reaches, reachable, usage; and onTurnSent, onActivity,
+  // onUsage.
   | 'readChats'
-  // send, report, createChat, retry, continue, interrupt, addContextFile
+  // send, report, createChat, retry, continue, interrupt, addContextFile; and modelRoles
   | 'sendMessages'
   // accounts, useAccount
   | 'accounts'
@@ -1191,65 +1301,3 @@ export type ExtensionUse =
   | 'network'
   // host.home; and Node's own APIs: node:fs, for anything outside host.storage
   | 'files'
-
-// Extensions were called mods. These old names stay, so an extension written against them still type-checks.
-/** @deprecated Use ExtensionSetting. */
-export type ModSetting = ExtensionSetting
-/** @deprecated Use ExtensionValues. */
-export type ModValues = ExtensionValues
-/** @deprecated Use ExtensionChat. */
-export type ModChat = ExtensionChat
-/** @deprecated Use ExtensionAccount. */
-export type ModAccount = ExtensionAccount
-/** @deprecated Use ExtensionAccounts. */
-export type ModAccounts = ExtensionAccounts
-/** @deprecated Use ExtensionRun. */
-export type ModRun = ExtensionRun
-/** @deprecated Use ExtensionProcess. */
-export type ModProcess = ExtensionProcess
-/** @deprecated Use ExtensionSpawnOptions. */
-export type ModSpawnOptions = ExtensionSpawnOptions
-/** @deprecated Use ExtensionStorage. */
-export type ModStorage = ExtensionStorage
-/** @deprecated Use ExtensionHost. */
-export type ModHost = ExtensionHost
-/** @deprecated Use ExtensionWait. */
-export type ModWait = ExtensionWait
-/** @deprecated Use ExtensionWaitAnswer. */
-export type ModWaitAnswer = ExtensionWaitAnswer
-/** @deprecated Use ExtensionProcessRow. */
-export type ModProcessRow = ExtensionProcessRow
-/** @deprecated Use ExtensionContext. */
-export type ModContext = ExtensionContext
-/** @deprecated Use ExtensionTool. */
-export type ModTool = ExtensionTool
-/** @deprecated Use ExtensionMemoryRequest. */
-export type ModMemoryRequest = ExtensionMemoryRequest
-/** @deprecated Use ExtensionMemory. */
-export type ModMemory = ExtensionMemory
-/** @deprecated Use ExtensionSession. */
-export type ModSession = ExtensionSession
-/** @deprecated Use ExtensionInstructionsFor. */
-export type ModInstructionsFor = ExtensionInstructionsFor
-/** @deprecated Use ExtensionSetup. */
-export type ModSetup = ExtensionSetup
-/** @deprecated Use ExtensionTone. */
-export type ModTone = ExtensionTone
-/** @deprecated Use ExtensionAction. */
-export type ModAction = ExtensionAction
-/** @deprecated Use ExtensionJson. */
-export type ModJson = ExtensionJson
-/** @deprecated Use ExtensionListItem. */
-export type ModListItem = ExtensionListItem
-/** @deprecated Use ExtensionView. */
-export type ModView = ExtensionView
-/** @deprecated Use ExtensionPanel. */
-export type ModPanel = ExtensionPanel
-/** @deprecated Use ExtensionCommand. */
-export type ModCommand = ExtensionCommand
-/** @deprecated Use Extension. */
-export type Mod = Extension
-/** @deprecated Use ExtensionManifest. */
-export type ModManifest = ExtensionManifest
-/** @deprecated Use ExtensionUse. */
-export type ModUse = ExtensionUse

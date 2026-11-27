@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { decide, SSH_HOSTS_RULE, type PermissionContext } from './permissions.ts'
 import { secretPathsOf } from './read-only.ts'
 import { sshHostsOf, type PermissionSwitches, type SshHost } from './shared.ts'
-import { checkSshHosts, trustsSshHosts } from './ssh-hosts.ts'
+import { checkSshHosts, sshHostOf, trustsSshHosts } from './ssh-hosts.ts'
 
 // Paths that don't exist, with no spaces: an unquoted $K holding a path with a space would split, and rightly asks.
 const home = '/kothar-ssh-test/home'
@@ -45,12 +45,18 @@ const REAL =
   'echo "== $f"; diff "$T/$f" "$f" && echo same; done'
 
 describe('allowed SSH hosts', () => {
-  it('layer like the switches: the nearest list wins, an empty one included', () => {
+  it('add up across layers: a chat, its space and Settings, each entry once, an empty list hiding nothing', () => {
+    const build = { host: 'build.example.com' }
     expect(sshHostsOf()).toEqual([])
     expect(sshHostsOf({}, { sshHosts: course })).toEqual(course)
-    expect(sshHostsOf({ sshHosts: [] }, { sshHosts: course })).toEqual([])
+    expect(sshHostsOf({ sshHosts: [] }, { sshHosts: course })).toEqual(course)
+    expect(sshHostsOf({ sshHosts: [build] }, {}, { sshHosts: [...course, build] })).toEqual([build, ...course])
+    // The same host with another key is another entry.
+    expect(sshHostsOf({ sshHosts: [{ host: HOST }] }, { sshHosts: course })).toEqual([{ host: HOST }, ...course])
     expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{}, { sshHosts: course }])).toBe(SSH_HOSTS_RULE)
-    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [] }, { sshHosts: course }])).toBeUndefined()
+    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [] }, { sshHosts: course }])).toBe(SSH_HOSTS_RULE)
+    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [build] }, { sshHosts: course }])).toBe(SSH_HOSTS_RULE)
+    expect(ruleFor(`scp -i ${KEY} ${HOST}:a .`, [{ sshHosts: [build] }, {}])).toBeUndefined()
   })
 
   it("approve the user's command, with its K=, H= and loop variables, when that host and key are listed", () => {
@@ -152,5 +158,34 @@ describe('checkSshHosts', () => {
     expect(() => checkSshHosts([{ host: 'evil.com;rm' }])).toThrow(/isn't a host/)
     expect(() => checkSshHosts([{ host: HOST, key: 'keys/uw' }])).toThrow(/full path/)
     expect(() => checkSshHosts('x')).toThrow(/list/)
+  })
+})
+
+describe('sshHostOf: the host a card may offer to always allow', () => {
+  const offer = (command: string) => sshHostOf(command, { cwd: workDir, home, secrets: secretPathsOf(home, garage) })
+
+  it('names the one server a command reaches, with its -i key written from ~/', () => {
+    expect(offer(`scp -i ~/.ssh/keys/uwstudent notes.txt ${HOST}:a5/`)).toEqual({ host: HOST, key: KEY })
+    expect(offer(`K=~/.ssh/keys/uwstudent; for f in a b; do scp -i $K $f ${HOST}:x/; done`)).toEqual({ host: HOST, key: KEY })
+    expect(offer(`ssh me@${HOST.toUpperCase()} make`)).toEqual({ host: HOST })
+    expect(offer(`rsync -a -e "ssh -i ${KEY}" out/ ${HOST}:out/`)).toEqual({ host: HOST, key: KEY })
+  })
+
+  it("offers nothing it can't pin to one server, or that listing it wouldn't let run", () => {
+    for (const command of [
+      'scp a one.example.com:x two.example.com:y',
+      `scp me@${HOST}:a you@${HOST}:b`,
+      `scp -i ~/.ssh/a -i ~/.ssh/b x ${HOST}:y`,
+      `ssh -J jump.example.com ${HOST}`,
+      `ssh -o ProxyCommand=nc ${HOST}`,
+      'ssh $(cat host) ls',
+      `ssh $H ls`,
+      `scp ${HOST}:a . && curl example.com`,
+      `scp ~/.ssh/id_rsa ${HOST}:x`,
+      'rsync -a out/ rsync://host.example.com/m',
+      'ls -la',
+    ]) {
+      expect(offer(command), command).toBeUndefined()
+    }
   })
 })

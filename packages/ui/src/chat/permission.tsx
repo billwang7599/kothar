@@ -1,6 +1,7 @@
 // A permission request waiting in the chat (or a worker's, in its space), and the verdict pill once it's answered.
+import { DropdownMenu } from 'radix-ui'
 import type { ClientMessage, ToolKind } from '@kothar/core/shared'
-import { Button, Chevron, Hint } from '../controls.tsx'
+import { Button, CHAT_NOUN, Chevron, Hint } from '../controls.tsx'
 import type { ChatView, Permission } from '../state.ts'
 import { BODY } from './parts.tsx'
 
@@ -44,15 +45,24 @@ export type PromptProps = {
 }
 
 export function PermissionPrompt({ permission, chat, connected, send, space, select, fromWorker }: PromptProps) {
-  const respond = (allow: boolean) =>
-    send({ type: 'permission.respond', chatId: chat.id, requestId: permission.requestId, allow })
+  const respond = (allow: boolean, trustHost?: 'space' | 'global') =>
+    send({ type: 'permission.respond', chatId: chat.id, requestId: permission.requestId, allow, ...(trustHost && { trustHost }) })
   return (
     <div
       className="flex flex-col gap-8 rounded-lg border border-l-3 border-permission-border border-l-amber bg-permission-bg px-14 py-12 shadow-raised"
       aria-label={fromWorker ? `Request from worker ${chat.name}` : undefined}
     >
       <div className="text-body">
-        {fromWorker ? (
+        {permission.buttons ? (
+          <>
+            {fromWorker && (
+              <>
+                Worker <strong>{chat.name}</strong>:{' '}
+              </>
+            )}
+            <strong>{permission.name}</strong>?
+          </>
+        ) : fromWorker ? (
           <>
             Worker <strong>{chat.name}</strong> wants to run <strong>{permission.name}</strong>
           </>
@@ -80,17 +90,81 @@ export function PermissionPrompt({ permission, chat, connected, send, space, sel
           )}
         </div>
       ) : chat.status === 'waiting' ? (
-        <div className="flex gap-8">
-          <Button variant="primary" disabled={!connected} onClick={() => respond(true)}>
-            Approve
-          </Button>
-          <Button variant="danger" disabled={!connected} onClick={() => respond(false)}>
-            Deny
-          </Button>
+        <div className="flex flex-wrap gap-8">
+          {permission.buttons ? (
+            // A card that asks in its own words is about something that can't be undone (forget): the yes is red.
+            <>
+              <Button variant="danger" disabled={!connected} onClick={() => respond(true)}>
+                {permission.buttons.allow}
+              </Button>
+              <Button disabled={!connected} onClick={() => respond(false)}>
+                {permission.buttons.deny}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="primary" disabled={!connected} onClick={() => respond(true)}>
+                Approve
+              </Button>
+              <Button variant="danger" disabled={!connected} onClick={() => respond(false)}>
+                Deny
+              </Button>
+            </>
+          )}
+          {permission.sshHost && !permission.buttons && (
+            <AlwaysAllow host={permission.sshHost} disabled={!connected} trust={(scope) => respond(true, scope)} />
+          )}
         </div>
       ) : (
         <div className="text-sm text-muted">{chat.status === 'stopping' ? 'Stopping…' : 'Pending'}</div>
       )}
     </div>
+  )
+}
+
+const SCOPES = [
+  { scope: 'space', label: `This ${CHAT_NOUN.one}` },
+  { scope: 'global', label: `All ${CHAT_NOUN.many}` },
+] as const
+
+type AlwaysAllowProps = {
+  host: { host: string; key?: string }
+  disabled: boolean
+  trust: (scope: 'space' | 'global') => void
+}
+
+// Approves the request and adds its SSH server (with its key) to Allowed SSH hosts, in this space or in Settings, so
+// later commands to it run without asking.
+function AlwaysAllow({ host, disabled, trust }: AlwaysAllowProps) {
+  const what = host.key ? `${host.host} with the key ${host.key}` : host.host
+  return (
+    <DropdownMenu.Root modal={false}>
+      <Hint
+        text={`Approve, and add ${what} to Allowed SSH hosts, so ssh, scp and rsync to it run without asking. Remove it in the Permissions tab or Settings → Work folder.`}
+      >
+        <DropdownMenu.Trigger asChild>
+          <Button disabled={disabled} className="flex min-w-0 items-center gap-6" data-always-allow={host.host}>
+            <span className="truncate">Always allow {host.host}</span>
+            {/* Pointing down: it opens a menu. */}
+            <span className="inline-flex rotate-90">
+              <Chevron />
+            </span>
+          </Button>
+        </DropdownMenu.Trigger>
+      </Hint>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content align="start" sideOffset={4} className="z-20 flex min-w-120 flex-col rounded-lg border bg-panel p-4 shadow-floating outline-none">
+          {SCOPES.map(({ scope, label }) => (
+            <DropdownMenu.Item
+              key={scope}
+              onSelect={() => trust(scope)}
+              className="flex h-26 items-center rounded-sm px-12 text-sm whitespace-nowrap outline-none data-highlighted:bg-raised"
+            >
+              {label}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   )
 }

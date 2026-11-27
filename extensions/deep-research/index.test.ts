@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChatSummary, Extension, ExtensionHost, ExtensionValues } from '@kothar/extension-api'
@@ -9,6 +9,7 @@ import { sandboxingMachine } from '@kothar/core/test-machine'
 import { until } from '@kothar/core/test-wait'
 import { afterEach, describe, expect, it } from 'vitest'
 import home from '../home/index.ts'
+import { createPlanExtension } from '../plan/index.ts'
 import { createDeepResearchExtension, PLAN_SCHEMA, WRITE_SCHEMA, type Outcome } from './index.ts'
 
 const cleanups: (() => void | Promise<void>)[] = []
@@ -102,6 +103,7 @@ async function core(settings: Record<string, string | number | boolean> = {}, ot
   const handle = (m: ClientMessage) => kothar.core.handle(m, (r) => messages.push(r)) as unknown as Promise<void> | undefined
   handle({ type: 'engine.setEnabled', engine: 'fake', enabled: true })
   handle({ type: 'workFolder.set', path: join(garage, 'work') })
+  handle({ type: 'extension.setEnabled', extensionId: 'deep-research', enabled: true })
   for (const [key, value] of Object.entries(settings)) handle({ type: 'extension.setValue', extensionId: 'deep-research', key, value })
   await until(() => host !== undefined)
   const chats = () => kothar.core.chats()
@@ -167,9 +169,9 @@ describe('the Deep research toggle', () => {
     await until(() => t.chats().some((c) => c.extension === 'home'))
     const main = t.chats().find((c) => c.extension === 'home')!.id
     expect(t.toggles(main)).toEqual([expect.objectContaining({ extension: 'deep-research', id: 'research', label: 'Deep research', on: false })])
-    // New research and the report beside the chat work there too; the Research tab shows once it has a run.
+    // The Research popup and the report beside the chat work there too; the Research tab shows once it has a run.
     const listed = t.messages.findLast((m) => m.type === 'chat.extensions' && m.chatId === main)
-    expect(listed?.type === 'chat.extensions' && listed.panels.map((p) => p.id)).toEqual(expect.arrayContaining(['report', 'new']))
+    expect(listed?.type === 'chat.extensions' && listed.panels.map((p) => p.id)).toEqual(expect.arrayContaining(['report', 'history']))
     expect(listed?.type === 'chat.extensions' && listed.noteViews).toEqual([{ extension: 'deep-research', id: 'run' }])
     await t.flip(main, true)
     await t.send(main, 'Which Greek letter comes first?')
@@ -255,6 +257,17 @@ describe('the deep_research tool', () => {
     expect(t.chat(space).queue).toEqual([])
     expect(t.chat(space).entries.some((e) => e.type === 'turn.started')).toBe(false)
     expect(t.chat(space).status).toBe('idle')
+  })
+
+  it('runs its workers on the list Workers use picks: Planning only while Plan declares it, else Searching', async () => {
+    const rolesOf = async (others: Extension[]) => {
+      const t = await core({ askFirst: false, depth: 'quick', workerRole: 'planning' }, others)
+      const space = t.create()
+      expect(await t.callTool(space, 'Greek letters?')).toMatchObject({ status: 'done' })
+      return t.messages.flatMap((m) => (m.type === 'chat.added' && m.chat.parentId === space ? [m.chat.role] : []))
+    }
+    expect(await rolesOf([])).toEqual(['searching', 'searching'])
+    expect(await rolesOf([createPlanExtension()])).toEqual(['planning', 'planning'])
   })
 
   it('shows its workers as subagents in Home too', async () => {
@@ -527,9 +540,17 @@ describe('Research in the chat', () => {
   it('puts a live card in the chat as a run starts: the plan, then its progress, then the report’s link', async () => {
     const t = await core()
     const space = t.create()
-    await t.handle({ type: 'extension.panel.action', chatId: space, extension: 'deep-research', panel: 'new', action: { name: 'depth', value: 'quick' } })
-    await t.handle({ type: 'extension.panel.action', chatId: space, extension: 'deep-research', panel: 'new', action: { name: 'start-new', value: { question: 'Greek letters?' } } })
-    expect(t.messages).toContainEqual(expect.objectContaining({ type: 'extension.panel.close', chatId: space, panel: 'new' }))
+    // New research is a button in the Research popup.
+    await t.handle({ type: 'extension.panel.action', chatId: space, extension: 'deep-research', panel: 'history', action: { name: 'compose' } })
+    await t.handle({ type: 'extension.panel.get', chatId: space, extension: 'deep-research', panel: 'history' })
+    await until(() => panelView(t, space, 'history').includes('What should be researched?'))
+    await t.handle({ type: 'extension.panel.action', chatId: space, extension: 'deep-research', panel: 'history', action: { name: 'depth', value: 'quick' } })
+    await t.handle({ type: 'extension.panel.action', chatId: space, extension: 'deep-research', panel: 'history', action: { name: 'start-new', value: { question: 'Greek letters?' } } })
+    expect(t.messages).toContainEqual(expect.objectContaining({ type: 'extension.panel.close', chatId: space, panel: 'history' }))
+    // The popup shows the list again next time.
+    await t.handle({ type: 'extension.panel.get', chatId: space, extension: 'deep-research', panel: 'history' })
+    await until(() => panelView(t, space, 'history').includes('No research') || panelView(t, space, 'history').includes('Greek letters?'))
+    expect(panelView(t, space, 'history')).not.toContain('What should be researched?')
     // No jump to the Research tab: the card is in the chat.
     expect(t.messages).not.toContainEqual(expect.objectContaining({ type: 'extension.panel.show', panel: 'research' }))
     await until(() => readRunIdOrNone(t.garage, space) !== undefined)
@@ -599,7 +620,7 @@ describe('Research in the chat', () => {
     expect(before.map((p) => p.id)).not.toContain('research')
     expect(before).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ extension: 'deep-research', id: 'new', placement: 'popup', launcher: true, shortcut: 'Mod+Shift+D' }),
+        expect.objectContaining({ extension: 'deep-research', id: 'history', title: 'Research', placement: 'popup', launcher: true, shortcut: 'Mod+Shift+D' }),
         expect.objectContaining({ id: 'report', placement: 'dock', tab: false }),
       ]),
     )
@@ -624,3 +645,133 @@ describe('Research in the chat', () => {
   })
 })
 
+// A finished or running run's record, written as the store writes one, for the Research popup's list.
+function seedRun(garage: string, run: { id: string; spaceId: string; chatId?: string; question: string; phase: string; startedAt: string; depth?: string; partial?: string; summary?: string }) {
+  const dir = join(garage, 'extensions', 'deep-research', 'runs', run.spaceId)
+  mkdirSync(dir, { recursive: true })
+  const record = {
+    chatId: run.spaceId,
+    depth: 'standard',
+    round: 0,
+    subQuestions: [],
+    workers: [],
+    findings: [],
+    sources: {},
+    limits: { parallel: 1, workers: 1, sources: 1, rounds: 0 },
+    ...run,
+  }
+  writeFileSync(join(dir, `${run.id}.json`), JSON.stringify(record))
+  if (run.summary !== undefined) writeFileSync(join(dir, `${run.id}.md`), `# ${run.question}`)
+}
+
+describe('the Research popup', () => {
+  type Item = { key: string; label: string; detail?: string; badges?: { text: string }[]; button?: { label: string }; action?: { name: string; value: unknown } }
+  const items = async (t: Awaited<ReturnType<typeof core>>, chatId: string): Promise<Item[] | string> => {
+    await t.handle({ type: 'extension.panel.get', chatId, extension: 'deep-research', panel: 'history' })
+    const drawn = t.messages.findLast((m) => m.type === 'extension.panel' && m.chatId === chatId && m.panel === 'history')
+    const view = drawn?.type === 'extension.panel' ? drawn.view : undefined
+    const list = view?.type === 'stack' ? view.children.find((c) => c.type === 'list') : undefined
+    if (list?.type !== 'list') return JSON.stringify(view ?? (drawn?.type === 'extension.panel' && drawn.error))
+    return list.items.length ? (list.items as Item[]) : (list.empty ?? '')
+  }
+  const act = (t: Awaited<ReturnType<typeof core>>, chatId: string, action: { name: string; value?: unknown }) =>
+    t.handle({ type: 'extension.panel.action', chatId, extension: 'deep-research', panel: 'history', action } as ClientMessage)
+
+  it('replaces New research as the sidebar launcher', async () => {
+    const t = await core()
+    const space = t.create()
+    t.handle({ type: 'context.get', chatId: space })
+    const listed = t.messages.findLast((m) => m.type === 'chat.extensions' && m.chatId === space)
+    const panels = listed?.type === 'chat.extensions' ? listed.panels : []
+    expect(panels.map((p) => p.id)).not.toContain('new')
+    expect(panels.filter((p) => p.launcher)).toEqual([expect.objectContaining({ id: 'history', title: 'Research', placement: 'popup', shortcut: 'Mod+Shift+D' })])
+  })
+
+  it('says when there is no research yet', async () => {
+    const t = await core()
+    const space = t.create()
+    expect(await items(t, space)).toBe('No research yet.')
+  })
+
+  it('lists every run in every space and Home, newest first, with where it is, its status, depth and date', async () => {
+    const t = await core({}, [home])
+    await until(() => t.chats().some((c) => c.extension === 'home'))
+    const main = t.chats().find((c) => c.extension === 'home')!.id
+    const a = t.create('Alpha space')
+    const b = t.create('Beta space')
+    seedRun(t.garage, { id: 'r1', spaceId: a, question: 'Oldest question', phase: 'done', startedAt: '2026-01-02T10:00:00.000Z', summary: 'S' })
+    seedRun(t.garage, { id: 'r2', spaceId: b, question: 'Waiting question', phase: 'awaiting', startedAt: '2026-03-02T10:00:00.000Z', depth: 'quick' })
+    seedRun(t.garage, { id: 'r3', spaceId: main, question: 'Home question', phase: 'failed', startedAt: '2026-02-02T10:00:00.000Z', depth: 'thorough' })
+    seedRun(t.garage, { id: 'r4', spaceId: a, question: 'Stopped question', phase: 'stopped', startedAt: '2025-12-02T10:00:00.000Z' })
+    const listed = (await items(t, a)) as Item[]
+    expect(listed.map((i) => i.label)).toEqual(['Waiting question', 'Home question', 'Oldest question', 'Stopped question'])
+    expect(listed.map((i) => i.badges?.[0]?.text)).toEqual(['Plan waiting for you', 'Failed', 'Done', 'Stopped'])
+    expect(listed[0]!.detail).toMatch(/^Beta space · quick · /)
+    expect(listed[1]!.detail).toMatch(/^Home · thorough · /)
+    expect(listed[2]!.detail).toMatch(/^Alpha space · standard · /)
+    expect(listed[3]!.detail).toContain('2025')
+    // Only a run with a report offers it.
+    expect(listed.map((i) => i.button?.label)).toEqual([undefined, undefined, 'Report', undefined])
+    // The list comes from the index, which now has every run, without findings.
+    const index = JSON.parse(readFileSync(join(t.garage, 'extensions', 'deep-research', 'index.json'), 'utf8')) as Record<string, object>
+    expect(Object.keys(index).sort()).toEqual([`${a}/r1`, `${a}/r4`, `${b}/r2`, `${main}/r3`].sort())
+    expect(JSON.stringify(index)).not.toContain('findings')
+    // This space only, and search.
+    await act(t, a, { name: 'here', value: true })
+    expect(((await items(t, a)) as Item[]).map((i) => i.label)).toEqual(['Oldest question', 'Stopped question'])
+    await act(t, a, { name: 'here', value: false })
+    await act(t, a, { name: 'search', value: 'beta' })
+    expect(((await items(t, a)) as Item[]).map((i) => i.label)).toEqual(['Waiting question'])
+    await act(t, a, { name: 'search', value: 'nothing like it' })
+    expect(await items(t, a)).toBe('No research matches.')
+  })
+
+  it('opens the chat a run is in, scrolled to its card, and closes the popup', async () => {
+    const t = await core()
+    const a = t.create('A')
+    const b = t.create('B')
+    seedRun(t.garage, { id: 'r1', spaceId: b, question: 'In B', phase: 'done', startedAt: '2026-01-02T10:00:00.000Z', summary: 'S' })
+    t.host().note(b, 'Deep research: In B', { view: { id: 'run', key: 'r1' } })
+    const entry = t.chat(b).entries.findLastIndex((e) => e.type === 'extension.note')
+    const [row] = (await items(t, a)) as Item[]
+    await act(t, a, row!.action!)
+    expect(t.messages).toContainEqual(expect.objectContaining({ type: 'extension.panel.close', chatId: a, panel: 'history' }))
+    expect(t.messages).toContainEqual({ type: 'extension.chat.open', extension: 'deep-research', chatId: b, entry })
+    // Report opens it with the report beside it.
+    await act(t, a, { name: 'report', value: { space: b, run: 'r1' } })
+    expect(t.messages).toContainEqual({ type: 'extension.chat.open', extension: 'deep-research', chatId: b, entry, panel: 'report' })
+    await t.handle({ type: 'extension.panel.get', chatId: b, extension: 'deep-research', panel: 'report' })
+    await until(() => {
+      const drawn = t.messages.findLast((m) => m.type === 'extension.panel' && m.chatId === b && m.panel === 'report')
+      return drawn?.type === 'extension.panel' && JSON.stringify(drawn.view).includes('# In B')
+    })
+  })
+
+  it('opens the worker a run is in, and its space once the worker is gone', async () => {
+    const t = await core()
+    const space = t.create('Space')
+    t.hold.on = true
+    const worker = t.host().createChat({ parentId: space, task: 'Look into it', name: 'Helper' }).id
+    await until(() => t.chat(worker)?.status === 'running')
+    seedRun(t.garage, { id: 'r1', spaceId: space, chatId: worker, question: 'From a worker', phase: 'researching', startedAt: '2026-01-02T10:00:00.000Z' })
+    t.host().note(worker, 'Deep research: From a worker', { view: { id: 'run', key: 'r1' } })
+    const entry = t.chat(worker).entries.findLastIndex((e) => e.type === 'extension.note')
+    const [row] = (await items(t, space)) as Item[]
+    expect(row!.detail).toMatch(/^Helper in Space · /)
+    await act(t, space, row!.action!)
+    expect(t.messages).toContainEqual({ type: 'extension.chat.open', extension: 'deep-research', chatId: worker, entry })
+    t.hold.release?.()
+    await until(() => !t.chats().some((c) => c.id === worker))
+    await act(t, space, row!.action!)
+    expect(t.messages.findLast((m) => m.type === 'extension.chat.open')).toEqual({ type: 'extension.chat.open', extension: 'deep-research', chatId: space })
+  })
+
+  it('drops runs from the list when they or their space are deleted', async () => {
+    const t = await core()
+    const a = t.create('A')
+    seedRun(t.garage, { id: 'r1', spaceId: a, question: 'Gone soon', phase: 'done', startedAt: '2026-01-02T10:00:00.000Z' })
+    expect(((await items(t, a)) as Item[]).map((i) => i.label)).toEqual(['Gone soon'])
+    rmSync(join(t.garage, 'extensions', 'deep-research', 'runs', a, 'r1.json'))
+    expect(await items(t, a)).toBe('No research yet.')
+  })
+})

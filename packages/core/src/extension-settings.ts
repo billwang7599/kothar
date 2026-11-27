@@ -1,6 +1,7 @@
 // Extensions in Settings: what the UI shows of each (ExtensionInfo), its settings view, its values and each space's,
 // and its setup (checked, installed, cancelled). The core passes in its extensions, settings and chats as plain
 // functions; what's installing and each setup's state are kept here.
+import type { ModelRoles } from './model-roles.ts'
 import type { Extension, ExtensionAction, ExtensionContext, ExtensionRun } from '@kothar/extension-api'
 import type { Approval } from './approvals.ts'
 import type { Chat } from './chat.ts'
@@ -38,6 +39,8 @@ export type ExtensionSettingsDeps = {
   needs: (id: string) => string | undefined
   /** An extension's own switch, apart from whether what it requires is on. */
   switchedOn: (extension: Extension) => boolean
+  /** The model roles each extension declares, and why any were left out (model-roles.ts). */
+  modelRoles: Pick<ModelRoles, 'of' | 'problems'>
 }
 
 export function openExtensionSettings(deps: ExtensionSettingsDeps) {
@@ -74,7 +77,8 @@ export function openExtensionSettings(deps: ExtensionSettingsDeps) {
     // A community extension shows its own switch; the master switch is beside it in the UI.
     // A built-in one shows its own switch too: one that requires an extension that's off keeps it, greyed (blocked).
     const enabled = community.has(id) ? ownSwitch(extension) : deps.switchedOn(extension)
-    const settingsError = settingsErrors.get(id)
+    const settingsError = [settingsErrors.get(id), deps.modelRoles.problems.get(id)].filter(Boolean).join('. ')
+    const modelRoles = deps.isOn(extension) ? deps.modelRoles.of(extension) : []
     const view = settingsViewOf(extension)
     const prompts = deps.promptsOf(extension)
     const fixedInstructions =
@@ -97,6 +101,7 @@ export function openExtensionSettings(deps: ExtensionSettingsDeps) {
       ...(view && { settingsView: view }),
       ...(settingsError && { loadError: settingsError }),
       ...(extension.chats?.length && { ownsChat: true }),
+      ...(extension.alwaysOn && !community.has(id) && { alwaysOn: true as const }),
       ...(prompts.length && { prompts }),
       ...(fixedInstructions && { fixedInstructions }),
       ...(extension.requires?.length && { requires: [...extension.requires] }),
@@ -104,6 +109,7 @@ export function openExtensionSettings(deps: ExtensionSettingsDeps) {
       ...(Object.keys(blockedSettings).length && { blockedSettings }),
       // A community extension's are its manifest's (community.uses).
       ...(!community.has(id) && { uses: usesOf(extension) }),
+      ...(modelRoles.length && { modelRoles }),
     }
     const from = community.get(id)
     const { version, author, uses } = from?.manifest ?? {}

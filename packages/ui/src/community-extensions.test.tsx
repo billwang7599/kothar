@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { ClientMessage, InstalledItem, MarketEntry, ExtensionInfo, RestartState } from '@kothar/core/shared'
 import { ConfirmDialog } from './controls.tsx'
 import { MarketplaceDialog, type Market } from './marketplace.tsx'
-import { SettingsDialog } from './settings.tsx'
+import { SettingsDialog, type SettingsPage } from './settings.tsx'
 import { reduce, initialState } from './state.ts'
 import { startAppearance } from './themes.tsx'
 
@@ -71,11 +71,11 @@ function render(node: ReactNode) {
 
 type Extra = { communityExtensions?: boolean; restart?: RestartState; running?: number }
 
-function settings(extensions: ExtensionInfo[], sent: ClientMessage[] = [], extra: Extra = { communityExtensions: true }) {
+function settings(extensions: ExtensionInfo[], sent: ClientMessage[] = [], extra: Extra = { communityExtensions: true }, page: SettingsPage = 'community-extensions') {
   render(
     <SettingsDialog
       open
-      page="community-extensions"
+      page={page}
       openPage={() => {}}
       close={() => {}}
       engines={[]}
@@ -117,6 +117,38 @@ test('Community hub lists only community extensions, with the warning, what each
   expect(text).toContain('Off. Turn it on in Community hub.')
   expect(text).not.toContain('Your assistant.')
   expect(dialog.querySelector('a[href="https://github.com/someone/counter"]')).toBeTruthy()
+})
+
+test('an always-on extension (Home) has no switch: it is not among the built-in extensions, and its page sits under Options', () => {
+  const home: ExtensionInfo = {
+    ...builtIn,
+    alwaysOn: true,
+    ownsChat: true,
+    prompts: [{ id: 'role', label: 'Home’s role', where: 'instructions', text: 'Be Home.', default: 'Be Home.' }],
+  }
+  const other: ExtensionInfo = { id: 'plan', name: 'Plan', description: 'Plans first.', enabled: true, settings: [], values: {} }
+  settings([home, other], [], { communityExtensions: true }, 'extensions')
+  let dialog = document.querySelector('[role="dialog"]')!
+  expect(dialog.querySelector('[role="switch"][aria-label="Plan"]')).toBeTruthy()
+  expect(dialog.querySelector('[role="switch"][aria-label="Home"]')).toBeNull()
+  expect(dialog.textContent).not.toContain('Your assistant.')
+  const tabs = [...dialog.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)
+  expect(tabs.indexOf('Home')).toBeGreaterThan(-1)
+  expect(tabs.indexOf('Home')).toBeLessThan(tabs.indexOf('Built-in extensions'))
+
+  const sent = settings([home, other], [], { communityExtensions: true }, 'extension:home')
+  dialog = document.querySelector('[role="dialog"]')!
+  expect(dialog.querySelector('[role="switch"]')).toBeNull()
+  expect(dialog.querySelector('[data-testid="extension-kind"]')!.textContent).toBe('Part of Kothar')
+  const role = dialog.querySelector('textarea[aria-label="Home’s role"]') as HTMLTextAreaElement
+  expect(role.value).toBe('Be Home.')
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+  act(() => {
+    setter.call(role, 'Be brief.')
+    role.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  act(() => role.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  expect(sent).toContainEqual({ type: 'extension.prompt.set', extensionId: 'home', promptId: 'role', text: 'Be brief.' })
 })
 
 test('says when no community extensions are installed', () => {

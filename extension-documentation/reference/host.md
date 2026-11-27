@@ -39,6 +39,7 @@ Built-in extensions aren't held to `uses`.
 | `space(chatId)` | The space the chat is in (the chat itself for a space), as a [`SpaceDetail`](types.md#spaces), or `undefined`. |
 | `reaches(callerId, chatId)` | Whether chat `callerId` may reach chat `chatId`. See below. |
 | `reachable(callerId)` | Every chat `callerId` may reach, by the same rule. |
+| `usage(chatId)` | What engines reported the chat used, its workers (running and removed) and its whole space, as a [`ChatUsage`](types.md#usage). See [`onUsage`](events.md#onusage). |
 
 ### Who may reach whom
 
@@ -126,10 +127,15 @@ Kothar, so this needs no other extension:
   sidebar unless you give a `name`. Without a `task`, give a `name` and send its first message with `send`.
 
 - It's listed under its parent, and it's view only: you can watch it and stop it, not write to it.
-- It works in its space's work folder and checkouts, so it takes no `folders` or `files` of its own.
+- It works in its space's work folder, so it takes no `folders` or `files` of its own. In a space with git folders,
+  `checkout: 'own'` gives it a worktree of each on a branch of its own, made from the space's checkout, and its changes
+  wait in its report for review (merge, squash, discard or keep); `checkout: 'shared'` has it work in the space's
+  checkouts. Without `checkout`, a quiet child shares and any other follows **Settings → Workers → Own worktree per
+  worker** (on by default).
 - It sees its parent's memory as it was at launch.
-- It runs on the model list named by `role`: `chat`, `planning`, `searching` or `workers` (the default). Use `role`
-  only with `parentId`.
+- It runs on the model list named by `role`: `chat`, `workers` (the default), or a role an extension that's on declares
+  ([`modelRoles`](extension.md#model-roles)), such as Deep Research's `searching`. Any other role is refused. Use
+  `role` only with `parentId`.
 - Its final reply joins the parent's queue as a report and wakes the parent. Then the child is removed.
 - With `quiet: true`, its final reply goes to your extension instead: read it in
   [`onTurnCompleted`](events.md) (`turn.text`, with `turn.chat` the child). The parent gets no report and isn't woken.
@@ -151,9 +157,10 @@ start workers** switch only concerns `spawn_worker`; your extension can start wo
 ```ts
 import type { ExtensionHost } from '@kothar/extension-api'
 
+// With modelRoles: [{ id: 'my-research', label: 'My research' }] on the extension.
 function research(host: ExtensionHost, parentId: string, question: string) {
   const task = `Find out: ${question}. Reply with a short answer and your sources.`
-  return host.createChat({ name: 'Research', parentId, role: 'searching', task }).id
+  return host.createChat({ name: 'Research', parentId, role: 'my-research', task }).id
 }
 
 export { research }
@@ -306,7 +313,8 @@ List `models` in the manifest's `uses`: each call runs on your account.
 
 Each call is listed in the Inspector's **Activity**, with your extension's name, the model, what was sent and the reply.
 Pass `chatId` (the chat the call is for, such as the chat a summary is of) to list it under that chat; without it, it's
-listed as not tied to a chat.
+listed as not tied to a chat. What the call used, if the engine says, counts toward that chat's usage (or the garage's
+own `usage.jsonl` without one) and reaches [`onUsage`](events.md#onusage) under your extension's id.
 
 ## Activity
 
@@ -354,7 +362,7 @@ folder and go when the chat is deleted. Kothar's own files there are out of reac
 `memory` listed.
 
 `everyChatStorage()` returns `{ chatId, storage }[]`: the `chatStorage` of every chat Kothar keeps, including chats
-the user can't see right now, such as Home while its extension is off. It's for housekeeping across chats, such as
+the user can't see right now, such as an extension's own chat while that extension is off. It's for housekeeping across chats, such as
 showing how much disk your files take or deleting them all. It isn't for reading chats the user can't see. It needs
 `memory` listed. Memory's Settings readout uses it:
 

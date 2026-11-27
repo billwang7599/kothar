@@ -2,9 +2,9 @@
 // permission requests, extensions waiting on the user, and a worker's view-only bar.
 import { useState } from 'react'
 import { AnimatePresence, m } from 'motion/react'
-import { ROLE_NAMES, type ClientMessage, type ModelLists } from '@kothar/core/shared'
+import type { ClientMessage, ExtensionInfo, ModelLists } from '@kothar/core/shared'
 import { Button, CHAT_NOUN, Hint, MOTION } from '../controls.tsx'
-import { engineName, type ChatView, type State } from '../state.ts'
+import { engineName, listNameOf, type ChatView, type State } from '../state.ts'
 import type { SettingsPage } from '../settings.tsx'
 import { PaperclipIcon } from './attachments.tsx'
 import { FORCE_STOP_HINT } from './composer.tsx'
@@ -31,13 +31,15 @@ type EngineNoteProps = {
   offers?: Engine
   noEngineOn: boolean
   modelLists?: ModelLists
+  // For the name of a role an extension declares.
+  extensions?: ExtensionInfo[]
   connected: boolean
   send: Send
   openSettings: (page?: SettingsPage) => void
 }
 
 /** Why this chat's model can't run, with the way back to Settings. */
-export function EngineNote({ chat, offers, noEngineOn, modelLists, connected, send, openSettings }: EngineNoteProps) {
+export function EngineNote({ chat, offers, noEngineOn, modelLists, extensions, connected, send, openSettings }: EngineNoteProps) {
   return (
     <div className="mx-auto flex max-w-column items-center gap-12 rounded-lg border border-dashed px-14 py-12 text-muted">
       <span className="flex-1">
@@ -45,7 +47,7 @@ export function EngineNote({ chat, offers, noEngineOn, modelLists, connected, se
           ? 'No engine is on. Turn one on in Settings to start chatting.'
           : chat.model
             ? `${chat.model} on ${engineName(offers) || chat.engine} can't run: ${offers?.enabled ? 'the engine no longer offers it' : 'the engine is off or gone'}. Pick another model, or go back to the models in Settings.`
-            : `Nothing in the ${chat.role && modelLists?.[chat.role]?.length ? ROLE_NAMES[chat.role] : 'Chat'} model list can run. Add a model, or turn its engine on, in Settings.`}
+            : `Nothing in the ${listNameOf(chat.role, modelLists, extensions)} model list can run. Add a model, or turn its engine on, in Settings.`}
       </span>
       {chat.model && !noEngineOn && (
         <Button size="small" disabled={!connected} onClick={() => send({ type: 'chat.setModel', chatId: chat.id })}>

@@ -46,6 +46,7 @@ A **space** is a chat with no `parentId` and no `extension`.
 | `workDir` | The folder its agents work in. Absent until the space's first message picks one. |
 | `folders` | `{ path, git }[]`: its folders, and whether each is a git repository. |
 | `checkouts` | `{ folder, path, branch, from? }[]`: each git folder's checkout in the work folder. `path` and `branch` are the checkout's; `from` is the branch the folder was on when Kothar checked it out. |
+| `workerCheckouts?` | `{ folder, path, branch, from, worker, name, state }[]`: workers' own checkouts (Settings → Workers → Own worktree per worker). `from` is the space's branch the worker's branch merges into; `worker` and `name` are the worker's id and name; `state` is `working`, or `review` / `kept` once it reported and its changes wait. Kothar makes and removes them; leave them out of any cleanup. |
 
 ## Log entries
 
@@ -56,6 +57,7 @@ A **space** is a chat with no `parentId` and no `extension`.
 | `user.message` | `text`, `attachments?`, `midTurn?` | A message you sent. `midTurn` is set when it was sent while a turn ran and taken in by that turn. |
 | `worker.report` | `text`, `chatId`, `name`, `error?` | A worker's final reply, delivered to its lead. |
 | `permission.resolved` | `requestId`, `allow`, `auto?` | A permission request was answered. `auto` is set when Kothar or an extension answered it. |
+| `permission.requested` | the engine event's fields, plus `sshHost?` and `buttons?` | As the engine sent it. `sshHost` (`{ host, key? }`) is set by Kothar when the command reaches one SSH server that its card can offer to always allow. `buttons` (`{ allow, deny }`) is set on Kothar's own `forget` card, which asks in its own words: Forget and Cancel. |
 | `question.resolved` | `requestId`, `answers?` | An agent's question was answered, or declined if there are no answers. |
 | `extension.note` | `text`, `extension?`, `panel?` | A note from [`host.note`](host.md#notes). |
 | Any engine event | | Every [engine event](#engine-events) except streamed deltas and steering. Completed text is logged as `text.completed`. |
@@ -93,11 +95,32 @@ all of them.
 | `steer.landed` | `id` | A message you sent mid-turn entered the running turn. |
 | `steer.returned` | `id` | A message you sent mid-turn was handed back unsent. |
 | `tools.listed` | `names` | The engine's built-in tools for this session, by its own names, as it starts (Claude Code only). |
+| `turn.usage` | `usage` | What the turn's model calls used, as a [`Usage`](#usage), just before `turn.completed`; once per model. Engines that report nothing never send it. Not in the log. |
 | `turn.completed` | `error?`, `errorKind?` | A turn ended. `errorKind` says why it failed (see [`onTurnCompleted`](events.md)). |
 | `session.ended` | `error?`, `errorKind?` | The engine session ended. |
 
 A tool's `kind` is one of `shell`, `edit`, `read`, `search`, `fetch`, `mcp` or `other`, the same across engines. So one
 permission policy works for every engine.
+
+## Usage
+
+What engines report their model calls used, in words every engine shares. A field the engine doesn't report is absent.
+
+| Type | Fields |
+|---|---|
+| `Usage` | `inputTokens?` (input read fresh, without the cache), `outputTokens?` (thinking included), `cacheReadTokens?`, `cacheWriteTokens?`, `costUsd?`, `model?` |
+| `UsageRecord` | A `Usage` as Kothar saves it in the chat's `usage.jsonl`: plus `at`, `engine`, `source` (`'turn'` or `'complete'`), `chatId?`, `turn?` (the turn's id, as in `SentTurn`) and `extension?` (whose `host.complete` call it was) |
+| `UsageTotals` | `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `costUsd`, `turns`, `calls` (one-shot calls) and `unpriced` (reports with tokens but no cost) |
+| `ChatUsage` | `chat` (its own), `workers` (its workers', running and removed) and `space` (the whole space) |
+
+Which engines report what:
+
+| Engine | Tokens | Cost |
+|---|---|---|
+| Claude Code | Each result's usage per model (`model_usage_since_last_result`, or the change in `modelUsage` on older versions), one-shot calls too | Yes, at API prices, even on a subscription |
+| Codex | The thread's token totals (`thread/tokenUsage/updated`), and `exec`'s for one-shot calls; cached input counted apart | No |
+| pi | Each assistant message's `usage` | Yes (`cost.total`); its one-shot calls report nothing |
+| OpenCode (ACP) | `session/prompt`'s `usage` | The change in `usage_update`'s running cost, in dollars |
 
 ## Tool capabilities
 

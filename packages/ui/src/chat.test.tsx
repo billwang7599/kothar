@@ -415,12 +415,13 @@ test('while Allow all is on, the Permissions section folds the other switches aw
   expect(container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]')).not.toBeNull()
 })
 
-test("the Permissions section adds and removes a chat's allowed SSH hosts, over Settings' list", () => {
+test("the Permissions section adds and removes a chat's own SSH hosts, with Settings' and its space's shown read only", () => {
   localStorage.setItem('kothar.panelTab', 'general')
   const sent: ClientMessage[] = []
   const group = () => container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]') as HTMLElement
   const input = (label: string) => group().querySelector(`input[aria-label="${label}"]`) as HTMLInputElement
   const buttonOf = (text: string) => [...group().querySelectorAll('button')].find((b) => b.textContent === text)
+  const inherited = () => [...group().querySelectorAll('li[data-inherited]')].map((li) => li.textContent)
   const typeInto = (target: HTMLInputElement, value: string) =>
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(target, value)
@@ -428,24 +429,41 @@ test("the Permissions section adds and removes a chat's allowed SSH hosts, over 
     })
   const settings = [{ host: 'build.example.com' }]
   render({}, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
-  expect(group().textContent).toContain('build.example.com')
-  expect(group().textContent).toContain('From Settings')
+  expect(inherited()).toEqual(['build.example.comFrom Settings'])
+  // Read only: no × for a host set in Settings, and no Reset (a chat's list adds; it never replaces).
+  expect(group().querySelector('button[aria-label="Remove build.example.com"]')).toBeNull()
   expect(buttonOf('Reset')).toBeUndefined()
   typeInto(input('SSH host'), ' b36wang@linux.student.cs.uwaterloo.ca ')
   typeInto(input('SSH key (optional)'), '~/.ssh/keys/uwstudent')
   act(() => buttonOf('Add')!.click())
+  // Only the chat's own list is sent: Settings' isn't copied in.
   expect(sent.at(-1)).toEqual({
     type: 'chat.setSshHosts',
     chatId: 'c1',
-    hosts: [...settings, { host: 'b36wang@linux.student.cs.uwaterloo.ca', key: '~/.ssh/keys/uwstudent' }],
+    hosts: [{ host: 'b36wang@linux.student.cs.uwaterloo.ca', key: '~/.ssh/keys/uwstudent' }],
   })
-  const own = [{ host: 'a.example.com' }, { host: 'b.example.com', key: '~/.ssh/b' }]
+  const own = [{ host: 'a.example.com' }, { host: 'build.example.com' }]
   render({ sshHosts: own }, (m) => sent.push(m), { contextOpen: true, workFolder: { sshHosts: settings } })
-  expect(group().textContent).not.toContain('build.example.com')
+  // Set in both places, it shows once, as the chat's own.
+  expect(inherited()).toEqual([])
+  expect(group().textContent).toContain('a.example.com')
   act(() => (group().querySelector('button[aria-label="Remove a.example.com"]') as HTMLButtonElement).click())
   expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1', hosts: [own[1]] })
-  act(() => buttonOf('Reset')!.click())
+  // The last one removed drops the chat's own list.
+  render({ sshHosts: [own[0]!] }, (m) => sent.push(m), { contextOpen: true })
+  act(() => (group().querySelector('button[aria-label="Remove a.example.com"]') as HTMLButtonElement).click())
   expect(sent.at(-1)).toEqual({ type: 'chat.setSshHosts', chatId: 'c1' })
+})
+
+test("a worker's Permissions section shows its space's SSH hosts as from its space", () => {
+  localStorage.setItem('kothar.panelTab', 'general')
+  const space = viewOf({ id: 's1', name: 'Space', sshHosts: [{ host: 'space.example.com' }] })
+  render({ id: 'w1', parentId: 's1' }, () => {}, { contextOpen: true, chats: [space], workFolder: { sshHosts: [{ host: 'build.example.com' }] } })
+  const group = container.querySelector('aside [role="group"][aria-label="Allowed SSH hosts"]') as HTMLElement
+  expect([...group.querySelectorAll('li[data-inherited]')].map((li) => li.textContent)).toEqual([
+    'space.example.comFrom its space',
+    'build.example.comFrom Settings',
+  ])
 })
 
 const hintOf = async (element: Element) => {
@@ -1105,6 +1123,36 @@ test("a wait's closing button hides the bar on the click, before the core ends t
   expect(bar()!.textContent).toContain('Browser: Look at the chart')
 })
 
+test('an SSH card offers Always allow for its host, in this space or all spaces; other cards do not', async () => {
+  const card = (sshHost?: { host: string; key?: string }): Item => ({
+    kind: 'permission',
+    requestId: 'r1',
+    name: 'Bash',
+    toolKind: 'shell',
+    summary: 'scp',
+    input: {},
+    outcome: 'pending',
+    ...(sshHost && { sshHost }),
+  })
+  const sent: ClientMessage[] = []
+  const host = 'linux.student.cs.uwaterloo.ca'
+  render({ status: 'waiting', items: [USER, card({ host, key: '~/.ssh/keys/uwstudent' })] }, (m) => sent.push(m))
+  const trigger = container.querySelector<HTMLButtonElement>(`[data-always-allow="${host}"]`)!
+  expect(trigger.textContent).toContain(`Always allow ${host}`)
+  expect(await hintOf(trigger)).toContain(`${host} with the key ~/.ssh/keys/uwstudent`)
+  for (const [label, trustHost] of [['This space', 'space'], ['All spaces', 'global']] as const) {
+    act(() => void trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    expect(items.map((i) => i.textContent)).toEqual(['This space', 'All spaces'])
+    act(() => items.find((i) => i.textContent === label)!.click())
+    expect(sent.at(-1)).toEqual({ type: 'permission.respond', chatId: 'c1', requestId: 'r1', allow: true, trustHost })
+  }
+
+  render({ status: 'waiting', items: [USER, card()] })
+  expect(container.querySelector('[data-always-allow]')).toBeNull()
+  expect(container.textContent).toContain('Approve')
+})
+
 test("a worker's own view shows where its request waits, with a way to the space instead of Approve", () => {
   const select = vi.fn()
   render(worker(), () => {}, { chats: [SPACE], select })
@@ -1698,4 +1746,31 @@ test('an undone message comes back to the composer once, before what was typed, 
   expect(area().value).toBe('oops, wrong chat\n\ntyped meanwhile')
   expect(container.querySelectorAll('[aria-label="Attachments"] li')).toHaveLength(1)
   localStorage.clear()
+})
+
+test('a forget card asks in its own words, lists what goes, and answers with Forget or Cancel', () => {
+  const sent: ClientMessage[] = []
+  const forget: Item = {
+    kind: 'permission',
+    requestId: 'f1',
+    name: 'Forget 2 messages',
+    toolKind: 'other',
+    summary: 'You: TallyVotes quiz notes\nReply: Saved the notes.',
+    input: { ids: [0, 1] },
+    outcome: 'pending',
+    buttons: { allow: 'Forget', deny: 'Cancel' },
+  }
+  render({ status: 'waiting', items: [USER, forget] }, (m) => sent.push(m))
+  expect(container.textContent).toContain('Forget 2 messages?')
+  expect(container.textContent).not.toContain('Allow Forget')
+  expect(container.textContent).toContain('Reply: Saved the notes.')
+  const labels = [...container.querySelectorAll('button')].map((b) => b.textContent)
+  expect(labels).toEqual(expect.arrayContaining(['Forget', 'Cancel']))
+  expect(labels).not.toContain('Approve')
+  const cancel = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Cancel')!
+  act(() => cancel.click())
+  expect(sent.at(-1)).toEqual({ type: 'permission.respond', chatId: 'c1', requestId: 'f1', allow: false })
+  const yes = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Forget')!
+  act(() => yes.click())
+  expect(sent.at(-1)).toEqual({ type: 'permission.respond', chatId: 'c1', requestId: 'f1', allow: true })
 })

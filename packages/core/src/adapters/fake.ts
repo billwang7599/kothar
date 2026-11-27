@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import type { Adapter, EngineEvent, Question, SessionOptions, ThinkingLevel, ToolKind } from '../shared.ts'
+import type { Adapter, EngineEvent, Question, SessionOptions, ThinkingLevel, ToolKind, Usage } from '../shared.ts'
 
 export type FakeStep =
   | EngineEvent
@@ -76,6 +76,11 @@ const demoScript: FakeStep[] = [
     'This folder has:\n\n- a `README.md`\n- a `src` directory\n\nTo list it yourself:\n\n```sh\nls -la\n```\n\n' +
       'This reply came from the **fake engine**.',
   ),
+  // Made-up numbers, so the window has usage to show.
+  {
+    type: 'turn.usage',
+    usage: { model: 'fake-small', inputTokens: 1840, outputTokens: 420, cacheReadTokens: 12_600, cacheWriteTokens: 2_100, costUsd: 0.0186 },
+  },
 ]
 
 export const FAKE_MODELS = ['fake-large', 'fake-small']
@@ -84,18 +89,19 @@ export const FAKE_DEFAULTS = { defaultModel: 'fake-small', defaultThinking: 'hig
 
 // A script can depend on the session, such as which account it runs on (options.accountDir). With steering, a
 // steered message lands after the next tool result, like Claude Code's and pi's; one still waiting when the script
-// ends is returned.
+// ends is returned. A script reports usage with turn.usage steps; completeUsage is what each one-shot call reports.
 export function createFakeAdapter(
   script: FakeStep[] | ((options: SessionOptions) => FakeStep[]) = demoScript,
   delayMs = 40,
-  { steering = false }: { steering?: boolean } = {},
+  { steering = false, completeUsage }: { steering?: boolean; completeUsage?: Usage } = {},
 ): Adapter {
   return {
     id: 'fake',
     name: 'Fake',
     imageInput: true,
     ...(steering && { steering }),
-    async complete(_machine, { prompt }) {
+    async complete(_machine, { prompt, onUsage }) {
+      if (completeUsage) onUsage?.(completeUsage)
       const keys = [...prompt.matchAll(/<item key="([^"]+)"/g)].map(([, key]) => key)
       return JSON.stringify({ summaries: keys.map((key) => ({ key, text: `summary of ${key}` })) })
     },

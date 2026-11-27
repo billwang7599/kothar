@@ -14,6 +14,7 @@ import { searchChats } from './search.ts'
 import {
   CONTEXT_SECTIONS,
   isUnread,
+  MAX_SETUP_SCRIPT,
   type ChatInfo,
   type ClientMessage,
   type ContextItem,
@@ -25,6 +26,7 @@ import {
   type QueuedMessage,
   type Setup,
 } from './shared.ts'
+import { isReviewAction, type ReviewAction } from './worker-checkouts.ts'
 import { checkSwitch } from './settings.ts'
 import { checkSshHosts } from './ssh-hosts.ts'
 import { messageOf } from './util.ts'
@@ -67,7 +69,7 @@ export type ProtocolDeps = {
   undoMessage: (chat: Chat, entry: unknown) => CoreMessage
   setQueue: (chat: Chat, queue: QueuedMessage[]) => void
   interrupt: (chat: Chat, force: boolean) => void
-  respond: (chat: Chat, requestId: string, allow: boolean) => void
+  respond: (chat: Chat, requestId: string, allow: boolean, trust?: unknown) => void
   answer: (chat: Chat, requestId: string, answers: unknown) => void
 
   // Context
@@ -78,12 +80,15 @@ export type ProtocolDeps = {
   setFolderMode: (chat: Chat, path: unknown, mode: unknown) => void
   copyChanges: (chat: Chat, path: unknown) => Promise<CopyChange[]>
   copyBack: (chat: Chat, path: unknown, files: unknown, overwrite: boolean) => Promise<number>
+  // A worker's changes, waiting on its space: Merge, Squash, Discard or Keep (worker-checkouts.ts).
+  reviewWorker: (space: Chat, workerId: string, action: ReviewAction) => Promise<string>
   writeContext: (chat: Chat, text: string) => void
   writeInstructions: (text: string) => void
   setContextDefault: (section: ContextSection, enabled: boolean) => void
 
   // Settings
   setEngineEnabled: (engine: string, enabled: boolean) => void
+  acpAgents: { save: (agent: unknown) => Promise<unknown>; remove: (engine: string) => void }
   setWorkFolder: (path: unknown) => void
   setPermissionDefault: (name: unknown, enabled: boolean) => void
   setSshHostsDefault: (hosts: unknown) => void
@@ -190,6 +195,23 @@ export function openProtocol(deps: ProtocolDeps) {
       deps.checkActive(chat)
       return deps.updateChat(chat, { sshHosts: hosts })
     },
+    'worker.review': (message, reply) => {
+      const chat = chatFor(message.chatId)
+      if (typeof message.workerId !== 'string') throw new Error('Which worker?')
+      if (!isReviewAction(message.action)) throw new Error('Merge, squash, discard or keep')
+      deps.checkActive(chat)
+      return void deps.reviewWorker(chat, message.workerId, message.action).catch((error) =>
+        reply({ type: 'error', message: messageOf(error) }),
+      )
+    },
+    'chat.setSetupScript': (message) => {
+      const chat = chatFor(message.chatId)
+      if (chat.info.parentId !== undefined || chat.info.extension) throw new Error('Only a space has a setup script')
+      if (message.script !== undefined && typeof message.script !== 'string') throw new Error('A setup script is text')
+      if ((message.script?.length ?? 0) > MAX_SETUP_SCRIPT) throw new Error(`A setup script is at most ${MAX_SETUP_SCRIPT} characters`)
+      deps.checkActive(chat)
+      return deps.updateChat(chat, { setupScript: message.script?.trim() ? message.script : undefined })
+    },
     search: (message, reply) => {
       const spaces = deps.shownChats().filter((c) => !c.info.worker)
       const hits = searchChats(
@@ -214,7 +236,8 @@ export function openProtocol(deps: ProtocolDeps) {
     'chat.editMessage': (message) => deps.editMessage(chatFor(message.chatId), message.entry, message.text),
     'chat.undoMessage': (message, reply) => reply(deps.undoMessage(chatFor(message.chatId), message.entry)),
     'chat.interrupt': (message) => deps.interrupt(chatFor(message.chatId), message.force === true),
-    'permission.respond': (message) => deps.respond(chatFor(message.chatId), message.requestId, message.allow === true),
+    'permission.respond': (message) =>
+      deps.respond(chatFor(message.chatId), message.requestId, message.allow === true, message.trustHost),
     'question.respond': (message) => deps.answer(chatFor(message.chatId), message.requestId, message.answers),
 
     // Context
@@ -293,13 +316,17 @@ export function openProtocol(deps: ProtocolDeps) {
 
     // Settings
     'engine.setEnabled': (message) => deps.setEngineEnabled(String(message.engine), message.enabled === true),
+    'acpAgent.save': async (message) => {
+      await deps.acpAgents.save(message.agent)
+    },
+    'acpAgent.remove': (message) => deps.acpAgents.remove(String(message.engine)),
     'workFolder.set': (message) => deps.setWorkFolder(message.path),
     'permission.setDefault': (message) => deps.setPermissionDefault(message.name, message.enabled === true),
     'permission.setSshHosts': (message) => deps.setSshHostsDefault(message.hosts),
     'terminal.set': (message) => deps.setTerminal(message.terminal),
     'editor.set': (message) => deps.setEditor(message.editor, message.command),
     'memory.set': (message) => deps.setMemory(optionalText(message.engine), optionalText(message.model)),
-    'workers.set': (message) => deps.workers.set({ start: message.start, limit: message.limit }),
+    'workers.set': (message) => deps.workers.set({ start: message.start, limit: message.limit, ownCheckouts: message.ownCheckouts }),
     'workers.prompt.set': (message) => deps.workers.setInstructions(typeof message.text === 'string' ? message.text : undefined),
     'engineTools.setEnabled': (message) => deps.engineTools.setEnabled(message.engine, message.enabled),
     'engineTools.setTool': (message) => deps.engineTools.setTool(message.engine, message.tool, message.on),

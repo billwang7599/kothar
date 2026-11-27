@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import * as signing from './signing.ts'
 import type { Plan, Probe, Run } from './signing.ts'
 
-const probe = (identities: string[] = [], profiles: string[] = []): Probe => ({
+const probe = (identities: string[] = [], profiles: string[] = [], files: string[] = ['/k/AuthKey.p8']): Probe => ({
   identities: () => identities,
+  exists: (path) => files.includes(path),
   notaryProfile: (profile) =>
     profiles.includes(profile) ? { found: true } : { found: false, error: `Error: No Keychain password item found for profile: ${profile}` },
 })
@@ -58,14 +59,17 @@ describe('signingPlan', () => {
     expect(plan).toMatchObject({ signed: true, identity: undefined })
   })
 
-  it('prefers the keychain profile over Apple ID variables, and falls back to them', () => {
-    expect(signing.signingPlan(APPLE_ID, probe([ME], ['kothar-notary'])).notary).toEqual({ kind: 'profile', profile: 'kothar-notary' })
-    expect(signing.signingPlan(APPLE_ID, probe([ME])).notary).toEqual({
+  it('prefers Apple ID variables over the kothar-notary profile, and uses the profile without them', () => {
+    const notaryProfile = vi.fn(() => ({ found: true as const }))
+    expect(signing.signingPlan(APPLE_ID, { identities: () => [ME], notaryProfile }).notary).toEqual({
       kind: 'apple-id',
       appleId: 'me@example.com',
       password: 'abcd-efgh-ijkl-mnop',
       teamId: 'AB12CD34EF',
     })
+    // Set credentials mean no sign-in to Apple just to look for the profile (a CI runner has none).
+    expect(notaryProfile).not.toHaveBeenCalled()
+    expect(signing.signingPlan({}, probe([ME], ['kothar-notary'])).notary).toEqual({ kind: 'profile', profile: 'kothar-notary' })
   })
 
   it('uses a named profile from APPLE_KEYCHAIN_PROFILE or KOTHAR_NOTARY_PROFILE', () => {
@@ -89,9 +93,42 @@ describe('signingPlan', () => {
     expect(notaryProfile).toHaveBeenCalledWith('ci', '/k.keychain-db')
   })
 
-  it('uses an App Store Connect API key', () => {
+  it('uses an App Store Connect API key, over the profile and over an Apple ID', () => {
     const env = { APPLE_API_KEY: '/k/AuthKey.p8', APPLE_API_KEY_ID: 'KEY', APPLE_API_ISSUER: 'ISS' }
-    expect(signing.signingPlan(env, probe([ME])).notary).toEqual({ kind: 'api-key', key: '/k/AuthKey.p8', keyId: 'KEY', issuer: 'ISS' })
+    const key = { kind: 'api-key', key: '/k/AuthKey.p8', keyId: 'KEY', issuer: 'ISS' }
+    expect(signing.signingPlan(env, probe([ME])).notary).toEqual(key)
+    expect(signing.signingPlan(env, probe([ME], ['kothar-notary'])).notary).toEqual(key)
+    expect(signing.signingPlan({ ...env, ...APPLE_ID }, probe([ME])).notary).toEqual(key)
+  })
+
+  it('signs with CSC_LINK and notarizes with an API key, as the release workflow does', () => {
+    const env = { CSC_LINK: 'MIIK…base64', CSC_KEY_PASSWORD: 'x', APPLE_API_KEY: '/k/AuthKey.p8', APPLE_API_KEY_ID: 'K', APPLE_API_ISSUER: 'I' }
+    const plan = signing.signingPlan({ ...env, KOTHAR_REQUIRE_NOTARIZED: '1' }, probe())
+    expect(plan).toMatchObject({ signed: true, identity: undefined, notary: { kind: 'api-key' } })
+    expect(plan.message).toContain('App Store Connect API key')
+  })
+
+  it('stops when APPLE_API_KEY names no file', () => {
+    const env = { APPLE_API_KEY: '/nowhere/AuthKey.p8', APPLE_API_KEY_ID: 'KEY', APPLE_API_ISSUER: 'ISS' }
+    expect(() => signing.signingPlan(env, probe([ME]))).toThrow(
+      "APPLE_API_KEY should be the path to the App Store Connect key (.p8), but there's no file at /nowhere/AuthKey.p8",
+    )
+  })
+
+  it('names the missing variable of a half-set API key, even with a whole Apple ID', () => {
+    expect(() => signing.signingPlan({ ...APPLE_ID, APPLE_API_KEY: '/k/AuthKey.p8', APPLE_API_ISSUER: 'ISS' }, probe([ME]))).toThrow(
+      'APPLE_API_KEY and APPLE_API_ISSUER are set, but not APPLE_API_KEY_ID',
+    )
+  })
+
+  it('with KOTHAR_REQUIRE_NOTARIZED, stops instead of building unsigned or unnotarized', () => {
+    const require = { KOTHAR_REQUIRE_NOTARIZED: '1' }
+    expect(() => signing.signingPlan(require, probe())).toThrow(
+      /^KOTHAR_REQUIRE_NOTARIZED is set, so the build stops here\. Kothar will be UNSIGNED .*no Developer ID Application certificate/,
+    )
+    expect(() => signing.signingPlan(require, probe([ME]))).toThrow(/NOT notarized/)
+    expect(() => signing.signingPlan({ ...require, KOTHAR_UNSIGNED: '1' }, probe([ME], ['kothar-notary']))).toThrow(/KOTHAR_UNSIGNED is set/)
+    expect(signing.signingPlan(require, probe([ME], ['kothar-notary'])).notary).toEqual({ kind: 'profile', profile: 'kothar-notary' })
   })
 
   it('stops on a half-set group of Apple variables instead of skipping notarization', () => {

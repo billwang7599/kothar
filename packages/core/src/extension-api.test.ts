@@ -790,6 +790,20 @@ describe('showPanel', () => {
     expect(() => t.host().closePanel('nope', 'pop')).toThrow('Unknown chat "nope"')
   })
 
+  it('opens a chat for the user, scrolled to an entry, with a dock of its own beside it', () => {
+    const t = withHost({ panels })
+    const id = t.create()
+    t.host().openChat(id)
+    t.host().openChat(id, { entry: 3, panel: 'side' })
+    expect(t.messages.filter((m) => m.type === 'extension.chat.open')).toEqual([
+      { type: 'extension.chat.open', chatId: id, extension: 'test' },
+      { type: 'extension.chat.open', chatId: id, extension: 'test', entry: 3, panel: 'side' },
+    ])
+    expect(() => t.host().openChat(id, { panel: 'tab' })).toThrow('Test extension has no dock panel "tab"')
+    expect(() => t.host().openChat(id, { entry: -1 })).toThrow('Not a log entry: -1')
+    expect(() => t.host().openChat('nope')).toThrow('Unknown chat "nope"')
+  })
+
   it('keeps a dock placement for the UI', () => {
     const t = withHost({ panels })
     const id = t.create()

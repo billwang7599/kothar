@@ -26,9 +26,9 @@ The desktop app uses the same core port, so quit Kothar first, or move the dev c
 WebSocket address, read by the UI).
 
 Other variables the core reads (`packages/core/src/main.ts`): `KOTHAR_PORT` (core port, default 4317),
-`KOTHAR_UI_ORIGIN`, `KOTHAR_TOKEN`, `KOTHAR_ENGINE`, `KOTHAR_MARKETPLACE_URL` and `KOTHAR_GITHUB_TOKEN`. The UI's Vite
-port is `KOTHAR_UI_PORT` (default 4318). Each has an older `HOTROD_` name that still works (see
-[Old names](#old-names-and-why-they-still-work)).
+`KOTHAR_UI_ORIGIN`, `KOTHAR_TOKEN`, `KOTHAR_ENGINE`, `KOTHAR_MARKETPLACE_URL`, `KOTHAR_GITHUB_TOKEN` and `KOTHAR_DEV`.
+The UI's Vite port is `KOTHAR_UI_PORT` (default 4318). The fake engine (scripted replies, no model) is offered only when
+`KOTHAR_DEV` is set, which `npm run dev` does, or `KOTHAR_ENGINE=fake`; the desktop app never lists it.
 
 To build the Mac app, see [Building the Mac app](README.md#building-the-mac-app).
 
@@ -64,10 +64,12 @@ packages/
     src/machine.ts       runs processes, locally and sandboxed
     src/folder-modes.ts  how agents may write in attached folders: the sandbox, permission answers and instructions
     src/folder-copies.ts folders set to Work on a copy: the copy, its changes and Copy changes back
-    src/adapters/        one file per engine (claude-code, codex, opencode, pi, fake) and their helpers
+    src/adapters/        one file per engine (claude-code, codex, opencode, pi, fake) and their helpers;
+                         acp-agent.ts runs any ACP agent the user adds in Settings (acp-agents.ts keeps the list)
     src/kothar-mcp.ts    the MCP server Kothar gives every agent (zoom, date, spawn_worker, ...)
   ui/              React app (Tailwind, Radix, Motion), talking to the core over a WebSocket (@kothar/ui)
   desktop/         Electron shell that runs the core and serves the built UI (@kothar/desktop)
+  cli/             the kothar command, a WebSocket client of a running core (@kothar/cli)
   extension-api/   @kothar/extension-api: the public extension types, MIT, types only
 extensions/<id>/   the built-in extensions, each default-exporting an Extension from index.ts
 extension-documentation/   the extension author docs
@@ -89,7 +91,7 @@ Use the names the code uses:
 | Chat | An endless conversation owned by Kothar, backed by a series of sessions. |
 | Space | A top-level chat with its own folders, files and `AGENTS.md`. Its agent is the **lead**. |
 | Worker | A chat started below another for one task: by its agent with `spawn_worker`, or by an extension with `host.createChat({ parentId })`. Its final reply wakes the lead (or, quiet, goes to the extension). Part of the core, set in Settings → Workers. |
-| Home | The built-in Home extension's chat (id `main`): a personal assistant that sees every space. |
+| Home | The main chat (id `main`): a personal assistant that sees every space. Part of Kothar and always on, though written as an extension (`extensions/home`, `alwaysOn`). |
 | Extension | Adds features to Kothar through the public extension API. **Built-in** ones ship in `extensions/`; **community** ones install from the marketplace. |
 | Setup | A saved choice for a kind of job: engine, model, thinking level, extensions to leave out, instructions. |
 | Garage | Kothar's own folder: settings, accounts, setups and every chat. Plain files (JSON, JSONL, Markdown). |
@@ -119,6 +121,37 @@ A **tool** is something an agent calls (run a command, edit a file, an MCP tool)
 
 Why some things are the way they are. Add one when you make a choice the next contributor would otherwise undo.
 
+- **No Hotrod-rename migrations.** Kothar never shipped as Hotrod, and the one garage from then has moved, so the
+  rename's migration code (garage and Electron folder moves, `HOTROD_` fallbacks, `hotrod.*` keys, old settings and
+  chat keys, `Mod*` aliases and `ChatDetail.mod`) was deleted rather than kept forever. Don't add it back.
+- **Fresh installs start lean.** Deep Research and Pins are off by default; a switch saved in `settings.json` wins, so
+  only installs that never touched them change. The fake engine is for development and tests (`KOTHAR_DEV`), not the app.
+- **Usage is its own file, not the log.** Each chat's `usage.jsonl` holds what engines reported (`turn.usage` and
+  one-shot calls), apart from `log.jsonl`, so deleting or forgetting messages never drops what they cost, and memory
+  and the transcript never see it. A worker's records move to its lead's file before its folder goes, so a space's
+  total keeps them. Costs are the engines' own figures; Kothar keeps no price list, so Codex, which reports none, shows
+  tokens only.
+
+- **Home is part of Kothar, but still an extension.** The main chat and spaces are what Kothar is, so Home is always on:
+  it has no switch, isn't listed under Built-in extensions, and its page (its editable role prompt) sits under
+  Options as Settings → Home. A saved `home: { enabled: false }` from when it could be turned off is dropped at
+  startup. Its code stays in `extensions/home` on the public extension API, marked `alwaysOn: true`, rather than
+  moving into core: it's the one extension that proves the API can own a chat, and moving it would grow the core for
+  no new behaviour. `alwaysOn` is generic (any built-in extension can set it; a community extension's is ignored), and
+  an always-on extension can still be left out per setup, except of a chat it owns.
+- **Model roles are declared by extensions, and their ids aren't namespaced.** Kothar keeps only Chat and Workers;
+  Plan declares `planning` and Deep Research `searching` (`Extension.modelRoles`, `packages/core/src/model-roles.ts`).
+  A role's id is the key its list is saved under (`settings.json` `models.<id>`), so keeping the old ids means users'
+  saved Planning and Searching lists work as they were, with no migration. Namespacing (`plan:planning`) would have
+  needed one, and would make community roles uglier for no gain while clashes are rare: the first extension to declare
+  an id keeps it and a later one's is shown as an error on its page. A role's list is kept while its extension is off
+  (hidden in Settings, not run), so turning it back on restores the user's picks.
+- **A release tag must match the version; the workflow never sets it.** The release workflow stops if `v0.2.0` is
+  pushed while `packages/desktop/package.json` says `0.1.0`, instead of writing the version from the tag. That way the
+  version that ships is the one in a reviewed commit on `main`, and a local `npm run package` of that commit builds the
+  same DMG name. In `scripts/signing.ts`, notary credentials in the environment win over the `kothar-notary` profile
+  (they're set on purpose, and checking the profile signs in to Apple, which a CI runner without one would wait on), and
+  `KOTHAR_REQUIRE_NOTARIZED=1` turns "signed but NOT notarized" into a stop, so CI can't publish a DMG that warns.
 - **Workers are part of the core, not an extension.** They were the Workers extension, but it was only a switch and two
   settings over things that were already core: child chats (`chat-lifecycle.ts`) and the `spawn_worker` tool
   (`kothar-mcp.ts`). As an extension it invited other extensions to depend on it (Deep Research greyed out a setting
@@ -127,11 +160,41 @@ Why some things are the way they are. Add one when you make a choice the next co
   extension had: **Let agents start workers** (the old switch, so turning it off still takes `spawn_worker` and its
   instructions away), **Max running per chat**, and the instructions as an editable prompt. A setup keeps its chats
   from starting workers with `workers: false` (older setups' `extensionsOff: ['workers']` reads as that).
+- **Workers get worktrees of their own, and their branches belong to the space.** Workers sharing the space's
+  checkout clashed when two ran at once, so a worker in a space with git folders gets its own worktree of each, made in
+  code (as every checkout is) from the space checkout's current commit, under `<work>/<space>/workers/<id>/`, on
+  `kothar-worker/<space>/<id>-<task>`. Not `kothar/<space>/…`: git can't keep `kothar/<space>` and a branch below it.
+  Its work folder stays the space's, so its sandbox and scratch files are as before; only its checkouts differ, and its
+  sandbox may not move the space's branch or another worker's. A worker is removed once it reports, so what its branch
+  holds is kept on the space (`chat.json`'s `workerBranches`, plain JSON, by worker id), not on the worker; a restart
+  that drops a worker settles its entry at startup. A worker that changed nothing leaves nothing. Nothing deletes work
+  silently: merging commits what's left first, discarding is only ever the user's (or a lead's, on the user's
+  approval) call, and deleting the space commits each worker's leftovers and keeps every branch with commits of its
+  own. A quiet child (an extension's own work, such as research) shares the space's checkout unless it asks, since it
+  rarely edits a repo and a worktree per search would be waste. Review lives on the worker's report in its lead's chat
+  (the only place left once the worker's gone): Merge, Squash, Keep, Discard, each saying what it did in a note. The
+  lead's `review_worker` asks the user on a card only they can answer (as `forget` does) for anything but Keep, since
+  a merge changes the space's branch and a discard deletes work. A merge refuses a space checkout with uncommitted
+  changes, and a conflict runs `merge --abort` (`reset --merge` for squash), so the space is never left half-merged.
+  `workers.ts` only gains the switch
+  (`checkout: 'shared'` when off); the rest is `worker-checkouts.ts`.
 - **One limit counts every worker.** Max running per chat counts every running child of a chat, `spawn_worker`'s and
   extensions' (quiet ones too), so an extension can't run past the user's limit. Over it, `spawn_worker` fails, so the
   agent knows and can wait or stop one; an extension's worker waits for a slot instead, because the extension's work
   (a research run) should finish, not fail. That's also why the switch for agents is separate from the limit: a
   limit of 0 would leave an extension's workers waiting forever.
+- **A restart picks up where Kothar stopped.** A worker is there for one task, so one still saved at start was stopped
+  by a quit or crash (`chat-lifecycle.ts` `restartedWorker`). It isn't deleted: if it was cut off, it stays idle with
+  its log and its lead gets a report saying so, so the lead decides whether to carry it on (`send_message`) or start
+  another. A worker whose turn had ended well reports as it would have and goes; one whose report the lead has already
+  read goes; a quiet one goes, since its extension owns its work. Queues are saved in each chat's `queue.json`
+  (`queue-store.ts`) and run only after startup (`core.resume()`, called by `startCore` once the server is up),
+  because sessions need the MCP address. The core records each process group it spawns in
+  `<garage>/processes.json` (`process-records.ts`); after taking `kothar.lock`, a start stops an earlier core's groups
+  that are still running, but only when the leader's start time (to the second, from `ps`) and command still match, so
+  a reused pid is never killed. Records from this process are skipped, since a restart in place or a test keeps a
+  sibling core running. A normal quit and SIGINT/SIGTERM/SIGHUP already stop every session (`closeOnSignals`, the
+  desktop app's `before-quit`).
 - **The agent combines extensions; code rarely does.** Each session's "What you can use" section (`core-prompts.ts`)
   lists what the chat can use, made from extensions' metadata, and tells the agent to combine them. Workers get their
   lead's extension tools. An extension a worker uses may start workers one level below that worker (only there), so a
@@ -174,8 +237,10 @@ Why some things are the way they are. Add one when you make a choice the next co
   all** chip, like Edits anywhere, so an unguarded chat is easy to spot.
 
 - **Allowed SSH hosts trust a server and one key, not ssh in general.** A user who copies files from the same server
-  all day shouldn't need Allow all or Run network commands without asking. `sshHosts` is a list, layered like a switch
-  (the nearest chat with a list of its own wins, an empty one included). `trustsSshHosts` (`ssh-hosts.ts`) approves a
+  all day shouldn't need Allow all or Run network commands without asking. `sshHosts` is a list, and unlike a switch the
+  layers add up: a chat trusts its own list, its space's and Settings' together (`sshHostsOf`), so a host allowed for
+  all spaces runs in a space with a list of its own too, and a space can't take it away. The Permissions tab lists the
+  hosts from above read only, marked where they're set. `trustsSshHosts` (`ssh-hosts.ts`) approves a
   sandboxed command only when every ssh, scp, sftp and rsync in it reaches a listed host, any `-i` key is the one listed
   for it, and nothing else in it would ask (another network command, any other login or key). It reads the command with
   `read-only.ts`'s parser, which now expands plain `$NAME`/`${NAME}` set earlier in the same command (`K=~/.ssh/k`,
@@ -184,6 +249,29 @@ Why some things are the way they are. Add one when you make a choice the next co
   unset or splitting variables and `FOO=bar ssh` all ask as before. Unsandboxed chats still ask for every command. The
   macOS sandbox only limits writes, so a trusted ssh reaches the network and reads its key; it can't add a new host to
   `~/.ssh/known_hosts` or open a ControlMaster socket there.
+- **A permission card can add its SSH server to Allowed SSH hosts, for the space or for all spaces.** Both scopes were
+  there already (Settings' list and a chat's own), so no new one was added. The core works out the server when the
+  request comes in (`trustableSshHost`, `sshHostOf` in `ssh-hosts.ts`) and logs it on the request as `sshHost`, so the
+  card needs no shell parsing and survives a restart. It is offered only when listing that one server (with its one
+  `-i` key, written from `~/`, and no user, so any login on it) is exactly what the command needs: it re-runs
+  `trustsSshHosts` with only that entry, and offers nothing where the list wouldn't count (unsandboxed, commands
+  asking, a read-only turn, Allow all). Since the lists add up, **This space** adds just the server to the space's
+  own list and **All spaces** just to Settings'; nothing is copied, and no other list changes. A worker's card writes
+  to its space.
+- **A folded group's spaces pop out on hover; an unfolded one shows nothing.** Unfolded, its spaces are already in
+  the sidebar, so a popup would only repeat them. The whole group row, ⋯ included, is the hover target, so the pointer
+  can cross the ⋯ to the popup, which opens just past the sidebar's edge (Radix HoverCard, 200 ms in, 150 ms out). A
+  space picked there leaves its group folded, since folding it was the user's choice; opening a hidden space any other
+  way (search, a shortcut, a link) still unfolds its group. No popup mid-drag, with the ⋯ menu open or while renaming.
+
+- **Extensions can open a chat for the user (`host.openChat`).** Deep Research's Research popup lists runs from every
+  space and Home and opens the chat each lives in. Nothing in the public API could move the window to another chat, and
+  a private hook would break rule 2, so `openChat(chatId, { entry, panel })` is a generic host call (use `panels`): it
+  selects the chat as the sidebar does, scrolls to a log entry (the same reveal the ⌘O palette uses) and can open one
+  of the extension's own docks beside it. It moves the user, so it's only for answering their click in the
+  extension's panel or card, never unasked. The list itself reads `index.json` in Deep Research's storage, one short
+  summary per run kept up to date on every save, so it never opens run records full of findings or reports; runs saved
+  before the index are added the first time the list draws.
 
 - **Space groups are core sidebar code, not an extension.** Groups are visual folders of spaces in the left sidebar.
   They live where spaces are ordered: a space's `group` sits in its chat.json beside `pinned` and `order`, `chat.move`
@@ -223,12 +311,45 @@ Why some things are the way they are. Add one when you make a choice the next co
   its own version: workers for subagents, Processes for background shells, Skills, Plan), and **outside** (off: they
   act where Kothar can't see, stop or log them, such as schedules, notifications and publishing). A tool an engine
   reports that its adapter doesn't know yet is on, marked new, and asks before each use.
+- **The CLI has a token of its own, taken only without an Origin.** The core's WebSocket checks Origin and the UI's
+  token. A running core also writes `<garage>/cli.json` (its port and a second token, mode 0600; `cli-access.ts`),
+  removed on close, and the server takes that token only on a socket with no `Origin` header. Browsers always send
+  Origin on a WebSocket, so no web page can use it, while any other origin is still refused outright. The UI's token
+  is never written to disk, and a process that can read the garage could already read every chat, so the file adds no
+  new reach. A separate Unix socket would have meant a second server path to keep in step; this reuses the protocol
+  the UI speaks, so the CLI gets every message type for free. `kothar new` has no reply to wait on, so it takes the
+  `chat.added` with its name and real folder path; `send --wait` follows the chat from the moment its own message is
+  logged, and acts on a permission request only once the chat is `waiting`, since the core logs a request before its
+  rules answer it.
 - **Extensions name capabilities, never engine tools.** An extension says what it stands in for with
   `replaces: ['background-shell']`; each adapter maps its own tool names to those capabilities (`Adapter.tools`), so
   engine names stay inside adapters and a community extension turns off the right tool on every engine.
 - **With every tool off, a few things stay.** Claude Code keeps `ToolSearch`, which it may need to load deferred MCP
   tools (Kothar's among them); pi uses `--no-builtin-tools`, not `--no-tools`, which would drop MCP too; OpenCode turns
   each built-in off by name, never `*`, which would match `kothar_*` as well.
+- **forget always asks, and nothing can answer for you.** An agent's `forget` tool erases messages for good (the
+  same removal as Delete: `entry.removed` in place, `log.jsonl` rewritten, files only they used deleted, Memory told
+  through `onMessagesRemoved`). Its card is asked of the user alone (`userOnly` in turn.ts): Allow all, automatic
+  permission answers, extensions' policies and read-only turns never answer it. An agent that could quietly erase its
+  own history could hide its mistakes, and a prompt injection could use it to wipe evidence; there's no undo once the
+  text is gone. It acts only on its own chat's finished turns (no other chat, not a parent's frozen view), reads ids as
+  the session was shown them (`chat.seen`), so a second forget in the same turn still names the right messages, and
+  keeps only ids in the log: the call's `reason` is dropped as it's logged, and the card keeps its count once the
+  messages are gone. It's a core tool beside `list_chats`, not Memory's, because it works with Memory off too and uses
+  the core's delete; no private hook was needed.
+
+- **Any ACP agent can be added from Settings, with no adapter of its own.** Settings → Engines → Add ACP agent saves
+  a name, command, arguments (`{cwd}` is the chat's folder), environment and extra writable folders in
+  `settings.json` (`acpAgents`); each becomes an engine `acp-<name>` run by `adapters/acp-agent.ts`, which shares the
+  protocol half (`acp.ts`) with OpenCode. Since Kothar knows nothing else about such an agent, it uses only what ACP
+  gives: detection starts a throwaway session to read the models and thinking levels it offers (config options, or
+  the older `models` state), and an agent that offers none runs on `default`, its own pick; instructions go ahead of
+  the first prompt in `<instructions>`, as ACP has no system prompt every agent takes; tools are classed by ACP's
+  `kind`, and their calls ask through Kothar's permission cards; Kothar's MCP server goes over HTTP only to agents
+  that say they take it, extensions' over stdio. Two things it can't do for an unknown agent: start it clean (it
+  loads its own config and plugins, unlike design rule 8) and sign it in (an agent that wants a sign-in says so on
+  its row; sign in with its own CLI). OpenCode keeps its own adapter for what it does beyond ACP: a clean config,
+  accounts, `complete` and its tool switches.
 
 ## Pull requests
 
@@ -250,6 +371,9 @@ An adapter is one file in `packages/core/src/adapters/`, implementing `Adapter` 
   `turn.completed` and so on. Every tool call carries a common kind (`shell`, `edit`, `read`, `search`, `fetch`,
   `mcp`, `other`).
 - Optional: `complete` (one-shot model calls, used by Memory) and `accounts` (sign in, sign out, API keys).
+- Wanted: usage. Emit `turn.usage` (a `Usage`: tokens without the cache, cache reads and writes, cost in dollars,
+  model) just before `turn.completed`, once per model, with only what the engine reports; and call `options.onUsage`
+  from `complete`. Engines that report running totals need the change since the last turn (see Codex and ACP).
 - Optional but wanted: `tools`, the engine's built-in tools, each with a shared capability and a group (`core`,
   `replaced`, `outside`; see [Decisions](#decisions)). With it, `start` gets `options.tools` (`off` and `on`, by the
   engine's names) and `options.noTools` (every built-in off, MCP tools kept), and Settings → Engines → Tools lists the
@@ -290,6 +414,8 @@ the full API reference. Built-in extensions in `extensions/` follow the same API
 - The core creates every checkout and removes them when a space is deleted (design rule 10). Optional cleanup of merged
   work belongs to an extension; see `extensions/git/cleanup.ts`. A repo with no commits yet isn't checked out: it's a
   plain folder with its mode until its first commit (`hasNoCommits` in `checkouts.ts`), so `checkouts` lacks it.
+- A child chat you start with `host.createChat({ parentId })` shares the space's checkouts when it's quiet, and follows
+  Settings → Workers (its own worktree by default) when it isn't. Pass `checkout: 'own'` or `'shared'` to choose.
 - If the API lacks something, add the smallest generic change to `packages/extension-api/index.ts` and the core in its
   own PR, update `extension-documentation/reference/`, then build the extension on top.
 
@@ -298,23 +424,84 @@ Community extensions and themes don't live in this repo; see
 
 ## Old names and why they still work
 
-Kothar was called Hotrod; extensions were called mods (community ones "aftermarket" mods), and workers were
-subagents. Installs, saved files and published extensions from then must keep working, so a few places still accept
-the old names. Don't remove these, and don't use the old names in new code:
+Extensions were called mods (community ones "aftermarket" mods), and workers were subagents. Saved files and published
+extensions from then must keep working, so a few places still accept the old names. Don't remove these, and don't use
+the old names in new code. (Kothar was also called Hotrod. That rename's migrations, of the garage, `HOTROD_` variables,
+`hotrod.*` UI preferences, old settings keys and the deprecated `Mod*` type aliases, were removed before the first
+release, once the only garage from then had moved.)
 
 | Where | What it keeps working |
 |---|---|
-| `packages/core/src/main.ts` (`envVar`, `defaultGarage`) | Every `KOTHAR_` variable falls back to its `HOTROD_` name; an old Hotrod garage moves to Kothar's folder on first launch. |
-| `packages/core/src/garage-move.ts` | That one-time garage move, repointing stored paths. |
-| `packages/core/src/vocab-move.ts` | Settings, chats and garage folders saved under the old words (mod, subagent, aftermarket, `askNetworkCommands`) are read under the new ones. |
-| `packages/core/src/machine.ts` (`HOTROD_TOKEN`) | The old token variable is stripped from agents' environments too. |
-| `packages/core/src/core.ts` (`mod:` beside `extension:` in chat summaries) and `packages/extension-api/index.ts` (deprecated `mod` field) | Extensions written when they were called mods. |
+| `packages/core/src/chat-store.ts` (`renameEntry`) | Old log entries (`subagent.report`, `mod.note`) read under today's types. Logs are append-only history, so these stay. |
 | `packages/core/src/catalog-check.ts` (catalog `kind: 'mod'`) | Marketplace catalogs written when extensions were mods. |
 | `packages/core/src/memory.ts`, `packages/ui/src/state.ts` (`[subagent "…"]`) | Worker reports in old chat logs. |
-| `packages/ui/src/connection.ts` (`VITE_HOTROD_CORE_URL`), `packages/ui/vite.config.ts` (`HOTROD_UI_PORT`) | Old UI environment variables. |
-| `packages/ui/src/renamed-storage.ts` | UI preferences saved under `hotrod.*` keys move to `kothar.*`. |
-| `packages/ui/src/panel-tab.ts` | Panel tabs saved as `mod:<id>`. |
 | `packages/core/src/workers.ts` (`moveWorkersSettings`), `packages/core/src/setups.ts` (`extensionsOff: ['workers']`) | Settings and setups saved while workers were an extension. |
+
+## Releasing
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`. On a macOS runner it builds Kothar, signs it with the
+Developer ID certificate, notarizes and staples the app and the DMG (`packages/desktop/scripts/signing.ts`, the same code
+as `npm run package` on your Mac), checks both with `spctl` (the job fails unless both say `Notarized Developer ID`), and
+publishes a GitHub Release with `Kothar-<version>-arm64.dmg`, its `.sha256` and notes generated from the merged PRs. A
+tag with a hyphen (`v0.2.0-beta.1`) makes a pre-release.
+
+**Dry run:** Actions → Release → Run workflow builds, signs, notarizes and verifies any branch, keeps the DMG as a
+workflow artifact for a week, and publishes nothing.
+
+### Secrets (one time)
+
+Add these under Settings → Secrets and variables → Actions → New repository secret. The job checks them first and
+names any that are missing; it never prints their values.
+
+| Secret | What it is |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | the Developer ID Application certificate and its private key, as a base64 `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | the password you gave the `.p12` when exporting it |
+| `APPLE_API_KEY_P8` | an App Store Connect API key, the base64 of its `.p8` file |
+| `APPLE_API_KEY_ID` | that key's ID (10 characters) |
+| `APPLE_API_ISSUER` | the Issuer ID shown above the keys list (a UUID) |
+
+Instead of the three API key secrets you can add `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`
+(`338W2JWGTX`). If both sets are there, the API key is used.
+
+**The `.p12`:** in Keychain Access → login → My Certificates, expand "Developer ID Application: …", select the
+certificate (with its private key underneath), right-click → Export 2 items… → Personal Information Exchange (.p12), and
+set a password. Then:
+
+```sh
+base64 -i DeveloperID.p12 | pbcopy   # paste as MACOS_CERTIFICATE_P12
+```
+
+**The API key:** at App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys, generate a
+key with the **Developer** role (an Account Holder or Admin has to have requested API access once). Download the
+`AuthKey_<ID>.p8`: Apple lets you download it only once. Note the Key ID and the Issuer ID. Then:
+
+```sh
+base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy   # paste as APPLE_API_KEY_P8
+```
+
+Delete the local `.p12` and `.p8` copies once they're saved as secrets (keep the `.p12` backup you made when you
+created the certificate).
+
+### Cutting a release
+
+The tag has to match `version` in `packages/desktop/package.json`, which names the DMG and the app; the job stops if it
+doesn't, and never changes the version itself. So:
+
+1. Bump `version` in `packages/desktop/package.json` in a PR, and merge it.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+3. Watch Actions → Release. Notarization takes a few minutes per file. When it's done, the release is on the Releases
+   page.
+
+If the job fails after the tag is pushed, fix it on `main`, then move the tag (`git tag -f v0.2.0 && git push -f origin
+v0.2.0`) or bump to the next version.
 
 ## Licence of contributions
 

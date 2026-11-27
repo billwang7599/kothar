@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { Extension, ExtensionView } from '@kothar/extension-api'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startCore } from '@kothar/core/main'
-import { createFakeAdapter } from '@kothar/core/fake'
+import { createFakeAdapter, type FakeStep } from '@kothar/core/fake'
 import type { ClientMessage, CoreMessage } from '@kothar/core/shared'
 import { sandboxingMachine } from '@kothar/core/test-machine'
 import { until } from '@kothar/core/test-wait'
@@ -25,12 +25,12 @@ const prompted: Extension = {
   instructions: (_session, { host }) => host.prompt('tone'),
 }
 
-async function core() {
+async function core(script: FakeStep[] = [{ type: 'text.completed', text: 'Done' }]) {
   const garage = realpathSync(mkdtempSync(join(tmpdir(), 'kothar-inspector-')))
   const env = { KOTHAR_ENGINE: 'fake', KOTHAR_GARAGE: garage, KOTHAR_WORK: join(garage, 'work'), KOTHAR_PORT: '0' }
   const kothar = await startCore({
     env,
-    adapters: [createFakeAdapter([{ type: 'text.completed', text: 'Done' }], 0)],
+    adapters: [createFakeAdapter(script, 0)],
     extensions: [createInspectorExtension(), prompted],
     machine: sandboxingMachine,
   })
@@ -83,6 +83,22 @@ const find = (view: ExtensionView | undefined, match: (v: ExtensionView) => bool
 }
 
 describe('the Inspector', () => {
+  it('shows what the engine reported a turn used, under the turn it was for', async () => {
+    const usage = { model: 'fake-small', inputTokens: 1200, outputTokens: 40, cacheReadTokens: 9000, costUsd: 0.0123 }
+    const t = await core([
+      { type: 'text.completed', text: 'Done' },
+      { type: 'turn.usage', usage },
+    ])
+    const id = t.create()
+    await t.send(id, 'Hello there')
+    await until(() => t.turns(id)[0]?.usage !== undefined)
+    expect(t.turns(id)[0]!.usage).toEqual([usage])
+    const drawn = await t.detail(id, 0)
+    const badges = find(drawn?.view, (v) => v.type === 'badge').map((v) => (v as { text: string }).text)
+    expect(badges).toEqual(expect.arrayContaining(['fake-small', '1.2k in', '40 out', '9k cache read', '$0.012']))
+    expect(find(drawn?.view, (v) => v.type === 'heading' && v.text === 'Used')).toHaveLength(1)
+  })
+
   it('records each turn in labelled sections, in order, with the edited text when a prompt is changed', async () => {
     const t = await core()
     const id = t.create()

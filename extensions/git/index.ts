@@ -32,7 +32,8 @@ export type PrStatus = {
 }
 
 // One git folder of a space: its checkout in the work folder, or the folder itself before the first message.
-type Target = { folder: string; path: string; checkout?: Checkout }
+// label: the card's title, when the folder's name isn't enough (a worker's own checkout).
+type Target = { folder: string; path: string; checkout?: Checkout; label?: string }
 
 export type RepoState = {
   target: Target
@@ -87,10 +88,23 @@ export function targetsOf(host: ExtensionHost, chatId: string): Target[] {
   const checkouts = space.checkouts
     .filter((c) => existsSync(c.path))
     .map((checkout) => ({ folder: checkout.folder, path: checkout.path, checkout }))
+  // Workers' own checkouts: a worker sees only its own; the space sees its own, then each worker's that's still there,
+  // counted against the space's branch it merges into.
+  const workers = (space.workerCheckouts ?? [])
+    .filter((c) => existsSync(c.path))
+    .map(({ worker, name, state, ...checkout }) => ({
+      folder: checkout.folder,
+      path: checkout.path,
+      checkout,
+      label: `${basename(checkout.folder)} · worker ${name}${state === 'working' ? '' : state === 'kept' ? ' (kept)' : ' (to review)'}`,
+      worker,
+    }))
+  const own = workers.filter((w) => w.worker === chatId)
+  if (own.length) return own.map(({ worker: _, ...target }) => target)
   const waiting = space.folders
     .filter((f) => f.git && !checkouts.some((c) => c.folder === f.path))
     .map((f) => ({ folder: f.path, path: f.path }))
-  return [...checkouts, ...waiting]
+  return [...checkouts, ...waiting, ...workers.map(({ worker: _, ...target }) => target)]
 }
 
 async function defaultBranch(run: Run, cwd: string) {
@@ -221,7 +235,7 @@ export type Diff = string | { error: string }
 
 export function repoView(state: RepoState, selected?: Selected, diff?: Diff): ExtensionView {
   const { target } = state
-  const title = basename(target.folder)
+  const title = target.label ?? basename(target.folder)
   if (state.error) {
     return { type: 'card', title, children: [{ type: 'text', text: state.error, tone: 'error', small: true }] }
   }

@@ -379,7 +379,12 @@ describe('claudeCode adapter', () => {
     ]
     expect(events.map((e) => e.type)).not.toContain('permission.requested')
     expect(events).toContainEqual({ type: 'question.asked', requestId, toolId, questions })
-    expect(events.at(-2)).toEqual({ type: 'text.completed', text: 'Format: Detailed\nSections: Introduction, Body' })
+    expect(events.at(-3)).toEqual({ type: 'text.completed', text: 'Format: Detailed\nSections: Introduction, Body' })
+    // The result's usage since the last result, for its one model.
+    expect(events.at(-2)).toEqual({
+      type: 'turn.usage',
+      usage: { model: 'claude-haiku-5-5', inputTokens: 4, outputTokens: 272, cacheReadTokens: 43485, cacheWriteTokens: 2455, costUsd: 0.0010622499999999998 },
+    })
 
     session.answer!(requestId, { [format]: ['Detailed'], [sections]: ['Introduction', 'Body'] })
     const input = JSON.parse(fixture('question').split('\n').find((l) => l.includes('control_request'))!).request.input

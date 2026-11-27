@@ -72,6 +72,9 @@ const allows = (hosts: SshHost[], target: Target, keys: string[], home: string) 
     return entry.key !== undefined && keys.every((key) => key === keyPath(entry.key!, home, home))
   })
 
+// Whether a reach to target with these keys (real paths) is trusted. trustsSshHosts asks the list; sshHostOf collects.
+type Allow = (target: Target, keys: string[]) => boolean
+
 // --- Options ---
 
 type Option = { flag: string; value?: string; at: number }
@@ -149,17 +152,17 @@ const remoteOf = (operand: string) => {
 
 type Verdict = { exempt: Set<number> } | undefined
 
-const ssh = (args: string[], hosts: SshHost[], cwd: string, context: ReadContext): Verdict => {
+const ssh = (args: string[], allow: Allow, cwd: string, context: ReadContext): Verdict => {
   const parsed = parseShort(args, '46AaCfGgKkNnqsTtVvXxYy', 'BbceFilmopQ')
   const shared = parsed && sshOptions(parsed.options, cwd, context.home)
   const destination = parsed?.operands[0]?.value
   if (!shared || destination === undefined) return
   const user = parsed.options.findLast((o) => o.flag === 'l')?.value
   const target = destination.startsWith('ssh://') ? uriTarget(destination, 'ssh', user) : targetOf(destination, user)
-  return target && allows(hosts, target, shared.keys, context.home) ? { exempt: shared.exempt } : undefined
+  return target && allow(target, shared.keys) ? { exempt: shared.exempt } : undefined
 }
 
-const scp = (args: string[], hosts: SshHost[], cwd: string, context: ReadContext): Verdict => {
+const scp = (args: string[], allow: Allow, cwd: string, context: ReadContext): Verdict => {
   // -l is a bandwidth limit here, not a user.
   const parsed = parseShort(args, '346ABCOpqRrTv', 'cFilPo')
   const shared = parsed && sshOptions(parsed.options, cwd, context.home)
@@ -172,13 +175,13 @@ const scp = (args: string[], hosts: SshHost[], cwd: string, context: ReadContext
       continue
     }
     const target = value.startsWith('scp://') ? uriTarget(value, 'scp') : targetOf(spec)
-    if (!target || !allows(hosts, target, shared.keys, context.home)) return
+    if (!target || !allow(target, shared.keys)) return
     remote = true
   }
   return remote ? { exempt: shared.exempt } : undefined
 }
 
-const sftp = (args: string[], hosts: SshHost[], cwd: string, context: ReadContext): Verdict => {
+const sftp = (args: string[], allow: Allow, cwd: string, context: ReadContext): Verdict => {
   // No -b batch file (it could put any local file) and no -D, -S or -s programs.
   const parsed = parseShort(args, '46aACfNpqrv', 'BcFilPoR')
   const shared = parsed && sshOptions(parsed.options, cwd, context.home)
@@ -187,13 +190,13 @@ const sftp = (args: string[], hosts: SshHost[], cwd: string, context: ReadContex
   const target = destination.startsWith('sftp://')
     ? uriTarget(destination, 'sftp')
     : targetOf(destination.includes(':') ? destination.slice(0, destination.indexOf(':')) : destination)
-  return target && allows(hosts, target, shared.keys, context.home) ? { exempt: shared.exempt } : undefined
+  return target && allow(target, shared.keys) ? { exempt: shared.exempt } : undefined
 }
 
 // rsync over ssh: its -e/--rsh must be a plain ssh with trusted options and no destination of its own. Daemon paths
 // (host::module, rsync://) aren't ssh.
 const RSYNC_REFUSED = ['--daemon', '--server', '--sender', '--config', '--rsync-path', '--write-devices']
-const rsync = (args: string[], hosts: SshHost[], cwd: string, context: ReadContext): Verdict => {
+const rsync = (args: string[], allow: Allow, cwd: string, context: ReadContext): Verdict => {
   const exempt = new Set<number>()
   let keys: string[] = []
   let user: string | undefined
@@ -253,7 +256,7 @@ const rsync = (args: string[], hosts: SshHost[], cwd: string, context: ReadConte
     }
     if (operand.slice(spec.length).startsWith('::')) return
     const target = targetOf(spec, user)
-    if (!target || !allows(hosts, target, keys, context.home)) return
+    if (!target || !allow(target, keys)) return
     remote = true
   }
   return remote ? { exempt } : undefined
@@ -326,8 +329,32 @@ const bindingsOf = (words: Word[], values: Values): Map<string, string>[] | unde
 // True if the command reaches at least one server through ssh, scp, sftp or rsync, every such reach is to an allowed
 // host with only its listed key, and nothing else in it would ask: no other network command, and no login or key
 // named outside those keys. context is the policy's reading context (its cwd, home, secrets and .env choice).
-export const trustsSshHosts = (command: string, hosts: SshHost[], context: ReadContext): boolean => {
-  if (!hosts.length) return false
+export const trustsSshHosts = (command: string, hosts: SshHost[], context: ReadContext): boolean =>
+  hosts.length > 0 && walk(command, (target, keys) => allows(hosts, target, keys, context.home), context)
+
+// The one server a command reaches, as an Allowed SSH hosts entry (its -i key, if any, written with ~/), when listing
+// it is all the command needs to run without asking. Undefined when it reaches several servers or users, uses several
+// keys, or wouldn't be trusted anyway: the permission card then offers no "Always allow".
+export const sshHostOf = (command: string, context: ReadContext): SshHost | undefined => {
+  const reached: { target: Target; keys: string[] }[] = []
+  const collected = walk(command, (target, keys) => (reached.push({ target, keys }), true), context)
+  if (!collected || !reached.length) return
+  const { host, user } = reached[0]!.target
+  const keys = new Set(reached.flatMap((r) => r.keys))
+  if (keys.size > 1 || reached.some((r) => r.target.host.toLowerCase() !== host.toLowerCase() || r.target.user !== user)) return
+  if (!HOST_NAME.test(host) || host.length > 253) return
+  const real = [...keys][0]
+  const key = real === undefined ? undefined : real.startsWith(`${context.home}/`) ? `~${real.slice(context.home.length)}` : real
+  const entry: SshHost = { host: host.toLowerCase(), ...(key && { key }) }
+  try {
+    checkSshHosts([entry])
+  } catch {
+    return
+  }
+  return trustsSshHosts(command, [entry], context) ? entry : undefined
+}
+
+const walk = (command: string, allow: Allow, context: ReadContext): boolean => {
   const tokens = tokenize(command, true)
   const targets: { word: Word; command: number }[] = []
   const commands = tokens && commandsOf(tokens, targets)
@@ -401,7 +428,7 @@ export const trustsSshHosts = (command: string, hosts: SshHost[], context: ReadC
       if (check) {
         // FOO=bar ssh ... could point ssh somewhere else (SSH_ASKPASS, GIT_SSH...).
         if (prefixed > 0) return false
-        const verdict = check(args, hosts, cwd, context)
+        const verdict = check(args, allow, cwd, context)
         if (!verdict) return false
         const others = args.filter((_, i) => !verdict.exempt.has(i))
         if (named(others.join(' '), cwd)) return false

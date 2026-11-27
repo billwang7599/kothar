@@ -6,6 +6,7 @@ import { appendFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import type {
   ChatDetail,
+  ChatUsage,
   Extension,
   ExtensionAction,
   ExtensionContext,
@@ -142,6 +143,8 @@ export type HostDeps<C extends HostChat> = {
   run: () => ExtensionRun
   /** A model call for an extension (host.complete); from: the extension, for the Activity record. */
   complete: (request: CompletionRequest, from: Extension) => Promise<string>
+  /** The chat's usage and its space's (host.usage). */
+  usage: (chat: C) => ChatUsage
   /** Kothar's activity stream (activity.ts): what extensions do through the host is emitted to it. */
   activity: Activity
   /** One of the extension's prompts as it's sent: the user's edit, else its default. */
@@ -239,7 +242,7 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
     const dir = join(deps.garage, 'extensions', extension.id)
     const chatStorageOf = (chat: C) => storageAt(chat.dir, `${extension.name}'s files in this chat`, deps.chatOwnFiles)
     const host: ExtensionHost = {
-      createChat({ name: given, folders, files, engine, parentId, role, quiet, showReport, task }) {
+      createChat({ name: given, folders, files, engine, parentId, role, quiet, showReport, task, checkout }) {
         if (task !== undefined && (typeof task !== 'string' || !task.trim())) throw new Error('A worker’s task is text')
         const name = (given ?? (task === undefined ? '' : workerName(task))) as string
         if (parentId === undefined) {
@@ -247,11 +250,21 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
           if (role !== undefined) throw new Error('Only a child chat (with parentId) takes a role')
           if (quiet !== undefined) throw new Error('Only a child chat (with parentId) can be quiet')
           if (showReport !== undefined) throw new Error('Only a quiet child chat can show its report')
+          if (checkout !== undefined) throw new Error('Only a child chat (with parentId) takes a checkout')
           return deps.createChat({ name, folders, files, engine })
         }
         if (showReport === true && quiet !== true) throw new Error('Only a quiet child chat can show its report')
         const shows = quiet === true && showReport === true
-        const info = deps.createChild(String(parentId), { name, engine, role, folders, files, ...(quiet === true && { quiet }), ...(shows && { showReport }) })
+        const info = deps.createChild(String(parentId), {
+          name,
+          engine,
+          role,
+          folders,
+          files,
+          ...(quiet === true && { quiet }),
+          ...(shows && { showReport }),
+          ...(checkout !== undefined && { checkout }),
+        })
         deps.activity.emit(String(parentId), () => ({
           kind: 'worker',
           by: extension,
@@ -388,6 +401,7 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
       messages: (chatId) => messagesOf(chatFor(chatId).entries),
       message: (chatId, entry) => messageAt(chatFor(chatId).entries, Number(entry)),
       complete: (request) => deps.complete(request, extension),
+      usage: (chatId) => deps.usage(chatFor(String(chatId))),
       refresh: (chatId) => deps.refresh(extension, chatId),
       showPanel(chatId, panel) {
         const chat = chatFor(String(chatId))
@@ -410,6 +424,25 @@ export function openExtensionHosts<C extends HostChat>(deps: HostDeps<C>) {
         // A tab has nothing to close: it stays among the right sidebar's tabs.
         if (found.placement !== 'popup' && found.placement !== 'dock') return
         deps.broadcast({ type: 'extension.panel.close', chatId: chat.info.id, extension: extension.id, panel: found.id, placement: found.placement })
+      },
+      openChat(chatId, options) {
+        const chat = deps.chat(String(chatId))
+        if (!chat || !deps.shown(chat)) throw new Error(`Unknown chat "${chatId}"`)
+        const panel = options?.panel
+        if (panel !== undefined) {
+          const found = extension.panels?.find((p) => p.id === panel)
+          if (found?.placement !== 'dock') throw new Error(`${extension.name} has no dock panel "${panel}"`)
+        }
+        const entry = options?.entry
+        if (entry !== undefined && !(Number.isInteger(entry) && entry >= 0)) throw new Error(`Not a log entry: ${entry}`)
+        if (!deps.isOn(extension)) return
+        deps.broadcast({
+          type: 'extension.chat.open',
+          chatId: chat.info.id,
+          extension: extension.id,
+          ...(entry !== undefined && { entry }),
+          ...(panel !== undefined && { panel }),
+        })
       },
       wait(chatId, wait) {
         const chat = chatFor(chatId)

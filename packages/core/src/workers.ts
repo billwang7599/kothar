@@ -5,6 +5,8 @@
 // - start: whether agents may start workers with spawn_worker (default on). Off, chats get neither the tool nor the
 //   instructions; extensions can still start workers for their own work (Deep Research's searches).
 // - limit: how many workers one chat runs at once (-1: no limit), counting every child, spawn_worker's and extensions'.
+// - checkout: 'shared' when new workers work in the space's checkouts rather than worktrees of their own
+//   (worker-checkouts.ts); absent (the default), they get their own.
 // - instructions: the user's edit of WORKER_INSTRUCTIONS, saved against the default it replaced (a PromptEdit).
 import type { Settings } from './chat-store.ts'
 import type { Chat } from './chat.ts'
@@ -16,8 +18,7 @@ export const WORKER_INSTRUCTIONS =
   'Delegate by default. Any task that needs more than a few tool calls (exploring code, making a change, running ' +
   'tests, researching) goes to a worker you start with spawn_worker, not to you, so you stay free to keep ' +
   'talking with the user while it runs. Split the work into as many workers as it needs, each with a whole task ' +
-  "it can finish on its own, independent of the others. You can edit the same files, just ensure they're in " +
-  'different worktrees, and make a stack PR so we have less merge conflicts. Do the work yourself only for quick ' +
+  'it can finish on its own, independent of the others. Do the work yourself only for quick ' +
   "answers and one-line changes. Each worker's final reply comes back to you as a message, so don't wait for it " +
   'or poll it; tell the user what you started and carry on. To stop a worker you no longer need, use stop_chat.'
 
@@ -25,7 +26,7 @@ export const DEFAULT_WORKER_LIMIT = 4
 // The id the Inspector and Settings use for the workers' instructions (Settings → Workers, #prompt-workers-instructions).
 export const WORKERS_PROMPT = { page: 'workers', id: 'instructions', label: 'When to start workers' } as const
 
-export type SavedWorkers = { start?: boolean; limit?: number; instructions?: PromptEdit }
+export type SavedWorkers = { start?: boolean; limit?: number; checkout?: 'shared'; instructions?: PromptEdit }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -81,12 +82,14 @@ export function openWorkers({ settings, saveSettings, broadcast, changed }: Work
     return typeof value === 'number' && Number.isInteger(value) && (value === -1 || value >= 1) ? value : DEFAULT_WORKER_LIMIT
   }
   const instructions = () => edit()?.text ?? WORKER_INSTRUCTIONS
+  const ownCheckouts = () => saved().checkout !== 'shared'
 
   const info = (): WorkersSettings => {
     const own = edit()
     return {
       start: start(),
       limit: limit(),
+      ownCheckouts: ownCheckouts(),
       instructions: {
         id: WORKERS_PROMPT.id,
         label: WORKERS_PROMPT.label,
@@ -114,7 +117,9 @@ export function openWorkers({ settings, saveSettings, broadcast, changed }: Work
     edited: () => edit() !== undefined,
     limit,
     start,
-    set(change: { start?: unknown; limit?: unknown }) {
+    ownCheckouts,
+    set(change: { start?: unknown; limit?: unknown; ownCheckouts?: unknown }) {
+      if (change.ownCheckouts !== undefined && typeof change.ownCheckouts !== 'boolean') throw new Error('Own worktrees is on or off')
       if (change.start !== undefined && typeof change.start !== 'boolean') throw new Error('Let agents start workers is on or off')
       if (change.limit !== undefined) {
         const value = change.limit
@@ -125,6 +130,7 @@ export function openWorkers({ settings, saveSettings, broadcast, changed }: Work
       write({
         ...(change.start !== undefined && { start: change.start === false ? false : undefined }),
         ...(change.limit !== undefined && { limit: change.limit === DEFAULT_WORKER_LIMIT ? undefined : (change.limit as number) }),
+        ...(change.ownCheckouts !== undefined && { checkout: change.ownCheckouts === false ? ('shared' as const) : undefined }),
       })
     },
     // text undefined (or the default itself): back to the default.

@@ -1,5 +1,5 @@
 import type { ExtensionAction, ExtensionNoteCard, ExtensionView } from '@kothar/extension-api'
-import { bySpaceOrder, levelsOf, looksBinary, NO_LISTS } from '@kothar/core/shared'
+import { bySpaceOrder, CORE_MODEL_ROLES, levelsOf, looksBinary, NO_LISTS, ROLE_NAMES } from '@kothar/core/shared'
 import type {
   RestartState,
   Answers,
@@ -38,6 +38,7 @@ import type {
   ToolKind,
   WorkFolder,
   ChatWait,
+  UsageTotals,
 } from '@kothar/core/shared'
 
 export type Permission = {
@@ -48,6 +49,10 @@ export type Permission = {
   input: unknown
   outcome: 'pending' | 'allowed' | 'denied' | 'cancelled'
   auto?: true
+  // The SSH server the card offers to always allow (the core's sshHost on the request).
+  sshHost?: { host: string; key?: string }
+  // The card's own labels for Approve and Deny (forget's Forget and Cancel); such a card asks in its name's words.
+  buttons?: { allow: string; deny: string }
 }
 
 // entry: where a message (the user's, a report or a reply) is in the chat's log, for extensions' message actions and
@@ -107,6 +112,10 @@ export type ChatView = ChatInfo & {
   draft: string
   queue: QueuedMessage[]
   waits?: ChatWait[]
+  // The usage its engines reported, its own (chat.usage), and its removed workers' (workersUsage); usage.tsx adds up a
+  // space's.
+  usage?: UsageTotals
+  workersUsage?: UsageTotals
   // A message the user undid: its text and attachments go back to the composer (chat.tsx), once per nonce.
   restored?: { text: string; attachments: Upload[]; nonce: number }
 }
@@ -273,8 +282,17 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
           : i,
       )
     case 'permission.requested': {
-      const { requestId, name, kind: toolKind, summary, input, toolId } = entry
-      const permission: Permission = { requestId, name, toolKind, summary, input, outcome: 'pending' }
+      const { requestId, name, kind: toolKind, summary, input, toolId, sshHost, buttons } = entry
+      const permission: Permission = {
+        requestId,
+        name,
+        toolKind,
+        summary,
+        input,
+        outcome: 'pending',
+        ...(sshHost && { sshHost }),
+        ...(buttons && { buttons }),
+      }
       const own = (i: Item) => i.kind === 'tool' && i.toolId === toolId
       if (!items.some(own)) return [...items, { kind: 'permission', ...permission }]
       return items.map((i) =>
@@ -503,6 +521,8 @@ function reduceAll(state: State, action: Action): State {
       })
     case 'engine.updated':
       return { ...state, engines: state.engines.map((e) => (e.id === action.engine.id ? action.engine : e)) }
+    case 'engines.updated':
+      return { ...state, engines: action.engines }
     case 'accounts.updated': {
       const { engine } = action.accounts
       const known = state.accounts.some((a) => a.engine === engine)
@@ -521,7 +541,7 @@ function reduceAll(state: State, action: Action): State {
     case 'chat.updated':
       // The core sends the chat's whole info, and JSON drops a cleared field (pinned, model, thinking, run…), so the
       // update replaces the info outright; only what the UI keeps of its own carries over.
-      return updateChat(state, action.chat.id, ({ status, items, entries, from, shift, draft, queue, waits }) => ({
+      return updateChat(state, action.chat.id, ({ status, items, entries, from, shift, draft, queue, waits, usage, workersUsage }) => ({
         ...action.chat,
         status,
         items,
@@ -531,6 +551,8 @@ function reduceAll(state: State, action: Action): State {
         draft,
         queue,
         waits,
+        usage,
+        workersUsage,
       }))
     case 'chat.removed': {
       const chats = state.chats.filter((c) => c.id !== action.chatId)
@@ -576,6 +598,10 @@ function reduceAll(state: State, action: Action): State {
       return updateChat(state, action.chatId, (c) => ({ ...c, status: action.status }))
     case 'chat.queue':
       return updateChat(state, action.chatId, (c) => ({ ...c, queue: action.queue }))
+    case 'chat.usage': {
+      const { usage, workers } = action
+      return updateChat(state, action.chatId, (c) => ({ ...c, usage, ...(workers && { workersUsage: workers }) }))
+    }
     case 'chat.waits': {
       const { waits } = action
       return updateChat(state, action.chatId, ({ waits: _, ...c }) => (waits.length ? { ...c, waits } : c))
@@ -685,6 +711,8 @@ function reduceAll(state: State, action: Action): State {
     // Open or close a dock, a tab or a popup (main.tsx), not kept in state.
     case 'extension.panel.show':
     case 'extension.panel.close':
+    // Open a chat for an extension (main.tsx), which then selects it.
+    case 'extension.chat.open':
     // Kept by the file link cache, so a check's answer re-renders only the messages that asked.
     case 'files.checked':
     // Kept by Copy changes back (folder-copies.tsx), the only one that reads it.
@@ -804,6 +832,26 @@ export const engineProblem = (engine: EngineInfo) =>
 export const engineName = (engine?: Pick<EngineInfo, 'id' | 'name'>) => engine?.name ?? engine?.id ?? ''
 
 // A model on an engine as one Select value; model ids can hold '/', never a newline.
+// A model list in Settings → Models: Kothar's own (Chat, Workers), then each role an extension that's on declares
+// (the core sends an extension's modelRoles only while it runs), in extension order.
+export type ShownRole = { id: string; label: string; description?: string; extension?: string }
+const CORE_ROLE_ABOUT: Record<(typeof CORE_MODEL_ROLES)[number], string> = {
+  chat: 'Chats you start.',
+  workers: 'Every worker no other list is for.',
+}
+export function modelRolesOf(extensions: readonly ExtensionInfo[] = []): ShownRole[] {
+  return [
+    ...CORE_MODEL_ROLES.map((id) => ({ id, label: ROLE_NAMES[id], description: CORE_ROLE_ABOUT[id] })),
+    ...extensions.flatMap((e) => (e.modelRoles ?? []).map((role) => ({ ...role, extension: e.name }))),
+  ]
+}
+
+/** A role's name ("Planning"), or the Chat list's when it has no models of its own or no extension that's on declares it. */
+export function listNameOf(role: string | undefined, lists: ModelLists | undefined, extensions?: readonly ExtensionInfo[]) {
+  const shown = role === undefined ? undefined : modelRolesOf(extensions).find((r) => r.id === role)
+  return shown && lists?.[shown.id]?.length ? shown.label : ROLE_NAMES.chat
+}
+
 export const modelKey = (choice: { engine: string; model: string }) => `${choice.engine}\n${choice.model}`
 export const fromModelKey = (key: string) => {
   const [engine = '', model = ''] = key.split('\n')

@@ -28,6 +28,29 @@ describe('openSettings', () => {
     save()
     expect(openSettings(garage).settings.workFolder).toBe('/work')
   })
+
+  it('moves what the Workers extension saved to Settings → Workers, and saves it', () => {
+    const garage = tempDir()
+    writeFileSync(join(garage, 'settings.json'), JSON.stringify({ extensions: { workers: { enabled: false, limit: 2 } } }))
+    expect(openSettings(garage).settings.workers).toEqual({ start: false, limit: 2 })
+    expect(JSON.parse(readFileSync(join(garage, 'settings.json'), 'utf8')).workers).toEqual({ start: false, limit: 2 })
+  })
+})
+
+describe('old log entries', () => {
+  // Logs are append-only history, so entries written before workers and extensions got their names keep the old types.
+  it('reads subagent reports and mod notes under their names today', () => {
+    const dir = tempDir()
+    const lines = [
+      { at: 'x', type: 'subagent.report', chatId: 'c2', name: 'Sub', text: 'Done' },
+      { at: 'x', type: 'mod.note', mod: 'git', text: 'hi' },
+    ]
+    writeFileSync(join(dir, 'log.jsonl'), lines.map((l) => JSON.stringify(l) + '\n').join(''))
+    expect(readChat(dir, fallback('c1')).entries).toEqual([
+      { at: 'x', type: 'worker.report', chatId: 'c2', name: 'Sub', text: 'Done' },
+      { at: 'x', type: 'extension.note', extension: 'git', text: 'hi' },
+    ])
+  })
 })
 
 describe('chat files', () => {

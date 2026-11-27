@@ -1,5 +1,6 @@
 import type { McpServer } from '@kothar/extension-api'
-import type { EngineEvent, EngineProcess, ImageInput, Session, ThinkingLevel, ToolKind } from '../shared.ts'
+import type { EngineEvent, EngineProcess, ImageInput, Session, ThinkingLevel, ToolKind, Usage } from '../shared.ts'
+import { cleanUsage } from '../usage.ts'
 import { type RpcError, rpcClient } from './rpc.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
 import { withImages } from './tool-images.ts'
@@ -10,6 +11,15 @@ import { withImages } from './tool-images.ts'
 // comes in as hooks; the OpenCode adapter is the first user.
 
 export const ACP_PROTOCOL_VERSION = 1
+
+// Kothar offers the agent no file system or terminal of its own; the agent uses its own tools.
+const INITIALIZE = {
+  protocolVersion: ACP_PROTOCOL_VERSION,
+  clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+}
+
+// ACP's "Authentication required" error (session/new before the agent is signed in).
+export const AUTH_REQUIRED = -32000
 
 const errorText = (error: RpcError) => {
   const data = error.data as any
@@ -85,6 +95,12 @@ export type AcpSessionOptions = {
   thinking?: ThinkingLevel
   // How the agent is named in errors.
   name: string
+  // Text sent ahead of the first prompt, for agents that take no instructions any other way (ACP has none in
+  // session/new that every agent supports). OpenCode gets its instructions as a config file instead.
+  instructions?: string
+  // Leave out HTTP MCP servers unless the agent's initialize says it takes them (mcpCapabilities.http), as the
+  // protocol asks. OpenCode takes them without saying so.
+  httpIfOffered?: boolean
 }
 
 export type AcpMcpServer =
@@ -98,6 +114,30 @@ export const acpStdioServer = (server: McpServer): AcpMcpServer => ({
   env: Object.entries(server.env ?? {}).map(([name, value]) => ({ name, value })),
 })
 
+// The values a select config option offers: a flat list, or groups of them.
+export const optionValues = (option: any): string[] =>
+  (Array.isArray(option?.options) ? option.options : [])
+    .flatMap((o: any) => (Array.isArray(o?.options) ? o.options : [o]))
+    .map((v: any) => v?.value)
+    .filter((v: unknown): v is string => typeof v === 'string')
+
+// What a new session offers: its models and thinking levels, from its config options (category model and
+// thought_level), else from the older `models` state (availableModels, set with session/set_model).
+export function offeredBy(created: any): { models: string[]; current?: string; efforts: string[]; legacy: boolean } {
+  const configOptions: any[] = Array.isArray(created?.configOptions) ? created.configOptions : []
+  const option = (category: string) => configOptions.find((o) => o?.category === category || o?.id === category)
+  const model = option('model')
+  const efforts = optionValues(option('thought_level'))
+  if (model) {
+    const current = typeof model.currentValue === 'string' ? model.currentValue : undefined
+    return { models: optionValues(model), ...(current && { current }), efforts, legacy: false }
+  }
+  const available: any[] = Array.isArray(created?.models?.availableModels) ? created.models.availableModels : []
+  const models = available.map((m) => m?.modelId).filter((id): id is string => typeof id === 'string')
+  const current = typeof created?.models?.currentModelId === 'string' ? created.models.currentModelId : undefined
+  return { models, ...(current && { current }), efforts, legacy: models.length > 0 }
+}
+
 const textOf = (content: any): string =>
   (Array.isArray(content) ? content : [])
     .map((block: any) => (block?.type === 'content' ? block.content : block))
@@ -106,6 +146,24 @@ const textOf = (content: any): string =>
     .join('\n')
 
 const LINES_KEPT = 20
+
+/**
+ * What a turn used, from session/prompt's usage (its tokens; thoughtTokens counted as output, as Kothar counts
+ * thinking) and the change in the session's cost (usage_update's cost.amount, a running total, in US dollars only).
+ */
+export function acpUsage(tokens: any, cost: number | undefined, model?: string): Usage | undefined {
+  const num = (value: unknown) => (typeof value === 'number' ? value : undefined)
+  const output = num(tokens?.outputTokens)
+  const thought = num(tokens?.thoughtTokens)
+  return cleanUsage({
+    inputTokens: num(tokens?.inputTokens),
+    outputTokens: output === undefined && thought === undefined ? undefined : (output ?? 0) + (thought ?? 0),
+    cacheReadTokens: num(tokens?.cachedReadTokens),
+    cacheWriteTokens: num(tokens?.cachedWriteTokens),
+    costUsd: cost,
+    ...(model && { model }),
+  })
+}
 
 // One ACP session on a started agent process: initialize, session/new, then a prompt per turn. Each Kothar session
 // is one ACP session; nothing is loaded or resumed.
@@ -129,6 +187,9 @@ export function startAcpSession(
   let limited = false
   let reply = { messageId: undefined as string | undefined, text: '' }
   let queued: { text: string; images: ImageInput[] } | undefined
+  // The session's cost so far (usage_update), and what of it the turns before have reported.
+  let sessionCost: number | undefined
+  let costReported = 0
 
   const turn: AcpTurn = {
     limit(message, resetsAt) {
@@ -151,13 +212,17 @@ export function startAcpSession(
     asked.clear()
   }
 
-  const endTurn = (error?: string) => {
+  const endTurn = (error?: string, tokens?: unknown) => {
     if (!running) return
     flushReply()
     cancelAsked()
     running = false
     const reason = interrupted ? 'Interrupted' : (error ?? hooks.turnError?.())
     interrupted = false
+    const cost = sessionCost === undefined ? undefined : sessionCost - costReported
+    if (sessionCost !== undefined) costReported = sessionCost
+    const usage = acpUsage(tokens, cost, options.model)
+    if (usage) emit({ type: 'turn.usage', usage })
     emit({ type: 'turn.completed', ...withKind(reason, hooks.errors) })
   }
 
@@ -189,6 +254,12 @@ export function startAcpSession(
     hooks.hasInput ? hooks.hasInput(call) : call.rawInput !== undefined && Object.keys(call.rawInput).length > 0
 
   const onUpdate = (update: any) => {
+    // The session's cost, a running total, whenever the agent sends it (ACP's usage_update).
+    if (update?.sessionUpdate === 'usage_update') {
+      const { amount, currency } = update.cost ?? {}
+      if (typeof amount === 'number' && Number.isFinite(amount) && (currency === undefined || currency === 'USD')) sessionCost = amount
+      return
+    }
     if (!running) return
     switch (update?.sessionUpdate) {
       case 'agent_message_chunk': {
@@ -277,26 +348,36 @@ export function startAcpSession(
     },
   })
 
+  let instructed = !options.instructions
   const send = async (text: string, images: ImageInput[]) => {
+    if (!instructed) {
+      instructed = true
+      text = `<instructions>\n${options.instructions}\n</instructions>\n\n${text}`
+    }
     const prompt = [{ type: 'text', text }, ...images.map(({ mimeType, base64 }) => ({ type: 'image', mimeType, data: base64 }))]
     try {
       const result = await client.request('session/prompt', { sessionId, prompt })
-      endTurn(result?.stopReason === 'refusal' ? `${options.name} refused to go on` : undefined)
+      endTurn(result?.stopReason === 'refusal' ? `${options.name} refused to go on` : undefined, result?.usage)
     } catch (error) {
       endTurn(messageOf(error))
     }
   }
 
   // The model and thinking level, through the session's config options (ACP's model and thought_level categories).
-  const configure = async (configOptions: any[]) => {
+  const configure = async (created: any) => {
+    let configOptions: any[] = Array.isArray(created?.configOptions) ? created.configOptions : []
     const option = (category: string) => configOptions.find((o) => o?.category === category || o?.id === category)
-    const values = (o: any): string[] => (o?.options ?? []).map((v: any) => v?.value).filter((v: unknown) => typeof v === 'string')
+    const values = optionValues
     const set = async (o: any, value: string) => {
       if (o.currentValue === value) return o
       const result = await client.request('session/set_config_option', { sessionId, configId: o.id, value })
       return result?.configOptions ?? configOptions
     }
-    if (options.model) {
+    const offered = offeredBy(created)
+    if (options.model && offered.legacy) {
+      if (!offered.models.includes(options.model)) throw new Error(`${options.name} doesn't offer the model ${options.model}`)
+      if (offered.current !== options.model) await client.request('session/set_model', { sessionId, modelId: options.model })
+    } else if (options.model) {
       const model = option('model')
       if (!model) throw new Error(`${options.name} doesn't let Kothar pick a model`)
       if (!values(model).includes(options.model)) throw new Error(`${options.name} doesn't offer the model ${options.model}`)
@@ -312,14 +393,13 @@ export function startAcpSession(
 
   const ready = (async () => {
     try {
-      await client.request('initialize', {
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-      })
-      const created = await client.request('session/new', { cwd: options.cwd, mcpServers: options.mcpServers })
+      const initialized = await client.request('initialize', INITIALIZE)
+      const http = initialized?.agentCapabilities?.mcpCapabilities?.http === true
+      const mcpServers = options.httpIfOffered && !http ? options.mcpServers.filter((s) => !('type' in s)) : options.mcpServers
+      const created = await client.request('session/new', { cwd: options.cwd, mcpServers })
       sessionId = created?.sessionId
       if (typeof sessionId !== 'string') throw new Error(`${options.name} started no session`)
-      await configure(created?.configOptions ?? [])
+      await configure(created)
     } catch (error) {
       failure = messageOf(error)
     }
@@ -386,3 +466,62 @@ export function startAcpSession(
 
 const stringOf = (value: unknown) => (typeof value === 'string' ? value : '')
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+export type AcpProbe = {
+  models: string[]
+  current?: string
+  efforts: string[]
+  // The agent wants a sign-in first (session/new failed with auth_required), and the ways it offers.
+  needsAuth?: string[]
+  // Why the probe failed, if it did for another reason.
+  error?: string
+}
+
+// Starts a session on a started agent only to read what it offers (initialize, session/new with no MCP servers),
+// then closes it. Detection uses it: ACP has no way to list models without a session.
+export function probeAcp(proc: EngineProcess, cwd: string, timeoutMs: number): Promise<AcpProbe> {
+  let lastCode: number | undefined
+  const client = rpcClient(proc, {
+    jsonrpc: true,
+    errorText: (error: RpcError) => {
+      lastCode = error.code
+      return errorText(error)
+    },
+    onRequest: (id) => client.fail(id, { code: -32601, message: 'Method not found' }),
+    onNotification: () => {},
+  })
+  let stderr = ''
+  const exited = new Promise<never>((_, reject) =>
+    proc.onExit((code, tail) => {
+      client.flush()
+      stderr = tail.trim()
+      client.abandon(stderr || `exited with code ${code}`)
+      reject(new Error(stderr || `exited with code ${code}`))
+    }),
+  )
+  exited.catch(() => {})
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer in ${Math.round(timeoutMs / 1000)}s`)), timeoutMs)
+  })
+  let authMethods: string[] = []
+  const run = async (): Promise<AcpProbe> => {
+    const initialized = await client.request('initialize', INITIALIZE)
+    authMethods = (Array.isArray(initialized?.authMethods) ? initialized.authMethods : [])
+      .map((m: any) => (typeof m?.name === 'string' ? m.name : m?.id))
+      .filter((m: unknown): m is string => typeof m === 'string')
+    const created = await client.request('session/new', { cwd, mcpServers: [] })
+    const { legacy: _, ...offered } = offeredBy(created)
+    return offered
+  }
+  return Promise.race([run(), exited, timeout])
+    .catch((error): AcpProbe => {
+      if (lastCode === AUTH_REQUIRED) return { models: [], efforts: [], needsAuth: authMethods }
+      return { models: [], efforts: [], error: messageOf(error) }
+    })
+    .finally(() => {
+      clearTimeout(timer)
+      proc.closeStdin()
+      proc.kill()
+    })
+}

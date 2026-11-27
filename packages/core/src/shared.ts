@@ -1,6 +1,7 @@
 import type {
   ToolCapability,
-  ModelRole as ApiModelRole,
+  CoreModelRole as ApiCoreModelRole,
+  ExtensionModelRole,
   Answers,
   Attachment,
   ChatEntry,
@@ -14,9 +15,12 @@ import type {
   ExtensionValues,
   ExtensionView,
   ExtensionWait,
+  Usage,
+  UsageTotals,
 } from '@kothar/extension-api'
 
 export type {
+  ExtensionModelRole,
   Answers,
   ChatEntry,
   ChatStatus,
@@ -27,9 +31,15 @@ export type {
   Question,
   ToolCapability,
   ToolKind,
+  Usage,
+  UsageRecord,
+  UsageTotals,
+  ChatUsage,
 } from '@kothar/extension-api'
 
 export interface EngineProcess {
+  // The process group the machine started it in (its leader's pid), where the machine knows one (the local machine).
+  pid?: number
   write(data: string): void
   closeStdin(): void
   kill(): void
@@ -93,6 +103,12 @@ export type EngineStatus = {
   defaultThinking?: ThinkingLevel
 }
 
+// An ACP agent the user added in Settings → Engines (settings.json `acpAgents`), run by the generic ACP adapter
+// (adapters/acp-agent.ts). id: `acp-` and a slug of the name, fixed once added. args may hold {cwd}, the session's
+// folder, for agents that take it as an argument. env: added to the agent's environment. writable: folders the agent
+// may write besides its work folder while sandboxed (its own config or cache folder).
+export type AcpAgent = { id: string; name: string; command: string; args: string[]; env: Record<string, string>; writable?: string[] }
+
 export type EngineInfo = Omit<EngineStatus, 'models'> & {
   id: string
   // How the UI names the engine, e.g. "Claude Code"; the id when the adapter gives none.
@@ -100,6 +116,8 @@ export type EngineInfo = Omit<EngineStatus, 'models'> & {
   enabled: boolean
   models?: ModelOption[]
   steering?: boolean
+  // An agent the user added (Settings → Engines → Add ACP agent), with what they typed, to edit or remove it.
+  acp?: AcpAgent
 }
 
 export type SessionOptions = {
@@ -164,6 +182,8 @@ export type CompleteOptions = CompletionRequest & {
   accountDir?: string
   apiKey?: string
   sandbox?: Sandbox
+  // Called with what the call used, if the engine says (once per model it called).
+  onUsage?: (usage: Usage) => void
 }
 
 export interface Session {
@@ -266,10 +286,20 @@ export const PERMISSION_SWITCHES = Object.keys(PERMISSION_DEFAULTS) as Permissio
 // (any subdomain). key: an identity file (~/ or absolute); without one, no -i key is let through for the host.
 export type SshHost = { host: string; key?: string }
 
-// The switches, and the allowed SSH hosts: like a switch, the nearest layer with a list of its own wins.
+// The switches (the nearest layer that sets one wins), and the allowed SSH hosts (every layer's lists add up).
 export type PermissionSwitches = Partial<Record<PermissionSwitch, boolean>> & { sshHosts?: SshHost[] }
 
-export const sshHostsOf = (...layers: PermissionSwitches[]) => layers.find((layer) => layer.sshHosts !== undefined)?.sshHosts ?? []
+const sameSshHost = (a: SshHost, b: SshHost) => a.host === b.host && a.key === b.key
+
+/**
+ * The SSH hosts a chat trusts: every layer's list together (the chat's own, its space's, Settings'), nearest first,
+ * each entry once. A list of its own adds to the ones above it; it can't take away a host Settings allows.
+ */
+export const sshHostsOf = (...layers: PermissionSwitches[]): SshHost[] => {
+  const all: SshHost[] = []
+  for (const layer of layers) for (const entry of layer.sshHosts ?? []) if (!all.some((e) => sameSshHost(e, entry))) all.push(entry)
+  return all
+}
 
 export const switchedOn = (name: PermissionSwitch, ...layers: PermissionSwitches[]) =>
   layers.find((layer) => layer[name] !== undefined)?.[name] ?? PERMISSION_DEFAULTS[name]
@@ -309,6 +339,13 @@ export type ChatInfo = PermissionSwitches & {
   thinking?: ThinkingLevel
   workDir?: string
   worktrees?: Record<string, Worktree>
+  // Spaces only: each worker's own branches, by worker id, while they run and until their changes are reviewed.
+  workerBranches?: Record<string, WorkerBranch>
+  // Spaces only: a shell script run in each worktree made for a worker, before its first turn (npm ci, copying .env).
+  setupScript?: string
+  // Workers only: 'own' works in worktrees of its own (worker-checkouts.ts); 'shared' (or absent, for workers from
+  // before) in the space's checkouts. Set when the worker is made.
+  checkout?: WorkerCheckout
   // The mode the user picked for a folder that isn't a git repo, by path: a folder of this chat's or one it inherits.
   // A folder without one takes the nearest chat above's, else DEFAULT_FOLDER_MODE (folder-modes.ts).
   folderModes?: Record<string, FolderMode>
@@ -356,6 +393,23 @@ export const isUnread = (chat: Pick<ChatInfo, 'doneAt' | 'readAt'>) =>
 // from: the branch the folder was on when it was checked out.
 export type Worktree = { path: string; branch: string; from?: string }
 
+// A worker's own checkout of one git folder (worker-checkouts.ts): its worktree and branch, the commit the branch was
+// made from, and the space's branch it merges into.
+export type WorkerRepo = { folder: string; path: string; branch: string; base: string; into: string }
+// What a worker changed in one repo since its branch was made: files and lines against the base (committed and not),
+// its commits, and how many paths are uncommitted.
+export type WorkerRepoChanges = { folder: string; files: number; added: number; removed: number; uncommitted: number; commits: number }
+// A worker's branches, kept on its space (ChatInfo.workerBranches) since the worker goes once it reports. working: the
+// worker runs; review: it's gone and its changes wait for Merge, Squash, Discard or Keep; kept: the user left them.
+export type WorkerBranchState = 'working' | 'review' | 'kept'
+export type WorkerBranch = {
+  name: string
+  createdAt: string
+  state: WorkerBranchState
+  repos: WorkerRepo[]
+  changes?: WorkerRepoChanges[]
+}
+
 /**
  * Where a pinned space sat before it was pinned, among the spaces of its group (or the ungrouped ones): the ids of the
  * spaces just above and just below it, nearest first (up to UNPIN_NEIGHBOURS each), and its index there. Neighbours
@@ -391,28 +445,32 @@ export type WorkFolder = PermissionSwitches & {
 export const allowsAll = (...layers: PermissionSwitches[]) => switchedOn('allowAll', ...layers)
 export const editsAnywhere = (...layers: PermissionSwitches[]) => allowsAll(...layers) || switchedOn('editAnywhere', ...layers)
 
-export const MODEL_ROLES = ['chat', 'planning', 'searching', 'workers'] as const
-
-export type ModelRole = (typeof MODEL_ROLES)[number]
-// The extension API names the same roles; this fails to compile if the two lists drift apart.
+// Kothar's own model roles: Chat, and Workers for every worker no role names. Extensions declare more
+// (Extension.modelRoles), such as Plan's 'planning' and Deep Research's 'searching'; a role is any of these ids.
+export const CORE_MODEL_ROLES = ['chat', 'workers'] as const
+export type CoreModelRole = (typeof CORE_MODEL_ROLES)[number]
+export type ModelRole = string
+// The extension API names the same core roles; this fails to compile if the two lists drift apart.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
-export const ROLES_MATCH_EXTENSION_API: Same<ModelRole, ApiModelRole> = true
+export const ROLES_MATCH_EXTENSION_API: Same<CoreModelRole, ApiCoreModelRole> = true
 
-export const ROLE_NAMES: Record<ModelRole, string> = {
+export const ROLE_NAMES: Record<CoreModelRole, string> = {
   chat: 'Chat',
-  planning: 'Planning',
-  searching: 'Searching',
   workers: 'Workers',
 }
+
+// A role's id is lowercase letters, digits and dashes, starting with a letter.
+export const MODEL_ROLE_ID = /^[a-z][a-z0-9-]*$/
 
 // One entry in a role's model list: a model on an engine, and the thinking level it runs at there. `thinking` is left
 // out only for a model that takes no levels, or until its engine has said which it takes.
 export type ModelRow = { engine: string; model: string; thinking?: ThinkingLevel }
 
-// One list per role, shared by every engine; a list can mix engines.
-export type ModelLists = Record<ModelRole, ModelRow[]>
+// One list per role, shared by every engine; a list can mix engines. Chat and Workers are always there; an extension's
+// role has its list once the user saved one, and keeps it while the extension is off.
+export type ModelLists = { chat: ModelRow[]; workers: ModelRow[] } & Record<string, ModelRow[]>
 
-export const NO_LISTS: ModelLists = { chat: [], planning: [], searching: [], workers: [] }
+export const NO_LISTS: ModelLists = { chat: [], workers: [] }
 
 /** The thinking levels a model takes: its own list if its engine gives one, else the engine's. */
 export const levelsOf = (engine: EngineInfo | undefined, model?: string): ThinkingLevel[] =>
@@ -438,7 +496,11 @@ export type PromptInfo = {
 
 // Settings → Workers: whether agents may start workers (spawn_worker), how many one chat runs at once (-1: no limit;
 // extensions' workers count too), and the instructions chats that may start them get.
-export type WorkersSettings = { start: boolean; limit: number; instructions: PromptInfo }
+// ownCheckouts: whether a new worker gets worktrees of its own, unless its spawn says otherwise (default on).
+export type WorkersSettings = { start: boolean; limit: number; ownCheckouts: boolean; instructions: PromptInfo }
+
+export type WorkerCheckout = 'own' | 'shared'
+export const MAX_SETUP_SCRIPT = 20_000
 
 export type ExtensionInfo = {
   id: string
@@ -453,6 +515,9 @@ export type ExtensionInfo = {
   loadError?: string
   // It has a chat of its own (Home). A setup can't leave it out of that chat, so setup forms don't list it.
   ownsChat?: boolean
+  // Part of Kothar (Extension.alwaysOn, such as Home): always on, with no switch, so it isn't listed among the
+  // extensions; its page sits under Options.
+  alwaysOn?: true
   // Its prompts the user can edit (Extension.prompts, and each tool's description), as sent now.
   prompts?: PromptInfo[]
   // It adds instructions the user can't edit: an instructions hook (or a memory's) with no 'instructions' prompt.
@@ -465,6 +530,8 @@ export type ExtensionInfo = {
   blockedSettings?: Record<string, string>
   // A built-in extension's uses, read from the fields it sets, for its page (a community one's are community.uses).
   uses?: ExtensionUse[]
+  // The model roles it declares (Extension.modelRoles), each a list in Settings → Models; only while it runs.
+  modelRoles?: ExtensionModelRole[]
   // A community extension: installed in the garage from the marketplace or a folder, and what it says it uses. running:
   // the version this run of Kothar loaded, if any; extensions load only at startup.
   community?: {
@@ -570,7 +637,9 @@ export type Upload = { name: string; mimeType: string; base64: string }
 
 // A worker's final reply to its lead: which worker, and why its turn ended early, if it did. from: an extension's
 // report of its own background work instead (ExtensionHost.report), by the extension's id, which chatId is then too.
-export type WorkerReport = { chatId: string; name: string; error?: string; from?: string }
+// changes: one line per repo for a worker with its own checkouts that changed something (worker-checkouts.ts
+// changesText), so the lead knows there's work to review.
+export type WorkerReport = { chatId: string; name: string; error?: string; from?: string; changes?: string[] }
 
 // steering: handed to the running turn, waiting for its next tool boundary; it can't be taken back.
 export type QueuedMessage = {
@@ -642,12 +711,19 @@ export type ChatState = ChatInfo & {
   queue: QueuedMessage[]
   // What extensions are waiting on the user for, while the turn runs (ExtensionHost.wait).
   waits?: ChatWait[]
+  // The usage its engines reported (usage.jsonl), its own only; the UI adds up a space's. Absent: none reported.
+  usage?: UsageTotals
+  // What its workers that have since been removed used (carried up to it). Absent: none.
+  workersUsage?: UsageTotals
 }
 
 export type ChatWait = ExtensionWait & { extension: string }
 
 export type ClientMessage =
   | { type: 'engine.setEnabled'; engine: string; enabled: boolean }
+  // Adds an ACP agent (no id) or edits one (its id); the core answers with engines.updated.
+  | { type: 'acpAgent.save'; agent: Omit<AcpAgent, 'id'> & { id?: string } }
+  | { type: 'acpAgent.remove'; engine: string }
   | ({ type: 'chat.create' } & NewChat)
   | { type: 'chat.rename'; chatId: string; name: string }
   | { type: 'chat.archive'; chatId: string; archived: boolean }
@@ -672,6 +748,10 @@ export type ClientMessage =
   | { type: 'chat.setPermission'; chatId: string; name: PermissionSwitch; enabled?: boolean }
   // The chat's own allowed SSH hosts, or none to take its space's or Settings' again.
   | { type: 'chat.setSshHosts'; chatId: string; hosts?: SshHost[] }
+  // A worker's changes waiting on its space (ChatInfo.workerBranches): chatId is the space, workerId the worker's.
+  | { type: 'worker.review'; chatId: string; workerId: string; action: 'merge' | 'squash' | 'discard' | 'keep' }
+  // A space's setup script for its workers' own worktrees; empty or absent: none.
+  | { type: 'chat.setSetupScript'; chatId: string; script?: string }
   // steer: hand it to the running turn if its engine can steer; otherwise, or without it, it waits for the turn to end.
   | { type: 'chat.send'; chatId: string; text: string; attachments?: Upload[]; steer?: boolean }
   | { type: 'chat.unqueue'; chatId: string; id: string }
@@ -684,7 +764,9 @@ export type ClientMessage =
   // Removes the user's message at entry and everything after it; replies with chat.undone, for the composer.
   | { type: 'chat.undoMessage'; chatId: string; entry: number }
   | { type: 'chat.interrupt'; chatId: string; force?: boolean }
-  | { type: 'permission.respond'; chatId: string; requestId: string; allow: boolean }
+  // trustHost: also add the SSH server the card offered (the entry's sshHost) to the space's Allowed SSH hosts, or
+  // Settings' (global). Only with allow.
+  | { type: 'permission.respond'; chatId: string; requestId: string; allow: boolean; trustHost?: 'space' | 'global' }
   | { type: 'question.respond'; chatId: string; requestId: string; answers?: Answers }
   // Replies with chat.context and chat.extensions.
   | { type: 'context.get'; chatId: string }
@@ -721,7 +803,7 @@ export type ClientMessage =
   // Saves the user's edit of one of an extension's prompts; without text (or with the default), back to the default.
   | { type: 'extension.prompt.set'; extensionId: string; promptId: string; text?: string }
   // Settings → Workers. text undefined: the instructions go back to their default.
-  | { type: 'workers.set'; start?: boolean; limit?: number }
+  | { type: 'workers.set'; start?: boolean; limit?: number; ownCheckouts?: boolean }
   // Settings → Engines → Tools: a master switch (every engine's without engine), one tool (on absent: back to its
   // default), or every tool of an engine back to its default.
   | { type: 'engineTools.setEnabled'; engine?: string; enabled: boolean }
@@ -823,6 +905,8 @@ export type CoreMessage =
       restart: RestartState
     }
   | { type: 'engine.updated'; engine: EngineInfo }
+  // The whole engine list, after an ACP agent was added or removed.
+  | { type: 'engines.updated'; engines: EngineInfo[] }
   | { type: 'accounts.updated'; accounts: EngineAccounts }
   | { type: 'chat.added'; chat: ChatState }
   | { type: 'chat.updated'; chat: ChatInfo & { run?: Run } }
@@ -838,6 +922,9 @@ export type CoreMessage =
   | { type: 'chat.thinking'; chatId: string; text: string }
   | { type: 'chat.status'; chatId: string; status: ChatStatus }
   | { type: 'chat.queue'; chatId: string; queue: QueuedMessage[] }
+  // The chat's usage totals changed: a turn or a one-shot call it asked for reported usage, or (workers) a worker of its
+  // was removed and its usage carried up to it.
+  | { type: 'chat.usage'; chatId: string; usage: UsageTotals; workers?: UsageTotals }
   | { type: 'chat.waits'; chatId: string; waits: ChatWait[] }
   | { type: 'chat.context'; chatId: string; items: ContextItem[] }
   | {
@@ -892,6 +979,9 @@ export type CoreMessage =
   | { type: 'extension.panel.show'; chatId: string; extension: string; panel: string; placement: 'dock' | 'tab' }
   // An extension closes its popup or dock for the chat, if the user has it open there (host.closePanel).
   | { type: 'extension.panel.close'; chatId: string; extension: string; panel: string; placement: 'popup' | 'dock' }
+  // An extension opens a chat for the user, after a click in its panel (host.openChat): entry, a log entry to scroll to;
+  // panel, one of its docks to open beside it.
+  | { type: 'extension.chat.open'; chatId: string; extension: string; entry?: number; panel?: string }
   // The answer to terminal.open: error if no terminal opened.
   | { type: 'terminal.result'; chatId: string; path: string; error?: string }
   // copied: how many files the last copyBack copied back.

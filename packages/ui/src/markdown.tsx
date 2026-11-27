@@ -7,6 +7,7 @@ import type { PluggableList } from 'unified'
 import { keepImageSrc, MarkdownImage } from './chat-image.tsx'
 import { CopyBlock } from './controls.tsx'
 import { FileLink } from './file-links.tsx'
+import { imagePathText } from './image-paths.ts'
 import { codeRef, fileRefsIn, type FileRef } from './file-refs.ts'
 import { KATEX_OPTIONS, mathText } from './math.ts'
 
@@ -138,7 +139,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
   return (
     <div className={`markdown ${className}`}>
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components} urlTransform={urlTransform}>
-        {mathText(text)}
+        {mathText(imagePathText(text))}
       </ReactMarkdown>
     </div>
   )

@@ -12,13 +12,18 @@ export const WINDOW_MAX_CHARS = 88_000
 export type Report = { text: string; report: WorkerReport }
 
 // How a worker's report reads to its lead, in memory and in the prompt that delivers it.
-export function reportText({ text, report: { chatId, name, error, from } }: Report) {
+export const CHANGES_WAITING =
+  "Its changes are on its own branch, not yet in the space's. They wait for review: the user can merge, squash, " +
+  'discard or keep them from the report, and you can with review_worker (the user approves merges and discards).'
+
+export function reportText({ text, report: { chatId, name, error, from, changes } }: Report) {
   if (from !== undefined) {
     const failed = error ? `\n\n(It ended early: ${error})` : ''
     return `Report from the ${from} extension, "${name}":\n\n${text || '(No reply)'}${failed}`
   }
   const early = error ? `\n\n(The turn ended early: ${error})` : ''
-  return `Report from worker "${name}" (${chatId}):\n\n${text || '(No reply)'}${early}`
+  const waiting = changes?.length ? `\n\n${CHANGES_WAITING}\n${changes.join('\n')}` : ''
+  return `Report from worker "${name}" (${chatId}):\n\n${text || '(No reply)'}${early}${waiting}`
 }
 
 export function withAttachments(text: string, attachments: Attachment[] = []) {
@@ -28,16 +33,32 @@ export function withAttachments(text: string, attachments: Attachment[] = []) {
 }
 
 export function messagesOf(entries: ChatEntry[]): MemoryMessage[] {
+  return numbered(entries).messages
+}
+
+// Where each message is in the log: message id → entry index (forget reads ids the agent saw this way).
+export function messageEntries(entries: ChatEntry[]): number[] {
+  return numbered(entries).at
+}
+
+function numbered(entries: ChatEntry[]) {
   const messages: MemoryMessage[] = []
-  const add = (kind: MessageKind, at: string, text: string) => messages.push({ id: messages.length, kind, at, text })
-  for (const entry of entries) {
+  const at: number[] = []
+  let index = 0
+  const add = (kind: MessageKind, when: string, text: string) => {
+    messages.push({ id: messages.length, kind, at: when, text })
+    at.push(index)
+  }
+  for (; index < entries.length; index++) {
+    const entry = entries[index]!
     if (entry.type === 'user.message') {
       const kind = entry.text.startsWith('[subagent "') ? 'work' : 'user'
       add(kind, entry.at, withAttachments(entry.text, entry.attachments))
     }
     if (entry.type === 'worker.report') {
-      const { text, chatId, name, error, from } = entry
-      add('work', entry.at, reportText({ text, report: { chatId, name, ...(error && { error }), ...(from !== undefined && { from }) } }))
+      const { text, chatId, name, error, from, changes } = entry
+      const report = { chatId, name, ...(error && { error }), ...(from !== undefined && { from }), ...(changes?.length && { changes }) }
+      add('work', entry.at, reportText({ text, report }))
     }
     if (entry.type === 'text.completed') add('talk', entry.at, entry.text)
     if (entry.type === 'tool.started') add('tool', entry.at, `${entry.name} ${JSON.stringify(entry.input) ?? ''}`.trim())
@@ -46,7 +67,7 @@ export function messagesOf(entries: ChatEntry[]): MemoryMessage[] {
       add('note', entry.at, `Turn ended early: ${entry.error}`)
     }
   }
-  return messages
+  return { messages, at }
 }
 
 const escapeTag = (text: string, tag: string) => text.replace(new RegExp(`</(${tag})`, 'gi'), '<\\/$1')

@@ -13,6 +13,7 @@ import type { ExtensionHook } from './extensions.ts'
 import { PARENT_VIEW_FILE } from './instruction-parts.ts'
 import { messagesOf } from './memory.ts'
 import type { openModels } from './models.ts'
+import { readQueue } from './queue-store.ts'
 import { WORKER_SETUP } from './setups.ts'
 import {
   bySpaceOrder,
@@ -24,8 +25,9 @@ import {
   type CoreMessage,
   type MemoryMessage,
   type ModelRole,
-  MODEL_ROLES,
   type NewChat,
+  type QueuedMessage,
+  type WorkerCheckout,
   type Setup,
 } from './shared.ts'
 
@@ -37,6 +39,9 @@ export type ChatSpec = NewChat & {
   setup?: string
   quiet?: boolean
   showReport?: boolean
+  // A worker's checkouts: its own worktrees or the space's. Absent: Settings → Workers for an agent's or a shown
+  // worker, the space's for a quiet one (an extension's own work, such as research, rarely edits a repo).
+  checkout?: WorkerCheckout
 }
 
 export type ChatLifecycleDeps = {
@@ -48,6 +53,8 @@ export type ChatLifecycleDeps = {
   // The chats extensions declare (Home), loaded first and named as declared.
   extensionChats: readonly DeclaredChat[]
   models: Pick<ReturnType<typeof openModels>, 'engineFor' | 'pinOn'>
+  // Whether a child can be started on this role: Kothar's own, or one an extension that's on declares.
+  liveRole: (role: unknown) => boolean
   checkEngine: (engine: string) => void
   checkEnabled: (engine: string) => void
   chatFor: (chatId: string) => Chat
@@ -69,10 +76,21 @@ export type ChatLifecycleDeps = {
   // What ends with a removed chat: its session, its panels, its work folder.
   stopSession: (chat: Chat) => void
   forgetChat: (chatId: string) => void
+  /** Before the chats' folders go: a removed worker's usage moves to the chat above (core.ts keepUsage). */
+  keepUsage?: (family: Chat[]) => void
   removeWorkDir: (chat: Chat) => Promise<void>
+  // Adds a message to a chat's queue without sending it (it runs once the core resumes, turn.ts resumeQueues).
+  queueMessage: (chat: Chat, message: Omit<QueuedMessage, 'id'>) => void
   // Whether a sidebar group with this id exists (groups.ts).
   hasGroup: (id: string | undefined) => boolean
+  // Settings → Workers: whether a new worker gets worktrees of its own by default.
+  ownCheckouts: () => boolean
 }
+
+// Why a worker Kothar's quit or crash cut off reported early, in its report to its lead.
+export const CUT_OFF_BY_RESTART =
+  'Kothar quit or restarted while it worked, so it was cut off. Its chat is kept: send it a message with send_message ' +
+  'to carry on where it stopped, or start a new worker.'
 
 export const checkName = (name: unknown) => {
   const trimmed = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : ''
@@ -121,7 +139,7 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
       unsavedText: '',
       pendingRequests: new Map(),
       waits: new Map(),
-      queue: [],
+      queue: readQueue(dir),
       turns: 0,
     }
     if (resave) deps.saveChat(chat)
@@ -142,19 +160,48 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
     createdAt: now().toISOString(),
   })
 
-  // Once, as the core opens: extensions' chats first, then every chat in the garage. Nothing runs yet, so a worker
-  // that has worked and is still here (Kothar quit or crashed mid-task, or an older Kothar kept it) goes now.
+  // Once, as the core opens: extensions' chats first, then every chat in the garage, then the workers left over from
+  // before (restartedWorker). Nothing runs yet: what this queues runs once the core resumes.
   const loadAll = () => {
     for (const { id, name } of deps.extensionChats) loadChat(join(chatsDir, id), freshInfo(id, name))
     for (const id of storedChatIds(chatsDir)) {
       if (chats.has(id)) continue
       loadChat(join(chatsDir, id), freshInfo(id, id))
     }
-    for (const chat of chats.values()) {
-      if (!chat.info.worker || !chat.entries.length) continue
+    for (const chat of [...chats.values()]) restartedWorker(chat)
+  }
+
+  // A worker is there for one task and goes once its lead has its report, so one still here at start was stopped by
+  // Kothar quitting or crashing, or quit between reporting and going. Which, by its log and its lead's:
+  // - its lead has read its report (in its log, after the worker's last entry): it's done, and goes. A report still
+  //   queued for the lead keeps the worker as it is.
+  // - its last turn ended well and wasn't reported (Kothar quit as it finished): it reports, as it would have, and goes.
+  // - it was cut off mid-task: it stays, idle, with its log, and its lead gets a report saying so, which wakes it to
+  //   carry the worker on with send_message or start another. Once that report is in the lead's log, the next start
+  //   takes the worker away unless it has worked since.
+  // A quiet worker (an extension's) goes as before: its extension, which hasn't started yet, owns its work. One that
+  // never started (no log, as when it waited for a slot) stays, with its first message in its queue.
+  const restartedWorker = (chat: Chat) => {
+    if (!chat.info.worker || !chat.entries.length) return
+    const parent = deps.parentOf(chat)
+    const gone = () => {
       chats.delete(chat.info.id)
       rmSync(chat.dir, { recursive: true, force: true })
     }
+    if (!parent || chat.info.quiet) return gone()
+    const id = chat.info.id
+    const lastAt = chat.entries.at(-1)!.at
+    // Still queued for its lead, which hasn't read it yet: kept as it is, so the lead can carry it on.
+    if (parent.queue.some((q) => q.report?.chatId === id)) return
+    if (parent.entries.some((e) => e.type === 'worker.report' && e.chatId === id && e.at >= lastAt)) return gone()
+    const asked = chat.entries.findLastIndex((e) => e.type === 'user.message')
+    const reply = chat.entries.slice(asked + 1).findLast((e) => e.type === 'text.completed')
+    const text = reply?.type === 'text.completed' ? reply.text : ''
+    const ended = chat.entries.findLast((e) => e.type === 'turn.completed' || e.type === 'session.ended')
+    const finished = !quitMidTurn(chat.entries) && ended?.type === 'turn.completed' && !ended.error
+    const report = { chatId: id, name: chat.info.name, ...(!finished && { error: CUT_OFF_BY_RESTART }) }
+    deps.queueMessage(parent, { text, report })
+    if (finished) gone()
   }
 
   const createChat = (spec: ChatSpec) => {
@@ -190,6 +237,7 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
         parentMessages: parentMessages.length,
         ...(spec.quiet === true && { quiet: true as const }),
         ...(spec.quiet === true && spec.showReport === true && { showReport: true as const }),
+        checkout: spec.checkout ?? (spec.quiet !== true && deps.ownCheckouts() ? 'own' : 'shared'),
       }),
       folders,
       files,
@@ -209,11 +257,21 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
   }
 
   // A chat below another, for one task: what spawn_worker and an extension's host.createChat with a parentId both make.
-  const createChild = (parentId: string, spec: NewChat & { role?: ModelRole; quiet?: boolean; showReport?: boolean }) => {
+  const createChild = (parentId: string, spec: NewChat & { role?: ModelRole; quiet?: boolean; showReport?: boolean; checkout?: WorkerCheckout }) => {
     if (spec.folders?.length || spec.files?.length) throw new Error('A child chat takes its folders from its space')
-    if (spec.role !== undefined && !MODEL_ROLES.includes(spec.role)) throw new Error(`Unknown role "${spec.role}"`)
+    if (spec.role !== undefined && !deps.liveRole(spec.role)) throw new Error(`Unknown role "${spec.role}"`)
+    if (spec.checkout !== undefined && spec.checkout !== 'own' && spec.checkout !== 'shared') throw new Error('A checkout is "own" or "shared"')
     const quiet = spec.quiet === true
-    return createChat({ name: spec.name, engine: spec.engine, parentId, worker: true, role: spec.role, quiet, showReport: quiet && spec.showReport === true })
+    return createChat({
+      name: spec.name,
+      engine: spec.engine,
+      parentId,
+      worker: true,
+      role: spec.role,
+      quiet,
+      showReport: quiet && spec.showReport === true,
+      ...(spec.checkout && { checkout: spec.checkout }),
+    })
   }
 
   const renameChat = (chat: Chat, name: unknown) => {
@@ -291,6 +349,7 @@ export function openChatLifecycle(deps: ChatLifecycleDeps) {
   // Removes each chat with its folder, without checks: deleteChat, and a finished worker (turn.ts).
   const removeChats = (family: Chat[]) => {
     const spaces: SpaceDetail[] = []
+    deps.keepUsage?.(family)
     for (const c of family) {
       deps.stopSession(c)
       const detail = deps.detailOf(c)

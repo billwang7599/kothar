@@ -21,6 +21,7 @@ after it cover each group in detail.
 
 | Field | What it adds | Page |
 |---|---|---|
+| `alwaysOn` | Built-in extensions only: part of Kothar, with no switch. It isn't listed under Built-in extensions, its page sits under Options, and a saved "off" is ignored. Home sets it. A community extension's is ignored | — |
 | `settings` | Settings on the extension's own page in Settings | [Settings and setup](settings.md) |
 | `spaceSettings` | Settings kept per space, shown in the extension's panels | [Settings and setup](settings.md#settings-per-space) |
 | `settingsVersion`, `migrateSettings` | Updating saved settings once when their shape changes | [Settings and setup](settings.md#migrating-saved-settings) |
@@ -38,6 +39,7 @@ after it cover each group in detail.
 | `noteViews` | Live cards in the transcript, drawn and updated by the extension, such as a research run's progress | [Panels and commands](panels.md#live-cards) |
 | `composerToggles` | Modes in the composer's mode picker, such as Deep research: one at a time, for the next message | [Panels and commands](panels.md#composer-modes) |
 | `chats` | Chats of the extension's own | [Chats](#chats), below |
+| `modelRoles` | Model lists of its own in Settings → Models, for the workers it starts and the turns it runs | [Model roles](#model-roles), below |
 | `memory` | What each session sees of its chat's history | [Tools, MCP servers, instructions and memory](agents.md#memory) |
 | `optionalDependencies`, `requires`, `onDependencyChanged` | Working with another extension: features that turn on with it, or not running without it | [Depending on other extensions](dependencies.md) |
 | `provides` | Capability names it shares an API under, for others to get with `host.use` | [Capabilities](dependencies.md#capabilities-provide-and-use) |
@@ -46,6 +48,7 @@ after it cover each group in detail.
 | `onChatCreated`, `onChatRemoved`, `onChatArchived`, `onMessagesRemoved`, `onSpaceRemoved`, `onStatusChanged`, `onTurnStarted`, `onTurnCompleted`, `onSessionEnded`, `onEvent`, `onLimitReached` | Hooks that react to chats as they run | [Events and hooks](events.md) |
 | `onPermissionRequested` | A policy that answers permission requests | [Events and hooks](events.md#onpermissionrequested) |
 | `onTurnSent` | Everything a turn's session was sent, labelled, as it opens | [Events and hooks](events.md#onturnsent) |
+| `onUsage` | What engines reported each turn and one-shot call used | [Events and hooks](events.md#onusage) |
 | `turnOptions` | Makes a turn read only, or runs it on another model list | [Events and hooks](events.md#turnoptions) |
 | `transformMessage`, `transformOutput` | Rewrites of messages and replies | [Events and hooks](events.md#transforms) |
 | `onWaitAction` | The user's answer to the extension's wait on a chat | [The host](host.md#waiting-for-the-user) |
@@ -53,8 +56,8 @@ after it cover each group in detail.
 
 ## Chats
 
-`chats` gives an extension chats of its own. Home is one: the built-in Home extension declares a single chat, and its
-tools let that chat make spaces.
+`chats` gives an extension chats of its own. Home is one: the built-in Home extension (always on, see `alwaysOn`)
+declares a single chat, and its tools let that chat make spaces.
 
 ```ts
 import type { Extension } from '@kothar/extension-api'
@@ -90,6 +93,35 @@ An extension's chat is pinned. It can't be renamed, archived or deleted, and it 
 of its own. When the extension is off, its chats are hidden and their history stays.
 
 List `chats` in the manifest's `uses`.
+
+## Model roles
+
+Kothar has two model lists of its own in **Settings → Models**: Chat, and Workers (every worker no other list is for).
+An extension adds more with `modelRoles`, each `{ id, label, description? }`. While the extension is on, each shows as
+a list in Settings → Models, under its `label` with its `description`, and its `id` can be named:
+
+- as `role` in [`host.createChat`](host.md#start-a-worker) with a `parentId`, for the workers it starts;
+- as `role` in [`turnOptions`](events.md#turnoptions), for a turn of a chat it's on for;
+- by agents, as `spawn_worker`'s `role`, in chats the extension is on for.
+
+A role whose list is empty runs on the Chat list. While the extension is off, its lists are hidden and kept, a role it
+declares is refused where one is given, and a chat already on one runs on the Chat list.
+
+```ts
+const plan: Extension = {
+  // …
+  modelRoles: [{ id: 'planning', label: 'Planning', description: 'Turns that work out a plan, and workers started to plan.' }],
+  turnOptions: (chat, { host }) => (host.toggled(chat.id, 'plan') ? { readOnly: true, role: 'planning' } : undefined),
+}
+```
+
+- An `id` is lowercase letters, digits and dashes, starting with a letter. It can't be `chat` or `workers`.
+- Ids aren't namespaced: the user's list is saved under the id (`models.<id>` in `settings.json`), so changing an id
+  drops the user's list. The first extension to declare an id keeps it; a later one's is left out, and its page says
+  why. A community extension should start its ids with its own id (`my-extension-review`).
+- Plan declares `planning` and Deep Research `searching`, the ids those lists had before extensions could declare them.
+
+List `sendMessages` in the manifest's `uses`.
 
 ## Rules for every hook
 

@@ -65,6 +65,7 @@ export function createMcpExtension(options: McpOptions = {}): McpExtension {
       authProvider: (server) => (server.auth === 'oauth' ? signIns.provider(server) : undefined),
       beforeConnect: (server) => (server.auth === 'oauth' ? signIns.refreshIfDue(server) : Promise.resolve()),
       store,
+      home: context.host.home,
       now: () => context.host.now().getTime(),
       record: (event) => host?.activity(event),
       idleMs: () => Math.max(1, Number(values.idleMinutes ?? 10)) * 60_000,

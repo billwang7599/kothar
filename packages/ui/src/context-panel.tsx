@@ -100,8 +100,24 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
       'them through) and Kothar’s saved accounts.',
   },
 }
-// While Allow all is on, the other switches are folded away: kept, but not used.
-export const switchesShown = (allowAll: boolean) => (allowAll ? (['allowAll'] as PermissionSwitch[]) : PERMISSION_SWITCHES)
+// Switches few people change, folded under More until opened.
+export const MORE_SWITCHES: readonly PermissionSwitch[] = ['autoEnvCommands', 'autoFetch']
+// The switches shown unfolded. While Allow all is on, the others are folded away: kept, but not used.
+export const switchesShown = (allowAll: boolean) =>
+  allowAll ? (['allowAll'] as PermissionSwitch[]) : PERMISSION_SWITCHES.filter((name) => !MORE_SWITCHES.includes(name))
+
+/** The switches in MORE_SWITCHES, folded under "More" (saying how many are on, so none is on unseen). */
+export function MoreSwitches({ on, children }: { on: number; children: ReactNode }) {
+  return (
+    <details className="group">
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-6 text-sm text-muted hover:text-text">
+        <Chevron />
+        More{on > 0 && ` (${on} on)`}
+      </summary>
+      <div className="mt-8 flex flex-col gap-8">{children}</div>
+    </details>
+  )
+}
 export const FOLDED_SWITCHES = `${PERMISSION_SWITCHES.length - 1} more switches and the allowed SSH hosts, not used while Allow all is on`
 const PERMISSIONS_HINT =
   'Each shows Settings → Work folder until you pick, or for a worker, its space. A pick is for this chat only.'
@@ -623,6 +639,33 @@ function Permissions({ chat, above, workFolder, disabled, send }: {
   disabled: boolean
   send: (m: ClientMessage) => void
 }) {
+  const isOn = (name: PermissionSwitch) => switchedOn(name, chat, ...above, workFolder)
+  const allowAll = isOn('allowAll')
+  const row = (name: PermissionSwitch) => {
+    const { label, amberWhileOn } = PERMISSIONS[name]
+    const on = isOn(name)
+    const amber = amberWhileOn && on
+    return (
+      <div
+        key={name}
+        className="flex flex-wrap items-center justify-between gap-x-8 gap-y-6 rounded-lg border px-10 py-8"
+      >
+        <span className={`min-w-0 flex-1 ${amber ? 'text-amber' : ''}`}>{label}</span>
+        <Select
+          label={label}
+          value={on ? 'on' : 'off'}
+          disabled={disabled}
+          options={[
+            { value: 'on', label: 'On' },
+            { value: 'off', label: 'Off' },
+          ]}
+          onChange={(value) =>
+            send({ type: 'chat.setPermission', chatId: chat.id, name, enabled: value === 'on' })
+          }
+        />
+      </div>
+    )
+  }
   return (
     <section className="flex flex-col gap-8" aria-label="Permissions">
       <h3 className="font-semibold">Permissions</h3>
@@ -630,43 +673,19 @@ function Permissions({ chat, above, workFolder, disabled, send }: {
         intro={PERMISSIONS_HINT}
         notes={[...PERMISSION_SWITCHES.map((name) => PERMISSIONS[name]), { label: SSH_HOSTS_LABEL, about: SSH_HOSTS_ABOUT }]}
       />
-      {switchesShown(switchedOn('allowAll', chat, ...above, workFolder)).map((name) => {
-        const { label, amberWhileOn } = PERMISSIONS[name]
-        const on = switchedOn(name, chat, ...above, workFolder)
-        const amber = amberWhileOn && on
-        return (
-          <div
-            key={name}
-            className="flex flex-wrap items-center justify-between gap-x-8 gap-y-6 rounded-lg border px-10 py-8"
-          >
-            <span className={`min-w-0 flex-1 ${amber ? 'text-amber' : ''}`}>{label}</span>
-            <Select
-              label={label}
-              value={on ? 'on' : 'off'}
-              disabled={disabled}
-              options={[
-                { value: 'on', label: 'On' },
-                { value: 'off', label: 'Off' },
-              ]}
-              onChange={(value) =>
-                send({ type: 'chat.setPermission', chatId: chat.id, name, enabled: value === 'on' })
-              }
-            />
-          </div>
-        )
-      })}
-      {switchedOn('allowAll', chat, ...above, workFolder) ? (
+      {switchesShown(allowAll).map(row)}
+      {!allowAll && <MoreSwitches on={MORE_SWITCHES.filter(isOn).length}>{MORE_SWITCHES.map(row)}</MoreSwitches>}
+      {allowAll ? (
         <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>
       ) : (
         <SshHostsEditor
-          hosts={sshHostsOf(chat, ...above, workFolder)}
+          hosts={chat.sshHosts ?? []}
           disabled={disabled}
-          onChange={(hosts) => send({ type: 'chat.setSshHosts', chatId: chat.id, hosts })}
-          inherited={{
-            from: above.some((c) => c.sshHosts !== undefined) ? `its ${CHAT_NOUN.one}` : 'Settings',
-            own: chat.sshHosts !== undefined,
-            reset: () => send({ type: 'chat.setSshHosts', chatId: chat.id }),
-          }}
+          onChange={(hosts) => send({ type: 'chat.setSshHosts', chatId: chat.id, ...(hosts.length && { hosts }) })}
+          inherited={[
+            ...above.flatMap((c) => (c.sshHosts ?? []).map((entry) => ({ entry, from: `its ${CHAT_NOUN.one}` }))),
+            ...sshHostsOf(workFolder).map((entry) => ({ entry, from: 'Settings' })),
+          ]}
         />
       )}
     </section>
@@ -734,6 +753,42 @@ function WorkFolderRow({ chatId, path, disabled, send, errors }: {
         <TerminalButton chatId={chatId} path={path} what="the work folder" disabled={disabled} send={send} />
       </div>
       <TerminalError chatId={chatId} path={path} errors={errors} />
+    </section>
+  )
+}
+
+export const SETUP_SCRIPT_ABOUT = 'Runs in each new worker worktree before its first message, such as npm ci.'
+
+// A space's setup script for its workers' own worktrees, saved when the field loses focus.
+function SetupScriptRow({ chatId, script, disabled, send }: {
+  chatId: string
+  script: string
+  disabled: boolean
+  send: (m: ClientMessage) => void
+}) {
+  const [draft, setDraft] = useState(script)
+  const [saved, setSaved] = useState(script)
+  if (saved !== script) {
+    setSaved(script)
+    setDraft(script)
+  }
+  return (
+    <section className="flex flex-col gap-4" aria-label="Worker setup script">
+      <h3 className="font-semibold">Worker setup script</h3>
+      <span className="text-xs text-muted">{SETUP_SCRIPT_ABOUT}</span>
+      <textarea
+        className="block w-full resize-y px-8 py-6 font-mono text-xs leading-[1.5] focus:border-accent disabled:text-muted"
+        aria-label="Worker setup script"
+        placeholder="npm ci"
+        rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+        spellCheck={false}
+        value={draft}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== script) send({ type: 'chat.setSetupScript', chatId, ...(draft.trim() && { script: draft }) })
+        }}
+      />
     </section>
   )
 }
@@ -894,6 +949,9 @@ export function ContextPanel(props: ContextPanelProps) {
             send={send}
             errors={props.terminalErrors}
           />
+        )}
+        {shown === 'general' && chat && !chat.parentId && !chat.extension && (
+          <SetupScriptRow chatId={chatId} script={chat.setupScript ?? ''} disabled={locked} send={send} />
         )}
         {shown === 'general' && chat && (
           <Permissions chat={chat} above={above} workFolder={workFolder} disabled={locked} send={send} />

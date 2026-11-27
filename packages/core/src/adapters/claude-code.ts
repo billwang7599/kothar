@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { type AccountStatus, type Adapter, type EngineToolSpec, type Machine, type Question, type Sandbox, type ThinkingLevel, type ToolKind } from '../shared.ts'
+import { type AccountStatus, type Adapter, type EngineToolSpec, type Machine, type Question, type Sandbox, type ThinkingLevel, type ToolKind, type Usage } from '../shared.ts'
+import { usageByModel } from '../usage.ts'
 import { onJsonLines } from './jsonl.ts'
 import { processUserEnv, type UserEnv } from './user-env.ts'
 import { type EngineErrors, withKind } from './error-kind.ts'
@@ -11,6 +12,43 @@ import { withImages } from './tool-images.ts'
 export const CLAUDE_ERRORS: EngineErrors = {
   network: /unable to connect to api(?!: ssl)/i,
   notLimit: /temporarily limiting requests|not your usage limit/i,
+}
+
+// One model's usage in a result's modelUsage or model_usage_since_last_result (2.1), in Kothar's words. Its
+// inputTokens leave out cache reads and writes, as Kothar's do.
+const usageOfModel = (u: any): Usage => ({
+  inputTokens: u?.inputTokens,
+  outputTokens: u?.outputTokens,
+  cacheReadTokens: u?.cacheReadInputTokens,
+  cacheWriteTokens: u?.cacheCreationInputTokens,
+  costUsd: u?.costUSD,
+})
+
+const isRecord = (value: unknown): value is Record<string, any> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/**
+ * What a result's model calls used, one entry per model. Claude Code's model_usage_since_last_result covers the calls
+ * since its previous result; without it (older versions), the change in modelUsage since `seen` (the running totals of
+ * the session, by model), which this updates. A one-shot call passes a new map.
+ */
+export function claudeUsage(result: any, seen: Map<string, Usage>): Usage[] {
+  const totals = isRecord(result?.modelUsage) ? result.modelUsage : {}
+  const since = isRecord(result?.model_usage_since_last_result) ? result.model_usage_since_last_result : undefined
+  const changes: [string, Usage][] = []
+  for (const [model, raw] of Object.entries(totals)) {
+    const now = usageOfModel(raw)
+    const before = seen.get(model) ?? {}
+    seen.set(model, now)
+    if (since) continue
+    const delta: Usage = {}
+    for (const field of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'costUsd'] as const) {
+      if (typeof now[field] === 'number') delta[field] = now[field] - (before[field] ?? 0)
+    }
+    changes.push([model, delta])
+  }
+  const entries: [string, Usage][] = since ? Object.entries(since).map(([model, raw]) => [model, usageOfModel(raw)]) : changes
+  return usageByModel(entries, (usage) => usage)
 }
 
 const KINDS: Record<string, ToolKind> = {
@@ -277,7 +315,7 @@ export function createClaudeCode(user: UserEnv = processUserEnv()): Adapter {
       apiKeys: true,
     },
 
-    async complete(machine, { cwd, system, prompt, schema, model, timeoutMs, accountDir, apiKey, sandbox }) {
+    async complete(machine, { cwd, system, prompt, schema, model, timeoutMs, accountDir, apiKey, sandbox, onUsage }) {
       const args = ['-p', ...CLEAN_ARGS, '--tools', '', '--output-format', 'json', '--model', model]
       args.push('--system-prompt', system)
       if (schema) args.push('--json-schema', JSON.stringify(schema))
@@ -295,6 +333,7 @@ export function createClaudeCode(user: UserEnv = processUserEnv()): Adapter {
       try {
         reply = JSON.parse(stdout)
       } catch {}
+      for (const usage of claudeUsage(reply, new Map())) onUsage?.(usage)
       if (code !== 0 || !reply || reply.is_error) {
         throw new Error(reply?.result || stderr.trim() || `Claude Code exited with code ${code}`)
       }
@@ -372,6 +411,8 @@ export function createClaudeCode(user: UserEnv = processUserEnv()): Adapter {
       // Steered messages written mid-turn and not yet taken in: Kothar's id by the uuid Claude Code knows, oldest first.
       const steers = new Map<string, string>()
       let cancelCount = 0
+      // The session's usage so far by model (modelUsage), for Claude Code versions whose results carry only totals.
+      const usageSeen = new Map<string, Usage>()
       const land = (uuid: unknown) => {
         const id = typeof uuid === 'string' ? steers.get(uuid) : undefined
         if (id === undefined) return
@@ -495,6 +536,7 @@ export function createClaudeCode(user: UserEnv = processUserEnv()): Adapter {
                 : undefined
             interrupted = false
             returnSteers()
+            for (const usage of claudeUsage(msg, usageSeen)) emit({ type: 'turn.usage', usage })
             emit({ type: 'turn.completed', ...withKind(error, CLAUDE_ERRORS) })
           }
         }

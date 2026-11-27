@@ -128,7 +128,7 @@ describe('turnOptions', () => {
   })
 
   it('runs the turn on its role’s list when that has models, without changing the chat’s engine', async () => {
-    const t = await start({ turnOptions: () => ({ role: 'planning' }) })
+    const t = await start({ modelRoles: [{ id: 'planning', label: 'Planning' }], turnOptions: () => ({ role: 'planning' }) })
     t.handle({ type: 'models.setList', role: 'chat', models: [{ engine: 'alpha', model: 'fake-small' }] })
     t.handle({ type: 'models.setList', role: 'planning', models: [{ engine: 'beta', model: 'fake-large' }] })
     await t.send()
@@ -137,8 +137,18 @@ describe('turnOptions', () => {
   })
 
   it('runs on the chat’s own model when the role’s list is empty', async () => {
-    const t = await start({ turnOptions: () => ({ role: 'planning' }) })
+    const t = await start({ modelRoles: [{ id: 'planning', label: 'Planning' }], turnOptions: () => ({ role: 'planning' }) })
     t.handle({ type: 'models.setList', role: 'chat', models: [{ engine: 'alpha', model: 'fake-small' }] })
+    await t.send()
+    expect(t.started.at(-1)).toMatchObject({ engine: 'alpha', options: { model: 'fake-small' } })
+  })
+  it('refuses a role no extension that’s on declares: its error shows and the turn runs as usual', async () => {
+    const t = await start(
+      { turnOptions: () => ({ role: 'searching' }) },
+      { enabledByDefault: false, modelRoles: [{ id: 'searching', label: 'Searching' }] },
+    )
+    t.handle({ type: 'models.setList', role: 'chat', models: [{ engine: 'alpha', model: 'fake-small' }] })
+    t.handle({ type: 'models.setList', role: 'searching', models: [{ engine: 'beta', model: 'fake-large' }] })
     await t.send()
     expect(t.started.at(-1)).toMatchObject({ engine: 'alpha', options: { model: 'fake-small' } })
   })

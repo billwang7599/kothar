@@ -2,8 +2,6 @@ import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import type { ExtensionManifest, ExtensionUse } from '@kothar/extension-api'
-import { moveCommunityDir } from './vocab-move.ts'
-import { garageHolder } from './garage-lock.ts'
 import {
   checkCatalog,
   checkExtensionManifest,
@@ -54,9 +52,6 @@ export type CommunityInstall = { manifest: ExtensionManifest; item: InstalledIte
 // The community extensions installed in the garage: each <garage>/community/<id>/ with a valid manifest.json, its
 // main.mjs and installed.json. Folders that don't pass are skipped and left on disk.
 export function installedExtensions(garage: string): CommunityInstall[] {
-  // Moving folders is for the core that holds the garage; one reading it before (or without) the lock leaves them.
-  const holder = garageHolder(garage)
-  if (holder === undefined || holder === process.pid) moveCommunityDir(garage)
   const root = communityDir(garage)
   if (!existsSync(root)) return []
   return readdirSync(root)

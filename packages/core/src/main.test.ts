@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { createFakeAdapter } from './adapters/fake.ts'
-import { envVar, startCore } from './main.ts'
+import { defaultGarage, envVar, registeredAdapters, startCore } from './main.ts'
 import { BAD_TOKEN_CLOSE_CODE, type Adapter, type CoreMessage } from './shared.ts'
 import { until } from './test-wait.ts'
 
@@ -37,21 +37,20 @@ function firstMessage(origin: string, token: string) {
   })
 }
 
-it('reads each KOTHAR_ variable, falling back to its HOTROD_ name', () => {
-  expect(envVar({ HOTROD_GARAGE: '/old' }, 'GARAGE')).toBe('/old')
-  expect(envVar({ KOTHAR_GARAGE: '/new', HOTROD_GARAGE: '/old' }, 'GARAGE')).toBe('/new')
-  expect(envVar({}, 'GARAGE')).toBeUndefined()
+it('reads KOTHAR_ variables only', () => {
+  expect(envVar({ KOTHAR_GARAGE: '/new' }, 'GARAGE')).toBe('/new')
+  expect(envVar({ HOTROD_GARAGE: '/old' }, 'GARAGE')).toBeUndefined()
 })
 
-it('starts from HOTROD_ variables set before the rename', async () => {
-  const garage = tempDir()
-  const env = { HOTROD_ENGINE: 'fake', HOTROD_GARAGE: garage, HOTROD_PORT: String(port), HOTROD_TOKEN: 'old-token' }
-  const kothar = await startCore({ env, adapters })
-  cleanups.push(() => kothar.close(true))
-  expect(kothar.garage).toBe(garage)
-  expect(kothar.port).toBe(port)
-  expect(kothar.token).toBe('old-token')
-  expect(kothar.core.engines().find((e) => e.id === 'fake')?.enabled).toBe(true)
+it('offers the fake engine only in development and tests', () => {
+  const ids = (env: Record<string, string>) => registeredAdapters(env).map((a) => a.id)
+  expect(ids({})).not.toContain('fake')
+  expect(ids({ KOTHAR_DEV: '1' })).toContain('fake')
+  expect(ids({ KOTHAR_ENGINE: 'fake' })).toContain('fake')
+})
+
+it('keeps the garage in Application Support/Kothar', () => {
+  expect(defaultGarage('/Users/someone')).toBe('/Users/someone/Library/Application Support/Kothar')
 })
 
 it('starts the core from the environment and stops it', async () => {

@@ -21,15 +21,22 @@ export const CHECKOUT_RULES =
   'Each git folder in your context is checked out in your work folder on a branch of its own, from its last ' +
   "commit, so changes the user hasn't committed aren't in it. Work and commit in the checkout:"
 
+export const WORKER_CHECKOUT_RULES =
+  'These checkouts are your own, made for this task from the space\'s branch: no other chat edits them, and your ' +
+  "changes aren't in the space's branch until they're reviewed and merged after your report. Commit your work there " +
+  "with clear messages; anything left uncommitted is committed for you when it's merged."
+
 export const NO_COMMITS_RULES =
   "These git folders have no commits yet, so Kothar hasn't checked them out: use them as the folder modes below " +
   'say. Each is checked out in your work folder from the first message after its first commit:'
 
 export const IMAGE_RULES =
-  'To show the user an image, such as a chart, screenshot or render you made, write ![caption](/absolute/path.png) ' +
-  'in your reply: Kothar shows it in the chat. It must be a file in your folders.'
+  'To show the user an image, such as a chart, screenshot or render you made, write ![caption](</absolute/path.png>) ' +
+  'in your reply, with the path in angle brackets so spaces in it work: Kothar shows it in the chat. It must be a ' +
+  'file in your folders.'
 
-export type InstructionCheckout = { folder: string; path: string; branch: string }
+// own: a worker's own worktree (worker-checkouts.ts), not the space's.
+export type InstructionCheckout = { folder: string; path: string; branch: string; own?: boolean }
 
 export type InstructionParts = {
   // An extension's own chat (Home) gets its extension's role instructions first.
@@ -88,7 +95,16 @@ export const instructionSections = (parts: InstructionParts): InstructionSection
     ...(role ? [from(parts.sources?.role, 'Role of this chat', role)] : []),
     ...(workDir !== undefined ? [core('Where you can write', `${WRITE_RULES}\nYour work folder: ${workDir}\n${BROWSER_LAUNCH_RULES}`)] : []),
     ...(checkouts.length
-      ? [core('Git checkouts', [CHECKOUT_RULES, ...checkouts.map((c) => `- ${c.folder}: ${c.path} (branch ${c.branch})`)].join('\n'))]
+      ? [
+          core(
+            'Git checkouts',
+            [
+              CHECKOUT_RULES,
+              ...checkouts.map((c) => `- ${c.folder}: ${c.path} (branch ${c.branch})`),
+              ...(checkouts.some((c) => c.own) ? [WORKER_CHECKOUT_RULES] : []),
+            ].join('\n'),
+          ),
+        ]
       : []),
     ...(folders.some((f) => f.unborn)
       ? [core('Git folders without commits', [NO_COMMITS_RULES, ...folders.flatMap((f) => (f.unborn ? [`- ${f.path}`] : []))].join('\n'))]

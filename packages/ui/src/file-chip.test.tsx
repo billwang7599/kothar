@@ -99,13 +99,46 @@ test('on a file chip, the size under the buttons never takes their clicks, and h
   expect(actions.classList).toContain('group-focus-within/file:pointer-events-auto')
 })
 
-test('on an image, the hidden overlay takes no clicks until shown, and its buttons work', () => {
+test('clicking an image opens it full size; its only hover action adds it to the context', () => {
   render(image)
-  const overlay = button(`Open ${image.name}`).parentElement!
+  expect(button(`Open ${image.name}`)).toBeNull()
+  expect(button(`Pin ${image.name}`)).toBeNull()
+  const add = button(`Add to context: ${image.name}`)
+  expect(add.textContent).toBe('Add to context')
+  const overlay = add.closest('span.absolute')!
   expect(overlay.classList).toContain('pointer-events-none')
   expect(overlay.classList).toContain('group-hover/file:pointer-events-auto')
-  act(() => button(`Pin ${image.name}`).click())
+  act(() => add.click())
   expect(sent).toEqual([{ type: 'context.add', chatId: 'space', section: 'files', path: image.path }])
-  act(() => button(`Open ${image.name}`).click())
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+
+  const thumbnail = button(`Open ${image.name} full size`)
+  expect(thumbnail.classList).toContain('cursor-zoom-in')
+  act(() => thumbnail.click())
   expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe(image.name)
+  expect(document.querySelector('[role="dialog"] img')?.getAttribute('src')).toBe(thumbnail.querySelector('img')!.getAttribute('src'))
+})
+
+test('a pinned image offers Remove from context, on hover and in the full-size view', () => {
+  render(image, [{ section: 'files', path: image.path, from: 'space', enabled: true, text: '' }])
+  expect(document.querySelector('[aria-label="Pinned to the context"]')).not.toBeNull()
+  act(() => button(`Remove from context: ${image.name}`).click())
+  expect(sent).toEqual([{ type: 'context.remove', chatId: 'space', section: 'files', path: image.path }])
+  sent = []
+  act(() => button(`Open ${image.name} full size`).click())
+  const inDialog = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
+    (b) => b.textContent === 'Remove from context',
+  )!
+  act(() => inDialog.click())
+  expect(sent).toEqual([{ type: 'context.remove', chatId: 'space', section: 'files', path: image.path }])
+})
+
+test('Escape closes an image opened full size', () => {
+  render(image)
+  act(() => button(`Open ${image.name} full size`).click())
+  act(() => {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  })
+  // Closed, and fading out: jsdom never ends the exit animation.
+  expect(document.querySelector('[role="dialog"]')?.getAttribute('data-state') ?? 'closed').toBe('closed')
 })
