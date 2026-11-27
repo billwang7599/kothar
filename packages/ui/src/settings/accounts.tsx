@@ -49,7 +49,7 @@ export function EngineAccountsSection({ accounts, connected, send }: EngineAccou
   )
 
   return (
-    <section className="flex flex-col not-first:pt-24" aria-label={`${id} accounts`}>
+    <section id={`accounts-${id}`} className="flex flex-col not-first:pt-24" aria-label={`${id} accounts`}>
       <h3 className="pb-8 font-mono font-semibold">{id}</h3>
       <div className={GROUP}>
         {listed.accounts.map((a) => (

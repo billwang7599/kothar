@@ -88,6 +88,7 @@ export type ProtocolDeps = {
 
   // Settings
   setEngineEnabled: (engine: string, enabled: boolean) => void
+  detectEngines: () => Promise<void>
   acpAgents: { save: (agent: unknown) => Promise<unknown>; remove: (engine: string) => void }
   setWorkFolder: (path: unknown) => void
   setPermissionDefault: (name: unknown, enabled: boolean) => void
@@ -316,6 +317,7 @@ export function openProtocol(deps: ProtocolDeps) {
 
     // Settings
     'engine.setEnabled': (message) => deps.setEngineEnabled(String(message.engine), message.enabled === true),
+    'engines.detect': () => deps.detectEngines(),
     'acpAgent.save': async (message) => {
       await deps.acpAgents.save(message.agent)
     },

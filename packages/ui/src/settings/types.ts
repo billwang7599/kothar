@@ -32,6 +32,8 @@ export type PageProps = {
   corePrompts?: PromptInfo[]
   workFolder: WorkFolder
   chooseWorkFolder: () => void
+  // Opens Get started (get-started.tsx) over Settings.
+  openGetStarted?: () => void
   connected: boolean
   send: (m: ClientMessage) => void
   // Installed themes and the marketplace's catalog.

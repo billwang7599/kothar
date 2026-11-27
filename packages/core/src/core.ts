@@ -235,9 +235,17 @@ function assembleCore(options: {
   const isEnabled = (engine: string) => settings.engines[engine] === true
   const engineInfo = (id: string): EngineInfo => {
     const status = detected.get(id) ?? { installed: false, signedIn: false }
-    const { name, steering } = adapterFor(id) ?? {}
+    const { name, steering, install } = adapterFor(id) ?? {}
     const acp = acpAgents.agentOf(id)
-    return { id, ...(name && { name }), enabled: isEnabled(id), ...status, ...(steering && { steering }), ...(acp && { acp }) }
+    return {
+      id,
+      ...(name && { name }),
+      enabled: isEnabled(id),
+      ...status,
+      ...(steering && { steering }),
+      ...(acp && { acp }),
+      ...(install && { install }),
+    }
   }
   const engineInfos = () => adapters.map((adapter) => engineInfo(adapter.id))
   const detectEngine = async (adapter: Adapter) => {
@@ -268,6 +276,12 @@ function assembleCore(options: {
     engineInfos,
     broadcast: (message) => broadcast(message),
   })
+  // Every engine detected again, for Check again in Get started.
+  const detectEngines = async () => {
+    await Promise.all(adapters.map(detectEngine))
+    models.settle()
+    followModels()
+  }
   const listeners: ((message: CoreMessage) => void)[] = []
   const broadcast = (message: CoreMessage) => listeners.forEach((listener) => listener(message))
   // Every window hears what's installed now, and the themes it can show.
@@ -1354,6 +1368,7 @@ function assembleCore(options: {
     writeInstructions,
     setContextDefault,
     setEngineEnabled,
+    detectEngines,
     acpAgents,
     setWorkFolder,
     setPermissionDefault,
@@ -1410,10 +1425,8 @@ function assembleCore(options: {
   return {
     engines: engineInfos,
     async refreshEngines() {
-      await Promise.all(adapters.map(detectEngine))
+      await detectEngines()
       enginesDetected = true
-      models.settle()
-      followModels()
       startExtensions()
     },
     setEngineEnabled,

@@ -2,20 +2,27 @@
 // then each engine's built-in tools.
 import { useState } from 'react'
 import type { EngineInfo } from '@kothar/core/shared'
-import { GROUP, Switch } from '../controls.tsx'
+import { Button, GROUP, Switch } from '../controls.tsx'
 import { engineProblem } from '../state.ts'
 import { AcpAgentActions, AcpAgentForm, AddAcpAgent } from './acp-agents.tsx'
 import { EngineToolsMaster, EngineToolsSections } from './engine-tools.tsx'
 import { SettingRow } from './rows.tsx'
 import type { PageProps } from './types.ts'
 
-type Props = Pick<PageProps, 'engines' | 'engineTools' | 'connected' | 'send'>
+type Props = Pick<PageProps, 'engines' | 'engineTools' | 'connected' | 'send' | 'openGetStarted'>
 
-export function EnginesPage({ engines, engineTools, connected, send }: Props) {
+export function EnginesPage({ engines, engineTools, connected, send, openGetStarted }: Props) {
   // The added agent whose form is open.
   const [editing, setEditing] = useState<string>()
   return (
     <>
+      {openGetStarted && (
+        <div className={`${GROUP} mb-16`}>
+          <SettingRow name="Get started" description="Install and sign in to an engine, then make your first space.">
+            <Button onClick={openGetStarted}>Open…</Button>
+          </SettingRow>
+        </div>
+      )}
       <EngineToolsMaster settings={engineTools} connected={connected} send={send} />
       <div className={GROUP}>
         {engines.map((engine) => (

@@ -376,6 +376,7 @@ export function createOpencode(user: UserEnv = processUserEnv()): Adapter {
   return {
     id: 'opencode',
     name: 'OpenCode',
+    install: 'npm install -g opencode-ai',
     imageInput: true,
     kotharMcp: true,
     tools: OPENCODE_TOOLS,

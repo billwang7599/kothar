@@ -181,7 +181,7 @@ export function AddAcpAgent({ connected, send }: Omit<FormProps, 'agent' | 'done
   const [open, setOpen] = useState(false)
   if (open) return <AcpAgentForm connected={connected} send={send} done={() => setOpen(false)} />
   return (
-    <div className="flex">
+    <div id="add-acp-agent" className="flex">
       <Hint text={ACP_ABOUT}>
         <Button size="small" disabled={!connected} onClick={() => setOpen(true)}>
           Add ACP agent

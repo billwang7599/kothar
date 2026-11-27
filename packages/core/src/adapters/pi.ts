@@ -129,6 +129,7 @@ export function createPi(user: UserEnv = processUserEnv()): Adapter {
   return {
     id: 'pi',
     name: 'pi',
+    install: 'npm install -g @mariozechner/pi-coding-agent',
     imageInput: true,
     kotharMcp: true,
     steering: true,

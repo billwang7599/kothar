@@ -24,8 +24,14 @@ const PAGES = [
     group: 'Options',
     title: 'Engines',
     intro: 'Kothar only starts the engines you turn on here, and gives each the built-in tools you leave on.',
-    body: ({ engines, engineTools, connected, send }: PageProps) => (
-      <EnginesPage engines={engines} engineTools={engineTools} connected={connected} send={send} />
+    body: ({ engines, engineTools, connected, send, openGetStarted }: PageProps) => (
+      <EnginesPage
+        engines={engines}
+        engineTools={engineTools}
+        connected={connected}
+        send={send}
+        openGetStarted={openGetStarted}
+      />
     ),
   },
   {

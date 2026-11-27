@@ -11,6 +11,7 @@ import { Button, CHAT_NOUN, ConfirmDialog, MOTION, PanelToggle, SidePanel, Toast
 import { SettingsDialog, type SettingsPage } from './settings.tsx'
 import { WorkFolderDialog } from './settings/work-folder.tsx'
 import { MarketplaceDialog } from './marketplace.tsx'
+import { dismissGetStarted, getStartedDismissed, GetStartedDialog, setUpDone } from './get-started.tsx'
 import { ResizeHandle, usePanelWidths } from './panel-width.tsx'
 import { ChatNav, NameDialog, SidebarFooter, type NameRequest } from './sidebar.tsx'
 import { nthSpace, stepSpace } from './nav.ts'
@@ -259,6 +260,23 @@ function App() {
   const [searching, setSearching] = useState(false)
   const [marketplace, setMarketplace] = useState(false)
   const openMarketplace = useCallback(() => setMarketplace(true), [])
+  // Get started opens by itself once per window, as soon as there's a work folder, until it's done or closed.
+  const [getStarted, setGetStarted] = useState(false)
+  const [getStartedAsked, setGetStartedAsked] = useState(false)
+  if (!getStartedAsked && state.loaded && state.workFolder.path) {
+    setGetStartedAsked(true)
+    if (!getStartedDismissed() && !setUpDone(state.engines, state.accounts, state.chats)) setGetStarted(true)
+  }
+  const openGetStarted = useCallback(() => setGetStarted(true), [])
+  const closeGetStarted = useCallback(() => {
+    dismissGetStarted()
+    setGetStarted(false)
+  }, [])
+  // The New space flow: the folder picker in the desktop app, else the name dialog.
+  const newSpace = useCallback(() => {
+    if (window.kothar) void newChatFromFolder()
+    else setNameRequest({ kind: 'new' })
+  }, [newChatFromFolder])
   const goTo = (chatId: string | undefined) => chatId && select(chatId)
   // The chats opened, newest first, for Last chat (Ctrl+Tab).
   const recentRef = useRef<string[]>([])
@@ -288,9 +306,10 @@ function App() {
     settings: () => openSettings(),
     search: () => setSearching((open) => !open),
     marketplace: () => setMarketplace((open) => !open),
-    ...panelShortcuts({ covered: settingsOpen || marketplace, chatOpen: !!selected, toggleSidebar, toggleContext }),
+    getStarted: openGetStarted,
+    ...panelShortcuts({ covered: settingsOpen || marketplace || getStarted, chatOpen: !!selected, toggleSidebar, toggleContext }),
     ...(window.kothar && { newSpaceFromFolder: () => void newChatFromFolder() }),
-    ...(!settingsOpen && !marketplace && panelKeys),
+    ...(!settingsOpen && !marketplace && !getStarted && panelKeys),
   }
   useShortcuts(shortcuts)
   const keys = useBindings()
@@ -395,6 +414,7 @@ function App() {
               corePrompts={state.corePrompts}
               workFolder={state.workFolder}
               chooseWorkFolder={() => setChangingWorkFolder(true)}
+              openGetStarted={openGetStarted}
               market={market}
               communityExtensions={communityExtensions}
               restart={state.restart}
@@ -476,6 +496,18 @@ function App() {
               ))}
             </AnimatePresence>
           </div>
+          <GetStartedDialog
+            open={getStarted && !firstRun}
+            close={closeGetStarted}
+            engines={state.engines}
+            accounts={state.accounts}
+            chats={state.chats}
+            connected={connected}
+            send={send}
+            openSettings={openSettingsLink}
+            newSpace={newSpace}
+            openMarketplace={openMarketplace}
+          />
           <MarketplaceDialog
             open={marketplace}
             close={() => setMarketplace(false)}

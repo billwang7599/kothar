@@ -53,6 +53,7 @@ const actions: ShortcutAction[] = [
   { id: 'toggleSidebar', label: 'Show or hide the sidebar', defaultKeys: 'Mod+[', menu: true },
   { id: 'toggleContextPanel', label: 'Show or hide the context panel', defaultKeys: 'Mod+]', menu: true },
   { id: 'marketplace', label: 'Marketplace', defaultKeys: null },
+  { id: 'getStarted', label: 'Get started', defaultKeys: null },
 ]
 
 const listeners = new Set<() => void>()
