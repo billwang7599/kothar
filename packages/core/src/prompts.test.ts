@@ -76,7 +76,7 @@ describe('sections of what is sent', () => {
       ['core', 'Where you can write', undefined],
       ['core', 'Git checkouts', undefined],
       ['core', 'Folder modes', undefined],
-      ['core', 'Showing images', undefined],
+      ['core', 'Showing files', undefined],
       ['core', 'What you can use', undefined],
       ['extension', 'Instructions', 'one'],
       ['extension', 'Instructions', 'two'],

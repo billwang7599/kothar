@@ -6,7 +6,7 @@ import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { ClientMessage } from '@kothar/core/shared'
 import { editorLabel, FileLinks, fileLinksChecked, forgetFileLinks, NoFileLinks } from './file-links.tsx'
-import { codeRef, fileRefsIn, looksLikePath } from './file-refs.ts'
+import { codeRef, fileRefsIn, localLinkOf, looksLikePath } from './file-refs.ts'
 import { UserText } from './lists.tsx'
 import { Markdown } from './markdown.tsx'
 
@@ -39,6 +39,15 @@ describe('finding paths', () => {
     expect(codeRef('cat src/a.ts')).toBeNull()
     expect(codeRef('npm run lint')).toBeNull()
     expect(codeRef('a.b()')).toBeNull()
+  })
+
+  test("reads a Markdown link's destination as a file, but never a web address or an anchor", () => {
+    expect(localLinkOf('/Users/me/My%20Notes/report.pdf')).toEqual({ path: '/Users/me/My Notes/report.pdf' })
+    expect(localLinkOf('file:///Users/me/a%20b/shot.png')).toEqual({ path: '/Users/me/a b/shot.png' })
+    expect(localLinkOf('~/notes/todo.md')).toEqual({ path: '~/notes/todo.md' })
+    expect(localLinkOf('docs/a.md')).toEqual({ path: 'docs/a.md' })
+    for (const href of ['https://x.dev/a.md', 'mailto:a@b.c', '#top', '//x.dev/a.md', 'file://host/a.md', 'javascript:alert(1)'])
+      expect(localLinkOf(href)).toBeNull()
   })
 
   test('names what a click opens with', () => {
@@ -124,6 +133,20 @@ describe('links', () => {
     expect(sent[0]).toEqual({ type: 'files.check', chatId: 'c1', paths: ['src/a.ts', 'src/b.ts'] })
     answer({ 'src/a.ts': '/w/src/a.ts', 'src/b.ts': '/w/src/b.ts' })
     expect(links().map((l) => l.textContent)).toEqual(['src/a.ts', 'src/b.ts:3'])
+  })
+
+  test('a Markdown link to a local file, spaces in angle brackets, becomes a file link that opens it', () => {
+    const path = '/Users/me/Library/Application Support/Kothar/work/x/report final.md'
+    render(<Markdown className="a" text={`Saved [the report](<${path}>) and [the site](https://x.dev).`} />)
+    expect(sent).toEqual([{ type: 'files.check', chatId: 'c1', paths: [path] }])
+    // Until the core finds it, just its text: no link to the window's own origin.
+    expect(host.querySelector(`a[href*="Users"]`)).toBeNull()
+    expect(host.textContent).toContain('the report')
+    answer({ [path]: path })
+    expect(links().map((l) => [l.dataset.fileLink, l.textContent])).toEqual([[path, 'the report']])
+    expect(host.querySelector('a[href="https://x.dev"]')).not.toBeNull()
+    act(() => links()[0]!.click())
+    expect(sent.at(-1)).toEqual({ type: 'file.open', chatId: 'c1', path, in: 'editor' })
   })
 
   test('text still typing out asks nothing and links nothing', () => {

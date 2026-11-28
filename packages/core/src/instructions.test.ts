@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BROWSER_LAUNCH_RULES, buildInstructions, CHECKOUT_RULES, contextTextOf, FOLDER_RULES, type InstructionParts, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
+import { BROWSER_LAUNCH_RULES, buildInstructions, CHECKOUT_RULES, contextTextOf, FILE_RULES, FOLDER_RULES, type InstructionParts, NO_COMMITS_RULES, WRITE_RULES } from './instructions.ts'
 import type { ContextItem } from './shared.ts'
 
 const item = (section: ContextItem['section'], path: string, text: string, more: Partial<ContextItem> = {}): ContextItem => ({
@@ -40,6 +40,7 @@ describe('buildInstructions', () => {
       `${CHECKOUT_RULES}\n- /code/a: /work/space/a (branch space/a)\n- /code/b: /work/space/b (branch space/b)`,
       `${FOLDER_RULES}\n- /docs: Edit in place. Write in it directly.\n- /ref: Read only.\n` +
         "- /garage/x: Read only, since it holds Kothar's own data.",
+      FILE_RULES,
       'EXTENSION ONE',
       'EXTENSION TWO',
       'WORKERS',
@@ -64,17 +65,27 @@ describe('buildInstructions', () => {
     expect(instructions.split('\n\n')).toEqual([
       `${NO_COMMITS_RULES}\n- /new`,
       `${FOLDER_RULES}\n- /new: Edit in place. Write in it directly.\n- /docs: Read only.`,
+      FILE_RULES,
     ])
   })
 
   it('leaves out what is absent', () => {
-    expect(buildInstructions(EMPTY)).toBe('')
-    expect(buildInstructions({ ...EMPTY, role: '', parentView: '', setup: { name: 'Plain' } })).toBe('')
-    expect(buildInstructions({ ...EMPTY, items: [item('agents', '/c/AGENTS.md', 'RULES')] })).toBe('RULES')
+    expect(buildInstructions(EMPTY)).toBe(FILE_RULES)
+    expect(buildInstructions({ ...EMPTY, role: '', parentView: '', setup: { name: 'Plain' } })).toBe(FILE_RULES)
+    expect(buildInstructions({ ...EMPTY, items: [item('agents', '/c/AGENTS.md', 'RULES')] })).toBe(`${FILE_RULES}\n\nRULES`)
   })
 
   it('keeps the workers instructions even when empty, as before', () => {
-    expect(buildInstructions({ ...EMPTY, workers: '', memory: ['MEMORY'] })).toBe('\n\nMEMORY')
+    expect(buildInstructions({ ...EMPTY, workers: '', memory: ['MEMORY'] })).toBe(`${FILE_RULES}\n\n\n\nMEMORY`)
+  })
+
+  it('tells every session, with Kothar tools or not, to link the files it makes and show its images', () => {
+    expect(FILE_RULES).toContain('[name](</absolute/path>)')
+    expect(FILE_RULES).toContain('![caption](</absolute/path.png>)')
+    expect(FILE_RULES).toContain('in your folders')
+    expect(buildInstructions(EMPTY)).toContain(FILE_RULES)
+    const withTools = buildInstructions({ ...EMPTY, toolbox: 'TOOLBOX' }).split('\n\n')
+    expect(withTools).toEqual([FILE_RULES, 'TOOLBOX'])
   })
 })
 

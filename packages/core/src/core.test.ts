@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeAdapter, FAKE_DEFAULTS, FAKE_MODELS, FAKE_THINKING, type FakeStep } from './adapters/fake.ts'
 import { sandboxingMachine } from './adapters/test-machine.ts'
 import { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
+import { FILE_RULES } from './instructions.ts'
 import { LOCK_FILE } from './garage-lock.ts'
 import { CUT_OFF_BY_RESTART } from './chat-lifecycle.ts'
 import { QUEUE_FILE } from './queue-store.ts'
@@ -191,7 +192,7 @@ const until = (check: () => boolean) => waitUntil(check, { tries: 200 })
 const withoutRules = (instructions = '') =>
   instructions
     .split('\n\n')
-    .filter((part) => !part.startsWith(WRITE_RULES) && !part.startsWith(FOLDER_RULES))
+    .filter((part) => !part.startsWith(WRITE_RULES) && !part.startsWith(FOLDER_RULES) && part !== FILE_RULES)
     .join('\n\n')
 const chatOf = (core: Core, id: string) => core.chats().find((c) => c.id === id)
 const statusOf = (core: Core, id: string) => core.chats().find((p) => p.id === id)?.status
@@ -3083,7 +3084,7 @@ describe('history', () => {
     expect(prompt.length).toBeLessThan(WINDOW_MAX_CHARS + 500)
     expect(prompt).not.toMatch(/^\d+\+\d+\|/m)
     expect(prompt.endsWith('New message from the user:\n\nnext')).toBe(true)
-    expect(t.calls[0]?.options.instructions).toBe([MAIN.instructions, rulesOf(t, 'home')].join('\n\n'))
+    expect(t.calls[0]?.options.instructions).toBe([MAIN.instructions, rulesOf(t, 'home'), FILE_RULES].join('\n\n'))
     expect(readFileSync(join(garage, 'chats', 'main', 'summaries.jsonl'), 'utf8')).toBe(
       '{"id":0,"n":1,"text":"old","at":"x"}\n',
     )
@@ -3113,7 +3114,7 @@ describe('history', () => {
     await until(() => statusOf(t.core, 'main') === 'idle')
     expect(t.calls[1]?.prompt).toBe('This is the conversation so far:\n\nVIEW OF 2\n\nNew message from the user:\n\ntwo')
     expect(t.calls[1]?.options.instructions).toBe(
-      [MAIN.instructions, rulesOf(t, 'home'), 'READ THE VIEW (false)'].join('\n\n'),
+      [MAIN.instructions, rulesOf(t, 'home'), FILE_RULES, 'READ THE VIEW (false)'].join('\n\n'),
     )
     expect(seen.at(-1)).toEqual({ chat: 'main', count: 2, tools: false })
 
