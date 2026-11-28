@@ -98,6 +98,18 @@ async function start() {
   })
 
   let closing: Promise<void> | undefined
+  // Set by the update notice's Restart: once the engines have stopped, install the downloaded update and relaunch.
+  let installUpdate = false
+  const installAndQuit = () => {
+    // Squirrel.Mac may still be unpacking the update; if it never finishes, quit anyway (it installs next time).
+    setTimeout(() => app.quit(), 60_000).unref()
+    try {
+      electronUpdater.autoUpdater.quitAndInstall()
+    } catch (error) {
+      console.warn('[updates]', error)
+      app.quit()
+    }
+  }
   let closed = false
   let confirming = false
   let forcing = false
@@ -126,7 +138,8 @@ async function start() {
     if (kothar.core.chats().some((c) => c.status !== 'idle')) window.webContents.send('quitting')
     closing = kothar.close().finally(() => {
       closed = true
-      app.quit()
+      if (installUpdate) installAndQuit()
+      else app.quit()
     })
   })
   window.on('close', (event) => {
@@ -147,7 +160,7 @@ async function start() {
   }
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, onSignal)
 
-  const updates = packaged ? startUpdates(window) : undefined
+  const updates = packaged ? startUpdates(window, () => (installUpdate = true)) : undefined
 
   const pickFolder = async (title = 'New space from folder') => {
     const result = await dialog.showOpenDialog(window, { title, properties: ['openDirectory', 'createDirectory'] })
@@ -202,7 +215,7 @@ async function start() {
                 label: app.name,
                 submenu: [
                   { role: 'about' as const },
-                  ...(updates ? [{ label: 'Check for Updates…', click: () => void updates.check(true) }] : []),
+                  ...(updates ? [{ label: 'Check for Updates…', click: () => updates.check(true) }] : []),
                   { type: 'separator' as const },
                   settings,
                   { type: 'separator' as const },
@@ -277,8 +290,9 @@ async function start() {
 
 // The updater (updates.ts), in the packaged app only: an unpackaged run has no app-update.yml, and Squirrel.Mac would
 // refuse an update signed differently from it anyway. Its state goes to the window as 'update-state'; the window's
-// banner and Settings → General call back through the preload (window.kothar.updates).
-function startUpdates(window: BrowserWindow): Updates {
+// notice and Settings → General call back through the preload (window.kothar.updates). Restart quits the normal way
+// (installUpdateOnQuit makes before-quit stop the engines, then install instead of only quitting).
+function startUpdates(window: BrowserWindow, installUpdateOnQuit: () => void): Updates {
   const { autoUpdater } = electronUpdater
   // electron-updater logs every step; the console is where the rest of Kothar's main process logs too.
   autoUpdater.logger = { info: () => {}, warn: (m: unknown) => console.warn('[updates]', m), error: () => {}, debug: () => {} }
@@ -292,33 +306,28 @@ function startUpdates(window: BrowserWindow): Updates {
     current: app.getVersion(),
     prefsFile: join(app.getPath('userData'), 'updates.json'),
     publish: (info) => {
-      if (!window.isDestroyed()) window.webContents.send('update-state', info)
+      if (window.isDestroyed()) return
+      // The menu's Check for Updates… opens the notice; bring the window up so it's seen.
+      if (info.prompt && window.isMinimized()) window.restore()
+      window.webContents.send('update-state', info)
     },
     ask: {
       upToDate: (current) =>
         void show({ type: 'info', message: 'You’re up to date', detail: `Kothar ${current} is the newest version.` }),
       failed: (message) =>
         void show({ type: 'warning', message: 'Couldn’t check for updates', detail: message }),
-      restartNow: async (version) => {
-        const { response } = await show({
-          type: 'info',
-          message: `Kothar ${version} is ready`,
-          detail: 'Restart Kothar to update. Otherwise it updates the next time you quit.',
-          buttons: ['Restart to Update', 'Later'],
-          defaultId: 0,
-          cancelId: 1,
-        })
-        return response === 0
-      },
+    },
+    restart: () => {
+      installUpdateOnQuit()
+      app.quit()
     },
   })
   ipcMain.handle('update-info', () => updates.info())
-  ipcMain.on('update-check', () => void updates.check(true))
+  ipcMain.on('update-check', () => updates.check())
   ipcMain.on('update-download', () => updates.download())
+  ipcMain.on('update-decline', () => updates.decline())
+  ipcMain.on('update-later', () => updates.later())
   ipcMain.on('update-restart', () => updates.restart())
-  ipcMain.on('update-set-auto', (_event, on: unknown) => {
-    if (typeof on === 'boolean') updates.setAutoDownload(on)
-  })
   app.on('will-quit', () => updates.stop())
   updates.start()
   return updates

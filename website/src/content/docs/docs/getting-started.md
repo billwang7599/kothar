@@ -13,9 +13,9 @@ Kothar runs on macOS 13 or later on Apple silicon.
 3. Open Kothar from Applications.
 
 :::note
-Kothar is in early development. Builds are signed and notarized by Apple, and Kothar updates itself: it downloads new
-versions in the background and installs them when you quit or click Restart. (v0.1.0 came before that, so if you have
-it, download the newest release by hand once.) You can also [run it from source](#run-from-source).
+Kothar is in early development. Builds are signed and notarized by Apple. When a new version is out, Kothar asks whether
+to install it, and does only if you click Update. (v0.1.0 came before that, so if you have it, download the newest
+release by hand once.) You can also [run it from source](#run-from-source).
 :::
 
 ## Pick a work folder

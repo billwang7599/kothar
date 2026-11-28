@@ -1,61 +1,80 @@
-// The desktop app's updater, as the window sees it: the banner at the top of the chat pane and the Update automatically
-// switch in Settings → General. The updater itself runs in the desktop shell (packages/desktop/src/updates.ts) and
-// reaches the window through the preload's window.kothar.updates, which only the packaged app has: in a browser tab or
-// an unpackaged desktop run there is no banner and no switch.
+// The desktop app's updates, as the window sees them: the notice at the top of the chat pane and Settings → General →
+// Updates. The updater itself runs in the desktop shell (packages/desktop/src/updates.ts), which decides when the notice
+// shows (at most once per version, never for one the user turned down) and reaches the window through the preload's
+// window.kothar.updates, which only the packaged app has: in a browser tab or an unpackaged desktop run there is no
+// notice and no Updates section. Nothing downloads or installs until the user clicks Update.
 import { useSyncExternalStore } from 'react'
 
 // Mirrors UpdateState and UpdateInfo in packages/desktop/src/updates.ts.
 export type UpdateState =
-  | { status: 'idle' }
+  | { status: 'idle'; checked?: boolean; error?: string }
   | { status: 'checking' }
   | { status: 'available'; version: string }
   | { status: 'downloading'; version: string; percent: number }
   | { status: 'ready'; version: string }
-export type UpdateInfo = { current: string; autoDownload: boolean; state: UpdateState }
+export type UpdateInfo = { current: string; state: UpdateState; prompt: boolean; declined?: string }
 
 export type UpdatesBridge = {
   info(): Promise<UpdateInfo>
   onState(listener: (info: UpdateInfo) => void): () => void
   check(): void
+  /** Update: download, then offer to restart. */
   download(): void
+  /** Not now: hide the notice; this version isn't offered by itself again. */
+  decline(): void
+  /** Restart later: hide the notice; the update installs on the next quit. */
+  later(): void
   restart(): void
-  setAutoDownload(on: boolean): void
 }
 
-/** What the banner says, or null for no banner. A dismissed version stays hidden until a newer one comes, or until it's
- * downloaded (dismissing "available" doesn't hide "ready"). */
-export type UpdateBanner = { text: string; action: 'download' | 'restart' | null; key: string }
+export const releaseNotesUrl = (version: string) => `https://github.com/billwang7599/kothar/releases/tag/v${version}`
 
-export function updateBanner(state: UpdateState | undefined, dismissed: ReadonlySet<string>): UpdateBanner | null {
-  if (!state) return null
-  const banner: UpdateBanner | null =
-    state.status === 'available'
-      ? { text: `Kothar ${state.version} is available.`, action: 'download', key: `available:${state.version}` }
-      : state.status === 'downloading'
-        ? { text: `Downloading Kothar ${state.version}… ${state.percent}%`, action: null, key: `downloading:${state.version}` }
-        : state.status === 'ready'
-          ? { text: `Kothar ${state.version} is ready. Restart to update.`, action: 'restart', key: `ready:${state.version}` }
-          : null
-  if (!banner || dismissed.has(banner.key)) return null
-  // Dismissing the offer also hides its download's progress; the download itself carries on.
-  if (state.status === 'downloading' && dismissed.has(`available:${state.version}`)) return null
-  return banner
+const chats = (n: number) => `${n} running ${n === 1 ? 'chat' : 'chats'}`
+
+/** What the notice says and offers, or null for no notice. running: chats not idle, which a restart stops. */
+export type UpdateNotice = {
+  text: string
+  version: string
+  actions: 'offer' | 'progress' | 'restart'
+  /** Under the text, before Restart: what restarting now does to running chats. */
+  warning?: string
+}
+
+export function updateNotice(info: UpdateInfo | undefined, running = 0): UpdateNotice | null {
+  if (!info?.prompt) return null
+  const { state } = info
+  switch (state.status) {
+    case 'available':
+      return { text: `Kothar ${state.version} is available.`, version: state.version, actions: 'offer' }
+    case 'downloading':
+      return { text: `Downloading Kothar ${state.version}… ${state.percent}%`, version: state.version, actions: 'progress' }
+    case 'ready':
+      return {
+        text: `Kothar ${state.version} is ready. Restart to finish.`,
+        version: state.version,
+        actions: 'restart',
+        ...(running > 0 && { warning: `Restarting stops ${chats(running)}.` }),
+      }
+    default:
+      return null
+  }
 }
 
 /** The Settings row's status line. */
 export function updateStatus(info: UpdateInfo): string {
-  const { state, current } = info
+  const { state } = info
   switch (state.status) {
     case 'checking':
-      return `Kothar ${current}. Checking for updates…`
+      return 'Checking…'
     case 'available':
-      return `Kothar ${current}. Version ${state.version} is available.`
+      return `Kothar ${state.version} is available`
     case 'downloading':
-      return `Kothar ${current}. Downloading ${state.version}…`
+      return `Downloading… ${state.percent}%`
     case 'ready':
-      return `Kothar ${current}. Version ${state.version} installs when you restart.`
+      return 'Ready, restart to finish'
     default:
-      return `Kothar ${current}`
+      if (state.error) return `Couldn’t check: ${state.error}`
+      return state.checked ? 'Up to date' : 'Not checked yet'
   }
 }
 

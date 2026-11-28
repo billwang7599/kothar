@@ -40,8 +40,9 @@ contextBridge.exposeInMainWorld('kothar', {
       },
       check: () => ipcRenderer.send('update-check'),
       download: () => ipcRenderer.send('update-download'),
+      decline: () => ipcRenderer.send('update-decline'),
+      later: () => ipcRenderer.send('update-later'),
       restart: () => ipcRenderer.send('update-restart'),
-      setAutoDownload: (/** @type {boolean} */ on) => ipcRenderer.send('update-set-auto', on),
     },
   }),
 })

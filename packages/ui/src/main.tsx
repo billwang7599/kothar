@@ -33,7 +33,8 @@ import { dockedPanels, MIN_WINDOW_PX, storedColumn } from './layout.ts'
 import { fileLinksChecked } from './file-links.tsx'
 import { receiveCopyChanges } from './folder-copies.tsx'
 import { wantComposerFocus } from './composer-focus.ts'
-import { updateBanner, updatesBridge, useUpdates, type UpdatesBridge } from './updates.ts'
+import { useUpdates, type UpdatesBridge } from './updates.ts'
+import { UpdateNotice } from './update-notice.tsx'
 import './styles.css'
 
 const SELECTED_KEY = 'kothar.selectedChat'
@@ -67,13 +68,13 @@ declare global {
       /** A system notification; clicking it brings the window to the front and calls onOpenChat with open. */
       notify?(notification: { title: string; body: string; open?: string }): void
       onOpenChat?(listener: (chatId: string) => void): () => void
-      /** The auto-updater, only in the packaged app (updates.ts). */
+      /** The updater, only in the packaged app (updates.ts). */
       updates?: UpdatesBridge
     }
   }
 }
 
-const BANNER_TONES = { warning: 'bg-warning-bg text-amber', error: 'bg-error-bg text-red', info: 'bg-panel text-accent' }
+const BANNER_TONES = { warning: 'bg-warning-bg text-amber', error: 'bg-error-bg text-red' }
 
 function Banner({ tone, children, action }: { tone: keyof typeof BANNER_TONES; children: ReactNode; action?: ReactNode }) {
   return (
@@ -317,8 +318,6 @@ function App() {
   const [quitting, setQuitting] = useState(false)
   useEffect(() => window.kothar?.onQuitting(() => setQuitting(true)), [])
   const updates = useUpdates()
-  const [dismissedUpdates, setDismissedUpdates] = useState<ReadonlySet<string>>(() => new Set())
-  const update = quitting ? null : updateBanner(updates?.state, dismissedUpdates)
   const reduceMotion = useReducedMotion()
 
   return (
@@ -378,33 +377,7 @@ function App() {
                 Stopping engines…
               </Banner>
             )}
-            {update && (
-              <Banner
-                tone="info"
-                action={
-                  <>
-                    {update.action && (
-                      <Button
-                        variant="primary"
-                        size="small"
-                        onClick={() => (update.action === 'restart' ? updatesBridge()?.restart() : updatesBridge()?.download())}
-                      >
-                        {update.action === 'restart' ? 'Restart' : 'Download'}
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="small"
-                      onClick={() => setDismissedUpdates((keys) => new Set(keys).add(update.key))}
-                    >
-                      Later
-                    </Button>
-                  </>
-                }
-              >
-                {update.text}
-              </Banner>
-            )}
+            {!quitting && <UpdateNotice info={updates} running={running} />}
             {state.rejected ? (
               <Banner tone="error">
                 The core rejected this window. Open the link the core printed; it carries the token.

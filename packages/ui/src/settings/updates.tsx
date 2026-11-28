@@ -1,41 +1,35 @@
-// Settings → General → Updates, in the packaged desktop app only (updates.ts). The preference lives in the desktop
-// shell, which reads it before the window opens, not in this window's localStorage.
-import { Button, Switch } from '../controls.tsx'
+// Settings → General → Updates, in the packaged desktop app only (updates.ts): the running version, what the last check
+// found, Check now, and Update for any version found, including one the user said Not now to in the notice.
+import { Button } from '../controls.tsx'
 import { updateStatus, updatesBridge, useUpdates } from '../updates.ts'
 import { Section, SettingRow } from './rows.tsx'
 import { ANCHORS, settingAnchor } from './search.ts'
 
-export const UPDATE_AUTOMATICALLY_HINT =
-  'Downloads new versions in the background and installs them when Kothar quits, or when you click Restart. When ' +
-  'it’s off, Kothar still checks and tells you, but downloads only when you click Download.'
+export const UPDATES_HINT =
+  'Kothar checks for a new version at launch and every few hours, and asks before it downloads anything. Updates ' +
+  'install only when you click Update.'
 
 export function UpdatesSection() {
   const info = useUpdates()
   const updates = updatesBridge()
   if (!info || !updates) return null
-  const busy = info.state.status !== 'idle'
+  const { state } = info
   return (
     <Section id={ANCHORS.updates} title="Updates">
-      <SettingRow
-        id={settingAnchor('update-automatically')}
-        name="Update automatically"
-        hint={UPDATE_AUTOMATICALLY_HINT}
-        description={updateStatus(info)}
-      >
-        {info.state.status === 'ready' ? (
+      <SettingRow id={settingAnchor('updates')} name={`Kothar ${info.current}`} hint={UPDATES_HINT} description={updateStatus(info)}>
+        {state.status === 'ready' ? (
           <Button size="small" variant="primary" onClick={() => updates.restart()}>
-            Restart to update
+            Restart
           </Button>
-        ) : info.state.status === 'available' ? (
-          <Button size="small" onClick={() => updates.download()}>
-            Download
+        ) : state.status === 'available' ? (
+          <Button size="small" variant="primary" onClick={() => updates.download()}>
+            Update
           </Button>
         ) : (
-          <Button size="small" disabled={busy} onClick={() => updates.check()}>
+          <Button size="small" disabled={state.status !== 'idle'} onClick={() => updates.check()}>
             Check now
           </Button>
         )}
-        <Switch label="Update automatically" checked={info.autoDownload} onChange={(on) => updates.setAutoDownload(on)} />
       </SettingRow>
     </Section>
   )
