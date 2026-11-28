@@ -1,20 +1,20 @@
 // The files a GitHub Release of Kothar holds, checked and ready to upload. Used by the release workflow and for a
 // release built on your own Mac (CONTRIBUTING.md, "Releasing"). Erasable TypeScript only: Node runs this file as is.
 //
-//   node scripts/release-files.ts prepare        check release/, add the checksums and the unversioned DMG copy
+//   node scripts/release-files.ts prepare        check release/ and add the unversioned DMG copy
 //   node scripts/release-files.ts upload v0.2.0  prepare, then create the GitHub Release for that tag with every file,
 //                                                or add the files to it if it exists (gh, signed in, run locally)
 //
 // A release holds:
-//   Kothar-<v>-arm64.dmg (+ .sha256)          what people download
-//   Kothar-arm64.dmg (+ .sha256)              the same DMG, unversioned: …/releases/latest/download/Kothar-arm64.dmg
+//   Kothar-<v>-arm64.dmg                      what people download
+//   Kothar-arm64.dmg                          the same DMG, unversioned: …/releases/latest/download/Kothar-arm64.dmg
 //                                             (the website's Download button) always fetches the newest
 //   Kothar-<v>-arm64-mac.zip (+ .blockmap)    what auto-update installs (Squirrel.Mac updates from a zip)
 //   latest-mac.yml                            what auto-update reads first: the version, and the zip's name, size and
 //                                             sha512. A mismatch makes every Kothar refuse the update, so it's checked.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -56,7 +56,6 @@ export function parseFeed(text: string): Feed {
 
 /** A file's sha512, base64, as latest-mac.yml has it. */
 export const sha512 = (file: string) => createHash('sha512').update(readFileSync(file)).digest('base64')
-const sha256Line = (file: string) => `${createHash('sha256').update(readFileSync(file)).digest('hex')}  ${basename(file)}\n`
 
 /** What's wrong with latest-mac.yml in dir, as sentences; empty when the updater will accept it. */
 export function checkFeed(dir: string, version: string): string[] {
@@ -89,18 +88,16 @@ export function checkFeed(dir: string, version: string): string[] {
 export const releaseAssets = (version: string) => {
   const dmg = dmgName(version)
   const zip = zipName(version)
-  return [dmg, `${dmg}.sha256`, UNVERSIONED_DMG, `${UNVERSIONED_DMG}.sha256`, zip, `${zip}.blockmap`, 'latest-mac.yml']
+  return [dmg, UNVERSIONED_DMG, zip, `${zip}.blockmap`, 'latest-mac.yml']
 }
 
-/** Checks dir and writes the checksums and the unversioned DMG; throws with every problem found. Returns the paths. */
+/** Checks dir and writes the unversioned DMG; throws with every problem found. Returns the paths. */
 export function prepare(dir: string, version: string): string[] {
   const dmg = join(dir, dmgName(version))
   const problems = existsSync(dmg) ? [] : [`${dmgName(version)} isn't in ${dir}. Run npm run package first.`]
   problems.push(...checkFeed(dir, version))
   if (problems.length > 0) throw new Error(`The release files aren't right:\n- ${problems.join('\n- ')}`)
-  writeFileSync(`${dmg}.sha256`, sha256Line(dmg))
   copyFileSync(dmg, join(dir, UNVERSIONED_DMG))
-  writeFileSync(join(dir, `${UNVERSIONED_DMG}.sha256`), sha256Line(join(dir, UNVERSIONED_DMG)))
   return releaseAssets(version).map((name) => join(dir, name))
 }
 
