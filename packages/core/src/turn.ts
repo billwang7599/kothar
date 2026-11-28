@@ -756,7 +756,7 @@ export function openTurns(deps: TurnDeps) {
     const adapter = adapterFor(roleRun?.engine ?? chat.info.engine)!
     const editAnywhere = editsAnywhere(...switchesOf(chat))
     if (!machine.canSandbox && !editAnywhere && UNSANDBOXED_NEEDS_EDIT_ANYWHERE) {
-      throw new Error("Kothar can't sandbox engines on this system yet. Turn on Allow edits outside the work folder in this chat's General tab, or as the default in Settings → Permissions, to run it unsandboxed.")
+      throw new Error("Kothar can't sandbox engines on this system yet. Turn on Allow edits outside the work folder, asking first, in this chat's General tab, or as the default in Settings → Permissions, to run it unsandboxed.")
     }
     return { run, adapter, editAnywhere, roleUsed: roleRun !== undefined }
   }

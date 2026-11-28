@@ -11,19 +11,19 @@ import { useState, type ReactNode } from 'react'
 import type { ClientMessage, EngineInfo, EngineToolRow, EngineToolsSettings, ToolGroup } from '@kothar/core/shared'
 import { Button, GROUP, Hint, Switch } from '../controls.tsx'
 import { SettingRow } from './rows.tsx'
-import { engineToolAnchor } from './search.ts'
+import { engineToolAnchor, TOOL_GROUP_LABELS } from './search.ts'
 
 const GROUPS: Record<ToolGroup, { label: string; hint: string }> = {
   core: {
-    label: 'Core',
+    label: TOOL_GROUP_LABELS.core,
     hint: 'What the engine works with: commands, edits, reads, searches. On by default: its model was trained on these exact tools, and Kothar sees and asks about every call.',
   },
   replaced: {
-    label: 'Kothar has its own',
-    hint: 'Kothar or an extension has its own version, which the user can see, open and stop. Off while that version is on.',
+    label: TOOL_GROUP_LABELS.replaced,
+    hint: 'Kothar or an extension replaces these with a version of its own, which you can see, open and stop. Off while that version is on.',
   },
   outside: {
-    label: 'Outside Kothar',
+    label: TOOL_GROUP_LABELS.outside,
     hint: "Acts where Kothar can't see, stop or log it, such as schedules, notifications and publishing. Off by default.",
   },
 }

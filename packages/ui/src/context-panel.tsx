@@ -61,7 +61,7 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
     amberWhileOn: true,
   },
   editAnywhere: {
-    label: 'Allow edits outside the work folder',
+    label: 'Allow edits outside the work folder, asking first',
     about:
       'On: no sandbox, and edits outside the work folder and the folders set to Edit in place ask you first. Off: ' +
       'agents write only in the chat’s folder in the work folder and in folders set to Edit in place, and edits ' +
@@ -72,7 +72,7 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
     label: 'Run commands without asking',
     about:
       'Agents run shell commands without asking you first, but only while the chat is sandboxed: with Allow edits ' +
-      'outside the work folder on, or on a system Kothar can’t sandbox, every command asks but plain reads.',
+      'outside the work folder, asking first, on, or on a system Kothar can’t sandbox, every command asks but plain reads.',
   },
   autoNetworkCommands: {
     label: 'Run network commands without asking',

@@ -225,7 +225,7 @@ export default lookOnly
     These refusals are Kothar's own, so no extension's `onPermissionRequested` can allow them.
   - **Engines** start in their own read-only mode where they have one: Codex in its `read-only` sandbox (when Kothar
     isn't sandboxing it), OpenCode with edits denied, Claude Code without its Edit, Write, MultiEdit and NotebookEdit
-    tools. pi never asks before using a tool, so outside the sandbox (Allow edits outside the work folder on) nothing stops it writing.
+    tools. pi never asks before using a tool, so outside the sandbox (Allow edits outside the work folder, asking first, on) nothing stops it writing.
 - `reason` is what the agent is told when a request is refused for being read only.
 - `role` runs the turn on that model list (Settings → Models) when the user has put models in it, and on the chat's own
   model otherwise. The chat's saved engine and model don't change. It's `chat`, `workers`, or a role an extension

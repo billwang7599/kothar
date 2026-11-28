@@ -168,3 +168,17 @@ test('launcher labels truncate too', () => {
   const launcher = [...container.querySelectorAll('nav button')].find((b) => b.textContent === 'A launcher with a long label')!
   expect(classes(launcher.querySelector('span:last-child'))).toContain('truncate')
 })
+
+test('while labels show, every row keeps the same room for the fold and the ⋯, so engine labels end at one edge', () => {
+  render()
+  // A space with a fold and a ⋯, a worker with a fold only, a worker with neither, a space with a ⋯ only.
+  for (const id of ['s', 'w1', 'w4', 'p']) {
+    const fold = row(id).nextElementSibling!
+    expect(classes(fold)).toContain('@min-[216px]:min-w-[33px]')
+    const menu = fold.nextElementSibling!
+    if (menu.hasAttribute('data-row-action')) expect(menu.querySelector('button[aria-label^="More for"]')).not.toBeNull()
+    else expect(classes(menu)).toEqual(expect.arrayContaining(['hidden', '@min-[216px]:block', 'w-[26px]']))
+  }
+  // The ⋯'s own place is 24 px plus a 2 px margin: the spacer matches it.
+  expect(classes(row('p').nextElementSibling!.nextElementSibling)).toEqual(expect.arrayContaining(['mr-2']))
+})

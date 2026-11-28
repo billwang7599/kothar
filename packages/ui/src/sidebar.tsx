@@ -41,6 +41,11 @@ const LABEL_ACTION =
 // worker's name dropped under 70 px. In px, not rem: the app's root font is 13px. Tailwind needs the classes in full.
 const ENGINE_LABEL_WIDE = 'hidden @min-[216px]:inline'
 const ENGINE_MARK_WIDE = '@min-[216px]:hidden'
+// While labels show, every row keeps the same room at its end for the fold chevron and the ⋯, whether it has them or
+// not, so every engine label ends at one right edge. The fold's room fits the chevron and a one-digit count of folded
+// workers; ten or more widens that row alone, by a digit. Narrower, the room goes to names.
+const FOLD_SLOT_WIDE = '@min-[216px]:min-w-[33px]'
+const MENU_SLOT_WIDE = 'hidden @min-[216px]:block w-[26px] shrink-0'
 // Two letters an engine is known by in a narrow sidebar; any other engine gets its own name's initials.
 const ENGINE_MARKS: Record<string, string> = { 'claude-code': 'CC', codex: 'CX', opencode: 'OC', pi: 'PI' }
 
@@ -212,23 +217,25 @@ function ChatRow(props: RowProps) {
           </span>
         )}
       </button>
-      {fold && (
-        <Hint text={fold.folded ? 'Show workers' : 'Hide workers'}>
-          <Button
-            variant="ghost"
-            size="none"
-            className="group mr-2 flex h-22 items-center gap-4 px-4 text-xs text-faint"
-            aria-label={fold.folded ? 'Show workers' : 'Hide workers'}
-            aria-expanded={!fold.folded}
-            data-open={fold.folded ? undefined : ''}
-            onClick={fold.toggle}
-          >
-            {fold.folded && <span className="tabular-nums">{fold.hidden.length}</span>}
-            <Chevron />
-          </Button>
-        </Hint>
-      )}
-      {menu && <RowMenu label={chat.name} items={menu} />}
+      <span className={`flex shrink-0 justify-end ${narrowable ? FOLD_SLOT_WIDE : ''}`}>
+        {fold && (
+          <Hint text={fold.folded ? 'Show workers' : 'Hide workers'}>
+            <Button
+              variant="ghost"
+              size="none"
+              className="group mr-2 flex h-22 items-center gap-4 px-4 text-xs text-faint"
+              aria-label={fold.folded ? 'Show workers' : 'Hide workers'}
+              aria-expanded={!fold.folded}
+              data-open={fold.folded ? undefined : ''}
+              onClick={fold.toggle}
+            >
+              {fold.folded && <span className="tabular-nums">{fold.hidden.length}</span>}
+              <Chevron />
+            </Button>
+          </Hint>
+        )}
+      </span>
+      {menu ? <RowMenu label={chat.name} items={menu} /> : narrowable && <span aria-hidden className={MENU_SLOT_WIDE} />}
       {reorder?.drop && (
         <span
           aria-hidden

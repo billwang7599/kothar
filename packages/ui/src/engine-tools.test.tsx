@@ -86,7 +86,7 @@ test('lists the tools of each engine that is on, with its group, a switch each, 
   expect(page().querySelector('section[aria-label="Claude Code tools"]')).not.toBeNull()
   expect(page().querySelector('section[aria-label="pi tools"]')).toBeNull()
   const text = page().textContent!
-  expect(text).toContain('Kothar has its own')
+  expect(text).toContain('Replaced by Kothar')
   expect(text).toContain('Outside Kothar')
   expect(text).toContain('Workers instead')
   expect(text).toContain('New')
@@ -228,7 +228,7 @@ test('with a filter, the bulk buttons say they act on what is shown, and only to
   expect(switchOf('Read on')).not.toBeNull()
   expect(switchOf('CronCreate on')).not.toBeNull()
   expect(switchOf('Bash on')).toBeNull()
-  expect(page().querySelector('details[aria-label="Claude Code Kothar has its own"]')).toBeNull()
+  expect(page().querySelector('details[aria-label="Claude Code Replaced by Kothar"]')).toBeNull()
   const on = [...page().querySelectorAll('button')].find((b) => b.textContent === 'Turn on 2 shown')!
   act(() => on.click())
   expect(sent).toEqual([
@@ -267,6 +267,8 @@ test('search finds a single tool, and going to it opens Advanced, its engine and
   expect(hit!.anchor).toBe(engineToolAnchor('claude-code', 'CronCreate'))
   expect(hit!.section).toBe('Claude Code tools')
   expect(index.some((e) => e.label === 'bash')).toBe(false)
+  // A tool is found by its group's name too.
+  expect(searchSettings(index, 'replaced by kothar').map((e) => e.label)).toContain('Agent')
   revealSetting(hit!.anchor)
   await frames()
   expect(fold('Claude Code').open).toBe(true)

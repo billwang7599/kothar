@@ -1,6 +1,6 @@
 // Settings search: every setting with the page it's on and the anchor its row carries, matched against what's typed,
 // and revealSetting, which shows one (opening its page's Advanced if it's in there) and flashes it.
-import { CONTEXT_SECTIONS, PERMISSION_SWITCHES, type ExtensionInfo, type PromptInfo } from '@kothar/core/shared'
+import { CONTEXT_SECTIONS, PERMISSION_SWITCHES, type ExtensionInfo, type PromptInfo, type ToolGroup } from '@kothar/core/shared'
 import { MORE_SWITCHES, PERMISSIONS, SECTIONS } from '../context-panel.tsx'
 import { SSH_HOSTS_ABOUT } from '../ssh-hosts.tsx'
 import { shortcutActions } from '../shortcuts.ts'
@@ -44,6 +44,13 @@ export const ANCHORS = {
 } as const
 
 export const settingAnchor = (...parts: string[]) => `setting-${parts.join('-').replace(/[^a-z0-9-]/gi, '-')}`
+
+/** The groups Engine tools sorts each engine's tools into, by name; search finds a tool by its group's name too. */
+export const TOOL_GROUP_LABELS: Record<ToolGroup, string> = {
+  core: 'Core',
+  replaced: 'Replaced by Kothar',
+  outside: 'Outside Kothar',
+}
 
 /** The anchor of one engine tool's row in Engine tools. */
 export const engineToolAnchor = (engine: string, tool: string) => settingAnchor('engine-tool', engine, tool)
@@ -130,7 +137,7 @@ export function settingsIndex({ engines, extensions, corePrompts = [], community
   for (const engine of engineTools?.engines ?? []) {
     if (!on.has(engine.engine)) continue
     for (const tool of engine.tools) {
-      entries.push({ page: 'engines', anchor: engineToolAnchor(engine.engine, tool.name), section: `${engine.name} tools`, label: tool.name, text: `engine tool ${tool.capability ?? ''}`, advanced: true })
+      entries.push({ page: 'engines', anchor: engineToolAnchor(engine.engine, tool.name), section: `${engine.name} tools`, label: tool.name, text: `engine tool ${tool.capability ?? ''} ${TOOL_GROUP_LABELS[tool.group]}`, advanced: true })
     }
   }
   for (const role of modelRolesOf(extensions)) {

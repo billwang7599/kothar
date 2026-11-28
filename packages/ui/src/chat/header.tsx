@@ -20,8 +20,8 @@ const ALLOW_ALL_HINT =
   'Allow all is on: this chat runs without the sandbox, and every request is approved without asking, logins and ' +
   'keys included. Turn it off in the chat’s General tab, or for every chat in Settings → Permissions.'
 const NOT_SANDBOXED_HINT =
-  'Kothar can’t sandbox engines on this system yet, so a chat runs only with Allow edits outside the work folder on (in ' +
-  'its General tab, or for every chat in Settings → Permissions), and its agents can write anywhere.'
+  'Kothar can’t sandbox engines on this system yet, so a chat runs only with Allow edits outside the work folder, asking ' +
+  'first, on (in its General tab, or for every chat in Settings → Permissions), and its agents can write anywhere.'
 
 type ChatHeaderProps = {
   chat: ChatView
