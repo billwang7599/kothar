@@ -232,6 +232,30 @@ test('Settings → Work folder picks the terminal Open in Terminal uses, where t
   expect(select()!.textContent).toBe('Ghostty')
 })
 
+test('Settings → Work folder sets the largest attachment, 200 MB by default, or no limit', () => {
+  const select = () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Largest attachment"]')!
+  const sent = renderSettings(workFolder)
+  expect(select().textContent).toBe('200 MB (default)')
+  act(() => select().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  const options = [...document.querySelectorAll('[role="option"]')]
+  expect(options.map((o) => o.textContent?.replace('✓', ''))).toEqual([
+    '25 MB',
+    '100 MB',
+    '200 MB (default)',
+    '500 MB',
+    '1 GB',
+    'No limit',
+  ])
+  const none = options.find((o) => o.textContent?.endsWith('No limit'))!
+  act(() => none.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  expect(sent).toEqual([{ type: 'attachmentLimit.set', bytes: 0 }])
+  renderSettings({ ...workFolder, attachmentLimit: 0 })
+  expect(select().textContent).toBe('No limit')
+  // A size saved by hand shows as it is.
+  renderSettings({ ...workFolder, attachmentLimit: 50_000_000 })
+  expect(select().textContent).toBe('50 MB')
+})
+
 test('Settings has no Instructions page: the global AGENTS.md is edited in the Context panel', () => {
   renderSettings(workFolder)
   const tabs = [...dialog().querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)

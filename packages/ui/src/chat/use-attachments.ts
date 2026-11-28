@@ -1,6 +1,7 @@
-// Files waiting to go with the next message: picked, pasted or dropped. There's no size cap: small files are read in
-// and ride the message as base64; bigger ones stream to the core at once (uploadFile), with progress on their chip.
-// Large ones get a warning (attachmentNotes), and a huge one is attached only once the user confirms.
+// Files waiting to go with the next message: picked, pasted or dropped. A file past the largest attachment in Settings
+// is refused; small files are read in and ride the message as base64; bigger ones stream to the core at once
+// (uploadFile), with progress on their chip. Large ones get a warning (attachmentNotes), and a huge one (possible only
+// with the limit past it, or none) is attached only once the user confirms.
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import {
   HUGE_ATTACHMENT_BYTES,
@@ -9,9 +10,10 @@ import {
   INLINE_ATTACHMENTS_TOTAL_BYTES,
   LARGE_ATTACHMENT_BYTES,
   LARGE_ATTACHMENTS_TOTAL_BYTES,
+  tooBigReason,
   type Upload,
 } from '@kothar/core/shared'
-import { dropUpload, uploadFile, type FileUpload } from '../connection.ts'
+import { dropUpload, uploadFile, UploadRefused, type FileUpload } from '../connection.ts'
 import { confirm } from '../controls.tsx'
 import { formatBytes } from '../format.ts'
 import type { Pending } from './attachments.tsx'
@@ -60,10 +62,11 @@ const readBase64 = (file: Blob) =>
   })
 
 /**
- * The files waiting to be sent. attach takes new ones in, telling the user (notify) about any it couldn't read;
- * unattach removes some, deleting what they had uploaded; sent clears them once a message took them.
+ * The files waiting to be sent. attach takes new ones in, telling the user (notify) about any it refused for size
+ * (limit: the largest attachment in bytes, undefined for none) or couldn't read; unattach removes some, deleting what
+ * they had uploaded; sent clears them once a message took them.
  */
-export function useAttachments(notify: (message: string) => void, deps: AttachmentDeps = WINDOW_DEPS) {
+export function useAttachments(notify: (message: string) => void, limit: number | undefined, deps: AttachmentDeps = WINDOW_DEPS) {
   const [pending, setPending] = useState<Pending[]>([])
   const pendingRef = useRef(pending)
   // oxlint-disable-next-line react/refs -- the latest list, for attach's inline total and the unmount cleanup
@@ -101,6 +104,11 @@ export function useAttachments(notify: (message: string) => void, deps: Attachme
     let inlineBytes = pendingRef.current.reduce((sum, p) => sum + (p.base64 !== undefined ? p.size : 0), 0)
     for (const file of files) {
       const name = file.name || 'attachment'
+      const tooBig = tooBigReason(name, file.size, limit)
+      if (tooBig) {
+        notify(tooBig)
+        continue
+      }
       if (file.size > HUGE_ATTACHMENT_BYTES) {
         const ok = await deps.confirm({
           text: `Attach ${name}? It's ${formatBytes(file.size)}.`,
@@ -130,11 +138,12 @@ export function useAttachments(notify: (message: string) => void, deps: Attachme
             if (!uploading.current.delete(id)) return deps.drop(uploadId)
             update(id, { uploadId, progress: undefined })
           },
-          () => {
+          (error: unknown) => {
             if (!uploading.current.delete(id)) return
             if (preview) URL.revokeObjectURL(preview)
             setPending((list) => list.filter((p) => p.id !== id))
-            notify(`Could not upload ${name}`)
+            // The core's own refusal (its limit changed since attach) says why; anything else, just that it failed.
+            notify(error instanceof UploadRefused ? `${name}: ${error.message}` : `Could not upload ${name}`)
           },
         )
       } catch {

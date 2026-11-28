@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { extname, join, resolve, sep } from 'node:path'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Core } from './core.ts'
+import { UploadTooBig } from './uploads.ts'
 import { BAD_TOKEN_CLOSE_CODE, IMAGE_TYPES, type CoreMessage } from './shared.ts'
 
 // Hashing first gives equal lengths, which timingSafeEqual needs, without leaking the token's length.
@@ -75,9 +76,18 @@ export async function startServer(options: {
         return response.writeHead(204, cors).end()
       }
       if (request.method !== 'POST' || upload[1]) return response.writeHead(405, cors).end()
-      return void core.receiveUpload(request).then(
+      const length = Number(request.headers['content-length'])
+      return void core.receiveUpload(request, Number.isSafeInteger(length) ? length : undefined).then(
         (staged) => response.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(staged)),
-        () => response.headersSent || response.writeHead(500, cors).end(),
+        (error) => {
+          if (response.headersSent) return
+          // Past the largest attachment: why, for the composer, and the connection closed so the rest isn't sent.
+          if (error instanceof UploadTooBig) {
+            const json = { ...cors, 'content-type': 'application/json', connection: 'close' }
+            return void response.writeHead(413, json).end(JSON.stringify({ error: error.message }))
+          }
+          response.writeHead(500, cors).end()
+        },
       )
     }
     const attachment = url.pathname.match(ATTACHMENT_PATH)

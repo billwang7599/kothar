@@ -2,7 +2,17 @@
 import { useState, type FormEvent } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog } from 'radix-ui'
-import { sshHostsOf, switchedOn, type ClientMessage, type PermissionSwitch, type WorkFolder } from '@kothar/core/shared'
+import {
+  ATTACHMENT_LIMITS,
+  attachmentLimitOf,
+  DEFAULT_ATTACHMENT_LIMIT,
+  formatBytes,
+  sshHostsOf,
+  switchedOn,
+  type ClientMessage,
+  type PermissionSwitch,
+  type WorkFolder,
+} from '@kothar/core/shared'
 import { FOLDED_SWITCHES, MORE_SWITCHES, MoreSwitches, PERMISSIONS, switchesShown } from '../context-panel.tsx'
 import { Button, CHAT_NOUN, ErrorText, GROUP, Hint, MOTION, Select, Switch, useReturnFocus } from '../controls.tsx'
 import { SettingRow } from './rows.tsx'
@@ -21,12 +31,16 @@ const EDITOR_ABOUT = 'What a file path in a chat opens with when you click it.'
 const COMMAND_HINT =
   'Runs without a shell. {file}, {line} and {col} are filled in; without {file}, the file goes at the end.'
 
+const ATTACHMENT_LIMIT_HINT =
+  'Files bigger than this are refused when you attach them, and the core refuses them too. Under it, files over ' +
+  '20 MB (or 75 MB together) still get a warning by the message box.'
+
 const PERMISSION_DEFAULT_HINT = 'The switches below are the default for every chat; each can choose otherwise in its Context panel.'
 
 export const WORK_FOLDER_INTRO = `${WORK_FOLDER_HINT} ${PERMISSION_DEFAULT_HINT}`
 
-// The work folder itself, the terminal Open in Terminal uses, what file links open with, and the default permission
-// switches for every chat.
+// The work folder itself, the terminal Open in Terminal uses, what file links open with, the largest attachment, and the
+// default permission switches for every chat.
 export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }: PageProps) {
   const allowAll = switchedOn('allowAll', workFolder)
   const row = (name: PermissionSwitch) => {
@@ -72,6 +86,7 @@ export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }
         </SettingRow>
       )}
       <EditorRow workFolder={workFolder} connected={connected} send={send} />
+      <AttachmentLimitRow workFolder={workFolder} connected={connected} send={send} />
       {switchesShown(allowAll).map(row)}
       {!allowAll && <MoreSwitches on={MORE_SWITCHES.filter((name) => switchedOn(name, workFolder)).length}>{MORE_SWITCHES.map(row)}</MoreSwitches>}
       {allowAll ? (
@@ -87,6 +102,31 @@ export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }
         </div>
       )}
     </div>
+  )
+}
+
+// The largest file a message may carry; the Select's values are byte counts as text, '0' for no limit.
+function AttachmentLimitRow({ workFolder, connected, send }: Pick<PageProps, 'workFolder' | 'connected' | 'send'>) {
+  const bytes = attachmentLimitOf(workFolder) ?? 0
+  // A size saved by hand in settings.json shows as a choice of its own.
+  const choices = ATTACHMENT_LIMITS.includes(bytes) ? ATTACHMENT_LIMITS : [...ATTACHMENT_LIMITS.slice(0, -1), bytes, 0]
+  const labelOf = (b: number) => (b === 0 ? 'No limit' : `${formatBytes(b)}${b === DEFAULT_ATTACHMENT_LIMIT ? ' (default)' : ''}`)
+  return (
+    <SettingRow
+      name={
+        <Hint text={ATTACHMENT_LIMIT_HINT}>
+          <span className="self-start">Largest attachment</span>
+        </Hint>
+      }
+    >
+      <Select
+        label="Largest attachment"
+        value={String(bytes)}
+        disabled={!connected}
+        options={choices.map((b) => ({ value: String(b), label: labelOf(b) }))}
+        onChange={(value) => send({ type: 'attachmentLimit.set', bytes: Number(value) })}
+      />
+    </SettingRow>
   )
 }
 

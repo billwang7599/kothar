@@ -33,6 +33,7 @@ import {
   ASK_FIRST_COMMANDS,
   bySpaceOrder,
   isUnread,
+  DEFAULT_ATTACHMENT_LIMIT,
   LARGE_ATTACHMENT_BYTES,
   LARGE_ATTACHMENTS_TOTAL_BYTES,
   GLOBAL_CONTEXT,
@@ -2806,6 +2807,42 @@ describe('attachments', () => {
     t.core.dropUpload(dropped.id)
     expect(() => send([{ ...gone, uploadId: dropped.id }])).toThrow('no longer waiting')
     expect(t.calls).toEqual([])
+  })
+
+  it('refuses files past the largest attachment in Settings when sent, saving nothing; a change applies at once', async () => {
+    const t = setup(textScript)
+    const send = (attachments: Upload[]) => t.handle({ type: 'chat.send', chatId: 'main', text: 'hi', attachments })
+    // The default, 200 MB, refuses a bigger streamed file from its length alone.
+    await expect(t.core.receiveUpload(Readable.from([Buffer.from('x')]), DEFAULT_ATTACHMENT_LIMIT + 1)).rejects.toThrow(
+      'bigger than the largest attachment, 200 MB',
+    )
+    expect(t.core.workFolder().attachmentLimit).toBeUndefined()
+
+    // Staged under one limit, sent under a lower one: refused by name, inline or streamed, and nothing saved.
+    const staged = await t.core.receiveUpload(Readable.from([Buffer.alloc(2000)]))
+    t.handle({ type: 'attachmentLimit.set', bytes: 1000 })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).attachmentLimit).toBe(1000)
+    expect(t.messages.findLast((m) => m.type === 'workFolder.updated')).toMatchObject({ workFolder: { attachmentLimit: 1000 } })
+    expect(() => send([upload('ok.txt', 'text/plain', 'ok'), upload('big.bin', '', Buffer.alloc(1001))])).toThrow(
+      'big.bin is 1 KB. The largest attachment is 1 KB (change it in Settings).',
+    )
+    expect(() => send([{ name: 'clip.mov', mimeType: 'video/mp4', uploadId: staged.id, size: 2000 }])).toThrow('clip.mov is 2 KB')
+    await expect(t.core.receiveUpload(Readable.from([Buffer.alloc(600), Buffer.alloc(600)]))).rejects.toThrow('largest attachment, 1 KB')
+    expect(existsSync(attachmentsDir(t, 'main'))).toBe(false)
+    expect(t.calls).toEqual([])
+
+    // No limit: the same file goes, and a big stream is taken.
+    t.handle({ type: 'attachmentLimit.set', bytes: 0 })
+    send([{ name: 'clip.mov', mimeType: 'video/mp4', uploadId: staged.id, size: 2000 }])
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    expect(sentAttachments(t.core, 'main')[0]).toMatchObject([{ name: 'clip.mov', size: 2000 }])
+    const huge = await t.core.receiveUpload(Readable.from([Buffer.alloc(1_000_000)]), DEFAULT_ATTACHMENT_LIMIT * 10)
+    expect(huge.size).toBe(1_000_000)
+
+    // Back to the default: settings.json leaves it out again. A bad value is refused.
+    t.handle({ type: 'attachmentLimit.set', bytes: DEFAULT_ATTACHMENT_LIMIT })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).attachmentLimit).toBeUndefined()
+    expect(() => t.handle({ type: 'attachmentLimit.set', bytes: -1 })).toThrow('whole number of bytes')
   })
 
   it('names a picture too big for image input by path only, still running the turn', async () => {

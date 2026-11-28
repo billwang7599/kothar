@@ -36,6 +36,7 @@ import {
   editsAnywhere,
   IMAGE_TYPES,
   LARGE_ATTACHMENT_BYTES,
+  tooBigReason,
   type Adapter,
   type Answers,
   type Attachment,
@@ -114,6 +115,8 @@ export type TurnDeps = {
   attachmentsDirOf: (chat: Chat) => string
   /** Files the window streamed ahead of their message (uploads.ts). */
   uploads: Pick<Uploads, 'sizeOf' | 'take'>
+  /** The largest attachment in Settings, in bytes; undefined for no limit. */
+  attachmentLimit: () => number | undefined
   // chat: the chat the turn is for; a worker with its own checkouts gets its own worktree (worker-checkouts.ts).
   checkoutOf: (space: Chat, folder: string, workDir: string, sandboxed: boolean, chat: Chat) => Promise<Checkout>
   // A worker with its own checkouts is reporting: its changes as lines for the lead, if it made any. Undefined (not a
@@ -1134,19 +1137,27 @@ export function openTurns(deps: TurnDeps) {
 
   const sendMessage = (chat: Chat, rawText: unknown, uploads: unknown, steering = false) => {
     if (uploads !== undefined && !Array.isArray(uploads)) throw new Error('Attachments must be a list')
-    // Checked in full before anything is saved. A file streamed ahead (uploadId) is moved into place, never read.
+    // Checked in full before anything is saved, each file against the largest attachment in Settings. A file streamed
+    // ahead (uploadId) is moved into place, never read.
     const files = (uploads ?? []).map((upload: Record<string, unknown> | undefined) => {
       const { name, mimeType, base64, uploadId } = upload ?? {}
       if (typeof name !== 'string' || typeof mimeType !== 'string' || (typeof base64 !== 'string' && typeof uploadId !== 'string')) {
         throw new Error('Each attachment needs a name, a type and its contents')
       }
       const type = mimeType || 'application/octet-stream'
+      const limit = deps.attachmentLimit()
+      const checkSize = (size: number) => {
+        const tooBig = tooBigReason(name, size, limit)
+        if (tooBig) throw new Error(tooBig)
+      }
       if (typeof base64 === 'string') {
         const bytes = Buffer.from(base64, 'base64')
+        checkSize(bytes.length)
         return { name, mimeType: type, size: bytes.length, save: (path: string) => writeFileSync(path, bytes, { flag: 'wx' }) }
       }
       const size = deps.uploads.sizeOf(uploadId)
       if (size === undefined) throw new Error(`${name} is no longer waiting to be sent. Attach it again`)
+      checkSize(size)
       return { name, mimeType: type, size, save: (path: string) => deps.uploads.take(uploadId, path) }
     })
     const text = typeof rawText === 'string' && rawText.trim() ? rawText : ''

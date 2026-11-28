@@ -64,7 +64,7 @@ packages/
     src/machine.ts       runs processes, locally and sandboxed
     src/folder-modes.ts  how agents may write in attached folders: the sandbox, permission answers and instructions
     src/folder-copies.ts folders set to Work on a copy: the copy, its changes and Copy changes back
-    src/uploads.ts       files the window streams ahead of their message (POST /uploads), with no size cap
+    src/uploads.ts       files the window streams ahead of their message (POST /uploads), up to the largest attachment in Settings
     src/adapters/        one file per engine (claude-code, codex, opencode, pi, fake) and their helpers;
                          acp-agent.ts runs any ACP agent the user adds in Settings (acp-agents.ts keeps the list)
     src/kothar-mcp.ts    the MCP server Kothar gives every agent (zoom, date, spawn_worker, ...)

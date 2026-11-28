@@ -40,9 +40,10 @@ Each chat's right panel has a **Context** tab. Every message gets the items that
 
 You can turn any item off for one chat. Changes apply from the next message.
 
-You can also attach files to a message with the paperclip, by pasting, or by dropping them on the chat. There's no
-size limit. Each file shows its size, and the composer warns when a file is over 20 MB or the files are over 75 MB
-together, since big files are slow to send and use a lot of context if an agent reads them. A file over 500 MB asks
+You can also attach files to a message with the paperclip, by pasting, or by dropping them on the chat. Each file can
+be up to 200 MB; change that in **Settings → Work folder → Largest attachment**, up to no limit at all. Each file shows
+its size, and the composer warns when a file is over 20 MB or the files are over 75 MB together, since big files are
+slow to send and use a lot of context if an agent reads them. With the limit above 500 MB, a file over 500 MB asks
 before it's attached. Pictures over 20 MB reach the agent as a file path rather than as a picture.
 
 ## Setups

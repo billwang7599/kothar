@@ -23,6 +23,8 @@ export type Settings = PermissionSwitches &
     editor?: string
     // The user's own command for files, with {file}, {line} and {col}.
     editorCommand?: string
+    // The largest attachment in bytes, 0 for no limit; absent, the default (shared.ts attachmentLimitOf).
+    attachmentLimit?: number
     // The user's edits of extensions' prompts, by extension and prompt id (prompts.ts).
     prompts?: Record<string, Record<string, { text: string; base: string }>>
     // Settings → Workers (workers.ts).

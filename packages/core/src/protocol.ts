@@ -140,6 +140,7 @@ export type ProtocolDeps = {
   terminalFor: (chat: Chat, path: unknown) => Promise<void>
   fileLinks: ReturnType<typeof openFileLinks>
   setEditor: (editor: unknown, command?: unknown) => void
+  setAttachmentLimit: (bytes: unknown) => void
 }
 
 type Handlers = {
@@ -327,6 +328,7 @@ export function openProtocol(deps: ProtocolDeps) {
     'permission.setSshHosts': (message) => deps.setSshHostsDefault(message.hosts),
     'terminal.set': (message) => deps.setTerminal(message.terminal),
     'editor.set': (message) => deps.setEditor(message.editor, message.command),
+    'attachmentLimit.set': (message) => deps.setAttachmentLimit(message.bytes),
     'memory.set': (message) => deps.setMemory(optionalText(message.engine), optionalText(message.model)),
     'workers.set': (message) => deps.workers.set({ start: message.start, limit: message.limit, ownCheckouts: message.ownCheckouts }),
     'workers.prompt.set': (message) => deps.workers.setInstructions(typeof message.text === 'string' ? message.text : undefined),

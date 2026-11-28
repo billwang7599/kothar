@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { draftOf, saveDraft } from './drafts.ts'
 import { AnimatePresence, m, useReducedMotion } from 'motion/react'
 import {
+  attachmentLimitOf,
   levelsOf,
   type ThinkingLevel,
   type ChatStatus,
@@ -128,7 +129,7 @@ const entryOf = (item: Item) => ('entry' in item && item.entry !== undefined ? [
 
 export function Chat(props: ChatProps) {
   const { chat, folder, engines, accounts, connected, send, openSettings, workFolder } = props
-  const { pending, attach, unattach, sent, restore } = useAttachments(props.notify)
+  const { pending, attach, unattach, sent, restore } = useAttachments(props.notify, attachmentLimitOf(workFolder))
   // An undone message comes back to the composer: its text before anything already typed, its files with the others.
   // The composer reads its text from the draft as it mounts, so it mounts again.
   const restored = chat.restored

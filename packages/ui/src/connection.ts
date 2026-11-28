@@ -36,6 +36,9 @@ export function uploadUrl(socketUrl: string, id?: string) {
 
 export type FileUpload = { done: Promise<{ id: string; size: number }>; abort: () => void }
 
+/** The core turned a file away and said why (413: past the largest attachment in Settings). */
+export class UploadRefused extends Error {}
+
 /**
  * Streams a file to this window's core (POST /uploads), reporting progress (0 to 1). The browser reads the file from
  * disk as it goes, so a big one is never held in memory. abort stops it; done then rejects.
@@ -45,6 +48,13 @@ export function uploadFile(file: Blob, onProgress: (fraction: number) => void): 
   const done = new Promise<{ id: string; size: number }>((resolve, reject) => {
     request.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total)
     request.onload = () => {
+      if (request.status === 413) {
+        let reason: unknown
+        try {
+          reason = JSON.parse(request.responseText).error
+        } catch {}
+        return reject(new UploadRefused(typeof reason === 'string' ? reason : 'Too big to attach'))
+      }
       if (request.status !== 200) return reject(new Error(`Upload failed (${request.status})`))
       try {
         resolve(JSON.parse(request.responseText))

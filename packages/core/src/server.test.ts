@@ -3,11 +3,13 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { createServer, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -62,7 +64,7 @@ async function start(port = 0, cliToken?: string) {
   })
   cleanups.push(() => server.close())
   const base = `ws://127.0.0.1:${server.port}`
-  return { base, url: `${base}/?token=${token}`, project }
+  return { base, url: `${base}/?token=${token}`, project, garage, core }
 }
 
 function connect(url: string, headers: { origin?: string }) {
@@ -339,6 +341,49 @@ it('takes a file streamed ahead, past the WebSocket message limit, from the wind
   await until(() =>
     messages.some((m) => m.type === 'chat.entry' && m.entry.type === 'user.message' && m.entry.attachments?.[0]?.size === size),
   )
+})
+
+// POSTs to /uploads by hand: with length, a Content-Length that says so (nothing need follow); body, chunks sent
+// chunked. The status and body the core answers with.
+function postUpload(http: string, { length, body = [] }: { length?: number; body?: Buffer[] }) {
+  return new Promise<{ status: number; text: string }>((resolve, reject) => {
+    const headers: Record<string, string | number> = { origin, 'content-type': 'application/octet-stream' }
+    if (length !== undefined) headers['content-length'] = length
+    const req = httpRequest(`${http}/uploads?token=${token}`, { method: 'POST', headers }, (response) => {
+      let text = ''
+      response.on('data', (chunk) => (text += chunk))
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, text }))
+    })
+    req.on('error', reject)
+    req.flushHeaders()
+    for (const chunk of body) req.write(chunk)
+    // A declared length that's never sent: the core must answer from the header alone.
+    if (length === undefined) req.end()
+  })
+}
+
+it('refuses a streamed file past the largest attachment in Settings, by its length or as it streams, keeping nothing', async () => {
+  const { base, garage, core } = await start()
+  const http = base.replace('ws:', 'http:')
+  const uploads = join(garage, 'uploads')
+  const staged = () => (existsSync(uploads) ? readdirSync(uploads) : [])
+
+  // The default, 200 MB: a bigger file is refused from its Content-Length, before a byte of it is read.
+  const declared = await postUpload(http, { length: 200_000_001 })
+  expect(declared.status).toBe(413)
+  expect(JSON.parse(declared.text).error).toBe('The file is 200 MB, bigger than the largest attachment, 200 MB (change it in Settings).')
+  expect(staged()).toEqual([])
+
+  // A lower limit: a body with no length is cut off once it passes it, and what was written is deleted.
+  core.handle({ type: 'attachmentLimit.set', bytes: 1000 }, () => {})
+  const streamed = await postUpload(http, { body: [Buffer.alloc(600), Buffer.alloc(600)] })
+  expect(streamed.status).toBe(413)
+  expect(JSON.parse(streamed.text).error).toContain('largest attachment, 1 KB')
+  expect(staged()).toEqual([])
+  // Under it, still taken.
+  const fits = await postUpload(http, { body: [Buffer.alloc(1000)] })
+  expect(fits.status).toBe(200)
+  expect(staged()).toHaveLength(1)
 })
 
 it("serves pictures from an extension's own folders with the token, and nothing else", async () => {

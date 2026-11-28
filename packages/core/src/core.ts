@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Readable } from 'node:stream'
 import type { ChatDetail, ChatUsage, Extension, ExtensionContext, SentTurn, SpaceDetail, Usage, UsageRecord } from '@kothar/extension-api'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { openAccounts } from './accounts.ts'
@@ -21,6 +22,7 @@ import { type CommunityExtension, type ExtensionHook, valuesOf } from './extensi
 import { gatherExtensions } from './community-load.ts'
 import { checkSshHosts } from './ssh-hosts.ts'
 import {
+  attachmentLimitOf,
   editsAnywhere,
   type SshHost,
   type Adapter,
@@ -335,7 +337,17 @@ function assembleCore(options: {
     !(chat && setupOf(chat)?.extensionsOff?.includes(extension.id) && !ownsChat(extension, chat))
   const chatsDir = join(garage, 'chats')
   mkdirSync(chatsDir, { recursive: true })
-  const { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setSshHostsDefault, setTerminal, setEditor } = openAppSettings({
+  const {
+    workFolder,
+    setWorkFolder,
+    setEngineEnabled,
+    setMemory,
+    setPermissionDefault,
+    setSshHostsDefault,
+    setTerminal,
+    setEditor,
+    setAttachmentLimit,
+  } = openAppSettings({
     garage,
     home,
     settings,
@@ -826,6 +838,7 @@ function assembleCore(options: {
     sandboxIn,
     attachmentsDirOf: (chat) => attachmentsDirOf(chat),
     uploads,
+    attachmentLimit: () => attachmentLimitOf(settings),
     checkoutOf: (space, folder, workDir, sandboxed, chat) => checkoutOf(space, folder, workDir, sandboxed, chat),
     workerChanges: (chat) => workerChanges(chat),
     copyOf: (space, folder, workDir) =>
@@ -1423,6 +1436,7 @@ function assembleCore(options: {
     terminalFor,
     fileLinks,
     setEditor,
+    setAttachmentLimit,
   })
 
   for (const extension of extensions.filter(isOn)) void checkSetup(extension)
@@ -1465,8 +1479,11 @@ function assembleCore(options: {
     accounts: accounts.list,
     refreshAccounts: accounts.refresh,
     onMessage: (listener: (message: CoreMessage) => void) => listeners.push(listener),
-    /** A file the window streams ahead of its message (server.ts POST /uploads). */
-    receiveUpload: uploads.receive,
+    /**
+     * A file the window streams ahead of its message (server.ts POST /uploads), refused (UploadTooBig) past the
+     * largest attachment in Settings; declaredSize: its Content-Length, so an oversized one is refused before it streams.
+     */
+    receiveUpload: (body: Readable, declaredSize?: number) => uploads.receive(body, attachmentLimitOf(settings), declaredSize),
     /** A streamed file the window no longer means to send. */
     dropUpload: uploads.drop,
     attachment(chatId: string, file: string) {
