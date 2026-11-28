@@ -896,7 +896,7 @@ export function ContextPanel(props: ContextPanelProps) {
         {hide && <PanelToggle side="right" label="Context panel" noun="context" open toggle={hide} action="toggleContextPanel" />}
       </header>
       <div
-        className="flex flex-1 scroll-inset flex-col gap-18 overflow-y-auto py-12 pl-12"
+        className="flex min-w-0 flex-1 scroll-inset flex-col gap-18 overflow-x-hidden overflow-y-auto py-12 pl-12"
         role="tabpanel"
         aria-label={extensionTab?.title ?? TAB_LABEL[shown]}
         {...whileStale(extensionTab ? panelView?.stale || extensionUi?.stale : props.itemsStale || extensionUi?.stale)}

@@ -9,6 +9,9 @@ import { HtmlFrame } from './html-frame.tsx'
 import { Markdown } from './markdown.tsx'
 import { MarkdownEditor } from './markdown-editor.tsx'
 import { windowExtensionFileUrl } from './connection.ts'
+import { DiffView } from './diff-view.tsx'
+import { extensionTabId, openPopup } from './panel-tab.ts'
+import { PathLabel } from './path-label.tsx'
 
 /**
  * Draws an extension's panel from the view tree its core side sends (ExtensionView in @kothar/extension-api), with
@@ -32,7 +35,8 @@ const DOTS: Record<ExtensionTone, string> = {
   warning: 'bg-amber',
   error: 'bg-red',
 }
-const BADGE = 'shrink-0 rounded-full bg-raised px-8 py-2 text-xs font-normal'
+// A long badge (a branch name) is cut to the row's width, whole on hover, so it never pushes a narrow panel wider.
+const BADGE = 'min-w-0 max-w-full truncate rounded-full bg-raised px-8 py-2 text-xs font-normal'
 // How near the end a followed log counts as at the end, in pixels.
 const FOLLOW_PX = 16
 const GAPS = { tight: 'gap-4', normal: 'gap-8', loose: 'gap-18' }
@@ -68,7 +72,7 @@ function Link({ text, url }: { text: string; url: string }) {
     )
   }
   return (
-    <a className="w-fit text-accent hover:underline" href={url} target="_blank" rel="noreferrer">
+    <a className="w-fit min-w-0 max-w-full text-accent wrap-anywhere hover:underline" href={url} target="_blank" rel="noreferrer">
       {text}
     </a>
   )
@@ -145,7 +149,7 @@ function SettingPicker({ node }: { node: Extract<ExtensionView, { type: 'picker'
 function Hinted({ hint, children }: { hint?: string; children: ReactNode }) {
   return hint ? (
     <Hint text={hint} align="start">
-      <span className="w-fit">{children}</span>
+      <span className="inline-flex w-fit min-w-0 max-w-full">{children}</span>
     </Hint>
   ) : (
     <>{children}</>
@@ -165,7 +169,9 @@ function RowHint({ hint, children }: { hint?: string; children: ReactElement }) 
 function Badges({ badges }: { badges?: ExtensionListItem['badges'] }) {
   return badges?.map((badge, i) => (
     <Hinted key={i} hint={badge.hint}>
-      <span className={`${BADGE} ${TONES[badge.tone ?? 'muted']}`}>{badge.text}</span>
+      <span className={`${BADGE} ${TONES[badge.tone ?? 'muted']}`} title={badge.hint ? undefined : badge.text}>
+        {badge.text}
+      </span>
     </Hinted>
   ))
 }
@@ -264,6 +270,83 @@ function Card({ node, act }: { node: Extract<ExtensionView, { type: 'card' }>; a
   )
 }
 
+// A flat part of a narrow panel: a header row that folds, its badges under it, then its children, with a line above.
+function Section({ node, act }: { node: Extract<ExtensionView, { type: 'section' }>; act: Act }) {
+  const [open, setOpen] = useState(node.open ?? true)
+  const title = (
+    <button
+      className="group flex min-w-0 flex-1 items-center gap-6 text-left font-semibold"
+      aria-expanded={open}
+      data-open={open || undefined}
+      onClick={() => setOpen(!open)}
+    >
+      <Chevron />
+      <span className="min-w-0 truncate" title={node.hint ? undefined : node.title}>
+        {node.title}
+      </span>
+    </button>
+  )
+  return (
+    <section className={`flex min-w-0 flex-col gap-4 border-t pt-8 ${fills(node) ? 'min-h-0 flex-1' : ''}`} aria-label={node.title} data-section>
+      <div className="flex min-w-0 items-center gap-4">
+        {node.hint ? (
+          <Hint text={node.hint} align="start">
+            {title}
+          </Hint>
+        ) : (
+          title
+        )}
+        {node.buttons?.length ? (
+          <span className="flex shrink-0 items-center gap-2" data-section-buttons>
+            {node.buttons.map((child, i) => (
+              <Node key={i} node={child} act={act} />
+            ))}
+          </span>
+        ) : null}
+      </div>
+      {node.badges?.length ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-4 pl-18" data-badges>
+          <Badges badges={node.badges} />
+        </div>
+      ) : null}
+      {open && (
+        <div className={`flex min-w-0 flex-col gap-6 pt-4 ${fills(node) ? 'min-h-0 flex-1' : ''}`}>
+          {node.children.map((child, i) => (
+            <Node key={i} node={child} act={act} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// A button: asks first or picks a path where it says to, then sends its action, then opens a popup where it says to.
+function ViewButton({ node, act }: { node: Extract<ExtensionView, { type: 'button' }>; act: Act }) {
+  const extension = useContext(ExtensionIdContext)
+  const pick = node.pick && pickerFor(node.pick.kind)
+  if (node.pick && !pick) return null
+  const button = (
+    <Button
+      variant={node.variant === 'primary' ? 'primary' : node.variant === 'ghost' ? 'ghost' : 'default'}
+      size="small"
+      disabled={node.disabled}
+      onClick={async () => {
+        if (node.confirm && !(await confirm(node.confirm))) return
+        if (!pick) act(node.action)
+        else {
+          const path = await pick(node.pick!.title)
+          if (!path) return
+          act({ name: node.action.name, value: path })
+        }
+        if (node.popup && extension) openPopup(extensionTabId(extension, node.popup))
+      }}
+    >
+      {node.label}
+    </Button>
+  )
+  return node.hint ? <Hint text={node.hint}>{button}</Hint> : button
+}
+
 // The arrows move along a list's rows; up from the first goes back to a search box above it.
 // The rows' own buttons (not a row's extra button, which Tab reaches): the arrows move between them.
 const ROW_BUTTONS = ':scope > li button[data-row]'
@@ -317,12 +400,17 @@ function List({ node, act }: { node: Extract<ExtensionView, { type: 'list' }>; a
           <>
             {item.dot && <span className={`size-7 shrink-0 self-start mt-7 rounded-full ${DOTS[item.dot]}`} data-tone={item.dot} />}
             <span className="flex min-w-0 flex-1 flex-col gap-2">
-              <span className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-4" data-row-head>
-                <span className={`min-w-0 max-w-full truncate ${item.mono ? 'font-mono text-xs' : ''}`}>
-                  <Marked text={item.label} marks={item.marks} />
-                </span>
+              {/* A path's row stays one line: its folders give way before the badges wrap under it. */}
+              <span className={`flex min-w-0 items-center gap-x-8 gap-y-4 ${item.path ? '' : 'flex-wrap'}`} data-row-head>
+                {item.path ? (
+                  <PathLabel path={item.label} className="max-w-full" />
+                ) : (
+                  <span className={`min-w-0 max-w-full truncate ${item.mono ? 'font-mono text-xs' : ''}`}>
+                    <Marked text={item.label} marks={item.marks} />
+                  </span>
+                )}
                 {item.badges?.length ? (
-                  <span className="flex min-w-0 flex-wrap items-center gap-4" data-badges>
+                  <span className={`flex min-w-0 items-center gap-4 ${item.path ? 'shrink-0' : 'flex-wrap'}`} data-badges>
                     <Badges badges={item.badges} />
                   </span>
                 ) : null}
@@ -608,9 +696,9 @@ export function downloadText(text: string, filename: string, mimeType = 'text/pl
 const fills = (node: ExtensionView): boolean =>
   node.type === 'html'
     ? node.height === undefined
-    : node.type === 'code'
+    : node.type === 'code' || node.type === 'diff'
       ? node.fill === true
-      : node.type === 'stack' && node.children.some(fills)
+      : (node.type === 'stack' || node.type === 'section') && node.children.some(fills)
 
 function Node({ node, act }: { node: ExtensionView; act: Act }): ReactNode {
   switch (node.type) {
@@ -666,26 +754,12 @@ function Node({ node, act }: { node: ExtensionView; act: Act }): ReactNode {
           />
         </Hinted>
       )
-    case 'button': {
-      const pick = node.pick && pickerFor(node.pick.kind)
-      if (node.pick && !pick) return null
-      const button = (
-        <Button
-          variant={node.variant === 'primary' ? 'primary' : node.variant === 'ghost' ? 'ghost' : 'default'}
-          size="small"
-          disabled={node.disabled}
-          onClick={async () => {
-            if (node.confirm && !(await confirm(node.confirm))) return
-            if (!pick) return act(node.action)
-            const path = await pick(node.pick!.title)
-            if (path) act({ name: node.action.name, value: path })
-          }}
-        >
-          {node.label}
-        </Button>
-      )
-      return node.hint ? <Hint text={node.hint}>{button}</Hint> : button
-    }
+    case 'button':
+      return <ViewButton node={node} act={act} />
+    case 'section':
+      return <Section node={node} act={act} />
+    case 'diff':
+      return <DiffView node={node} act={act} />
     case 'link':
       return <Link text={node.text} url={node.url} />
     case 'list':

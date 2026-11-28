@@ -806,6 +806,9 @@ export type ExtensionListItem = {
   // extension needn't redraw the panel to keep it current. Shown as 5s, 2m 5s, 1h 2m, 1d 1h.
   since?: number
   mono?: boolean
+  // The label is a file path: when the row is narrow it's cut from the left of its folders, so the file's name stays
+  // in view ("…/browser/package.json"), and drawn mono. The whole path shows on hover.
+  path?: boolean
   badges?: { text: string; tone?: ExtensionTone; hint?: string }[]
   // A status dot before the label, in this tone.
   dot?: ExtensionTone
@@ -871,6 +874,9 @@ export type ExtensionView =
       // value: the picked path; nothing is sent if the user cancels. The picker exists only in the desktop app: in a
       // browser tab the button isn't drawn, so offer another way too, such as a form for a typed path.
       pick?: { kind: 'folder' | 'file'; title?: string }
+      // Also opens this extension's popup panel (ExtensionPanel.placement 'popup') with this id, after the action is
+      // sent, so the popup can draw what the action picked (such as a pop-out of a tab).
+      popup?: string
     }
   | { type: 'link'; text: string; url: string }
   | { type: 'list'; items: ExtensionListItem[]; empty?: string; label?: string }
@@ -893,6 +899,37 @@ export type ExtensionView =
   | { type: 'markdown'; text: string }
   // A card with a title that folds; open says how it starts.
   | { type: 'card'; title: string; badges?: ExtensionListItem['badges']; open?: boolean; children: ExtensionView[] }
+  // A flat part of a narrow panel, with no border of its own: a header row (its title, cut short with the whole on
+  // hover, and buttons at its end), the badges under it, then the children, with a thin line above the next section.
+  // It folds as a card does; open says how it starts. Uses the panel's full width, where cards each take a border and
+  // padding.
+  | {
+      type: 'section'
+      title: string
+      hint?: string
+      badges?: ExtensionListItem['badges']
+      // Small views at the end of the header row, such as a button or a link.
+      buttons?: ExtensionView[]
+      open?: boolean
+      children: ExtensionView[]
+    }
+  // A unified diff (git diff's text), its lines coloured and numbered from its hunk headers, wrapping instead of
+  // scrolling sideways. comment: the user can click a line, or Shift-click a second to take a range, and write a
+  // comment; saving sends the action named comment with value { start, end, text } (indexes of the first and last line
+  // of text, from 0, as text.split('\n') counts them), or { id, text } for an edit. remove: deleting one sends this
+  // action with value: its id. comments are drawn under their end line, by their indexes; one with no start (its lines
+  // left the diff) is listed above the diff instead. key: a new key drops a half-written comment. fill: takes the room
+  // it's given (a popup's main column).
+  | {
+      type: 'diff'
+      key: string
+      text: string
+      comments?: ExtensionDiffComment[]
+      comment?: string
+      remove?: string
+      maxLines?: number
+      fill?: boolean
+    }
   | { type: 'divider' }
   // Text fields the user fills in, such as a note to save. The UI keeps what's typed until submit, which sends the
   // action named submit.action with value { [field name]: text }; cancel sends its action as a button does. value is a
@@ -1003,6 +1040,10 @@ export type ExtensionView =
       value?: string | number
       options?: { value: string | number; label: string }[]
     }
+
+// A comment on lines of a diff view. start and end index the diff's lines (from 0); without start, the lines it was on
+// aren't in the diff any more, and label says where it was ("a.txt, line 4").
+export type ExtensionDiffComment = { id: string; text: string; start?: number; end?: number; label?: string }
 
 // Libraries an html view's page can load from Kothar, offline:
 // - react: React 19 and ReactDOM. The page puts its component in <script type="text/jsx"> (JSX and TypeScript work;

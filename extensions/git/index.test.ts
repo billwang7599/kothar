@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -56,8 +56,7 @@ const noGh: Gh = () => ({ code: null, stdout: '', stderr: 'spawn gh ENOENT' })
 
 // A core on the fake engine with the Git extension on. `work` runs at each session's start, in its checkout, as the
 // agent.
-async function start(work: (cwd: string) => void = () => {}, gh: Gh = noGh, clock = { now: 0 }) {
-  const garage = tempDir()
+async function start(work: (cwd: string) => void = () => {}, gh: Gh = noGh, clock = { now: 0 }, garage = tempDir()) {
   const ghCalls: string[][] = []
   const gitCalls: string[][] = []
   const machine: Machine = {
@@ -95,21 +94,21 @@ async function start(work: (cwd: string) => void = () => {}, gh: Gh = noGh, cloc
   const tabs = (chatId: string) => {
     handle({ type: 'context.get', chatId })
     const listed = replies.findLast((m) => m.type === 'chat.extensions' && m.chatId === chatId)
-    return listed?.type === 'chat.extensions' ? listed.panels.map((p) => p.title) : []
+    return listed?.type === 'chat.extensions' ? listed.panels.filter((p) => p.placement !== 'popup').map((p) => p.title) : []
   }
   const views = () => messages.filter((m) => m.type === 'extension.panel')
   type Action = Pick<Extract<ClientMessage, { type: 'extension.panel.action' }>, 'action'>
-  const panel = async (chatId: string, message?: Action) => {
+  const panel = async (chatId: string, message?: Action, id = 'changes') => {
     const seen = views().length
-    if (message) handle({ type: 'extension.panel.action', chatId, extension: 'git', panel: 'changes', ...message })
-    else handle({ type: 'extension.panel.get', chatId, extension: 'git', panel: 'changes' })
-    await until(() => views().length > seen)
-    const shown = views().at(-1)
+    if (message) handle({ type: 'extension.panel.action', chatId, extension: 'git', panel: id, ...message })
+    else handle({ type: 'extension.panel.get', chatId, extension: 'git', panel: id })
+    await until(() => views().slice(seen).some((v) => v.type === 'extension.panel' && v.panel === id))
+    const shown = views().findLast((v) => v.type === 'extension.panel' && v.panel === id)
     if (shown?.type !== 'extension.panel') throw new Error('no view')
     if (shown.error) throw new Error(shown.error)
     return shown.view!
   }
-  return { core, garage, handle, create, chat, send, tabs, panel, ghCalls, gitCalls, messages }
+  return { core, garage, handle, create, chat, send, tabs, panel, ghCalls, gitCalls, messages, close: () => kothar.close(true) }
 }
 
 // Every piece of text in a view, in order, for checking what the tab says.
@@ -120,6 +119,17 @@ function textOf(view: ExtensionView): string[] {
       return view.children.flatMap(textOf)
     case 'card':
       return [view.title, ...(view.badges ?? []).map((b) => b.text), ...view.children.flatMap(textOf)]
+    case 'section':
+      return [
+        view.title,
+        ...(view.badges ?? []).map((b) => b.text),
+        ...(view.buttons ?? []).flatMap(textOf),
+        ...view.children.flatMap(textOf),
+      ]
+    case 'split':
+      return [...textOf(view.side), ...textOf(view.main)]
+    case 'diff':
+      return [view.text]
     case 'list':
       return view.items.flatMap((i) => [i.label, ...(i.detail ? [i.detail] : [])])
     case 'heading':
@@ -152,6 +162,7 @@ describe('the Changes tab', () => {
     const t = await start()
     const id = t.create('Repo', [dir])
     expect(textOf(await t.panel(id))).toEqual([
+      'Pop out',
       'Refresh',
       basename(dir),
       'main',
@@ -181,6 +192,7 @@ describe('the Changes tab', () => {
     })
     const view = await t.panel(id)
     expect(textOf(view)).toEqual([
+      'Pop out',
       'Refresh',
       basename(dir),
       branch,
@@ -237,7 +249,7 @@ describe('the Changes tab', () => {
     const t = await start()
     const id = t.create('Repo', [repo()])
     const view = await t.panel(id)
-    expect(textOf(view)).toEqual(['Refresh', expect.any(String), 'main', 'Not pushed', 'No changes'])
+    expect(textOf(view)).toEqual(['Pop out', 'Refresh', expect.any(String), 'main', 'Not pushed', 'No changes'])
   })
 })
 
@@ -408,5 +420,110 @@ describe("workers' own checkouts", () => {
     expect(targetsOf(host, 'w1')).toEqual([
       { folder: '/repo', path: mine, checkout: { folder: '/repo', path: mine, branch: 'kothar-worker/app/w1-a', from: 'kothar/app' }, label: 'repo · worker A' },
     ])
+  })
+})
+
+// Every view in a tree, depth first.
+function viewsIn(view: ExtensionView): ExtensionView[] {
+  const kids =
+    view.type === 'stack' || view.type === 'row' || view.type === 'card'
+      ? view.children
+      : view.type === 'section'
+        ? [...(view.buttons ?? []), ...view.children]
+        : view.type === 'split'
+          ? [view.side, view.main]
+          : []
+  return [view, ...kids.flatMap(viewsIn)]
+}
+const diffIn = (view: ExtensionView) => viewsIn(view).find((v) => v.type === 'diff') as Extract<ExtensionView, { type: 'diff' }> | undefined
+const buttonsIn = (view: ExtensionView) => viewsIn(view).flatMap((v) => (v.type === 'button' ? [v.label] : []))
+
+describe('review comments', () => {
+  it('adds, edits and deletes comments on diff lines, kept in a file that outlives the core', async () => {
+    const dir = repo()
+    writeFileSync(join(dir, 'a.txt'), 'one\nTWO\nthree\n')
+    const t = await start()
+    const id = t.create('Repo', [dir])
+    await t.panel(id)
+    const opened = await t.panel(id, { action: { name: 'open', value: { path: dir, group: 'uncommitted', file: 'a.txt' } } })
+    const diff = diffIn(opened)!
+    expect(diff).toMatchObject({ comment: 'comment', remove: 'uncomment', comments: [] })
+    const lines = diff.text.split('\n')
+    const added = lines.indexOf('+TWO')
+    // Two lines: the removed "two" and the added "TWO".
+    await t.panel(id, { action: { name: 'comment', value: { start: added - 1, end: added, text: 'Keep it lower case' } } })
+    const commented = await t.panel(id)
+    expect(diffIn(commented)!.comments).toEqual([{ id: expect.any(String), text: 'Keep it lower case', start: added - 1, end: added }])
+    expect(textOf(commented)).toEqual(expect.arrayContaining(['Send 1 comment', '1 comment']))
+    const file = join(t.garage, 'chats', id, 'review-comments.json')
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    expect(saved).toEqual([
+      expect.objectContaining({ path: dir, group: 'uncommitted', file: 'a.txt', side: 'new', start: 2, end: 2, quote: '-two\n+TWO', text: 'Keep it lower case' }),
+    ])
+    const commentId = saved[0].id
+    // A line that's only context can take one too; a hunk header can't.
+    await t.panel(id, { action: { name: 'comment', value: { start: added + 1, end: added + 1, text: 'And this' } } })
+    const header = lines.findIndex((l) => l.startsWith('@@'))
+    await t.panel(id, { action: { name: 'comment', value: { start: header, end: header, text: 'No' } } })
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveLength(2)
+    await t.panel(id, { action: { name: 'comment', value: { id: commentId, text: 'Lower case, please' } } })
+    const second = JSON.parse(readFileSync(file, 'utf8'))[1].id
+    await t.panel(id, { action: { name: 'uncomment', value: second } })
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([expect.objectContaining({ id: commentId, text: 'Lower case, please' })])
+
+    // A new core on the same garage, as after a restart or a reload, still has it.
+    await t.close()
+    const again = await start(() => {}, noGh, { now: 0 }, t.garage)
+    await again.panel(id)
+    const back = await again.panel(id, { action: { name: 'open', value: { path: dir, group: 'uncommitted', file: 'a.txt' } } })
+    expect(diffIn(back)!.comments).toEqual([expect.objectContaining({ id: commentId, text: 'Lower case, please' })])
+  })
+
+  it("sends every comment to the space's agent in one message, then clears them", async () => {
+    const dir = repo()
+    writeFileSync(join(dir, 'a.txt'), 'one\nTWO\n')
+    writeFileSync(join(dir, 'b.txt'), 'bee\nsee\n')
+    const t = await start()
+    const id = t.create('Repo', [dir])
+    await t.panel(id)
+    for (const [file, line, text] of [['a.txt', '+TWO', 'Lower case'], ['b.txt', '+see', 'Spell it "sea"']] as const) {
+      const opened = await t.panel(id, { action: { name: 'open', value: { path: dir, group: 'uncommitted', file } } })
+      const at = diffIn(opened)!.text.split('\n').indexOf(line)
+      await t.panel(id, { action: { name: 'comment', value: { start: at, end: at, text } } })
+    }
+    expect(buttonsIn(await t.panel(id))).toContain('Send 2 comments')
+    await t.panel(id, { action: { name: 'send' } })
+    await until(() => t.chat(id).entries.some((e) => e.type === 'user.message'))
+    const sent = t.chat(id).entries.filter((e) => e.type === 'user.message')
+    expect(sent).toHaveLength(1)
+    const text = sent[0]!.type === 'user.message' ? sent[0]!.text : ''
+    expect(text).toContain('Please apply all 2 of these review comments')
+    expect(text).toContain(`${basename(dir)} on branch main, at ${dir}.`)
+    expect(text).toContain('1. a.txt, line 2 (uncommitted change):\n```diff\n+TWO\n```\nLower case')
+    expect(text).toContain('2. b.txt, line 2 (uncommitted change):\n```diff\n+see\n```\nSpell it "sea"')
+    expect(existsSync(join(t.garage, 'chats', id, 'review-comments.json'))).toBe(false)
+    expect(readFileSync(join(t.garage, 'chats', id, 'review-sent.jsonl'), 'utf8')).toContain('Spell it')
+    await until(() => t.chat(id).status === 'idle')
+    expect(buttonsIn(await t.panel(id))).not.toContain('Send 2 comments')
+  })
+
+  it('pops out on the file open in the tab, and keeps a file open there', async () => {
+    const dir = repo()
+    writeFileSync(join(dir, 'a.txt'), 'one\nTWO\n')
+    writeFileSync(join(dir, 'b.txt'), 'bee\nsee\n')
+    const t = await start()
+    const id = t.create('Repo', [dir])
+    // Nothing open in the tab: the pop-out shows the first file.
+    const first = await t.panel(id, undefined, 'changes-review')
+    expect(first.type).toBe('split')
+    expect(diffIn(first)).toMatchObject({ fill: true })
+    expect(diffIn(first)!.text).toContain('+TWO')
+    await t.panel(id)
+    await t.panel(id, { action: { name: 'open', value: { path: dir, group: 'uncommitted', file: 'b.txt' } } })
+    await t.panel(id, { action: { name: 'popout' } })
+    const popped = await t.panel(id, undefined, 'changes-review')
+    expect(diffIn(popped)!.text).toContain('+see')
+    const open = { name: 'open', value: { path: dir, group: 'uncommitted', file: 'b.txt' } }
+    expect(diffIn(await t.panel(id, { action: open }, 'changes-review'))!.text).toContain('+see')
   })
 })
