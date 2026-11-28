@@ -38,7 +38,7 @@ CI (`.github/workflows/ci.yml`) runs these on every PR, on Linux. Run them befor
 
 ```sh
 npm run lint        # oxlint
-npm run typecheck   # tsc for core, ui, desktop, extensions and bench
+npm run typecheck   # tsc for core, cli, ui, desktop, extensions and bench
 npm test            # vitest, every package and extension
 npx vitest run packages/core/src/memory.test.ts   # one file
 ```
@@ -74,7 +74,9 @@ packages/
   extension-api/   @kothar/extension-api: the public extension types, MIT, types only
 extensions/<id>/   the built-in extensions, each default-exporting an Extension from index.ts
 extension-documentation/   the extension author docs
-bench/             memory benchmark (npm run bench:memory; offline, on the fake engine)
+bench/             memory benchmark (npm run bench:memory; offline, on the fake engine) and browser measurements
+website/           kothar.sh: landing page and user docs (Astro + Starlight), its own npm project
+.github/workflows/ ci.yml (lint, typecheck, tests, website build) and release.yml (signed DMG on a v* tag)
 ```
 
 The core loads every `extensions/<id>/index.ts` at startup, and the folder name must match the extension's `id`.
@@ -117,6 +119,8 @@ A **tool** is something an agent calls (run a command, edit a file, an MCP tool)
 8. **State is plain files** in the garage, not a database.
 9. **Pass dependencies in.** Core modules take the home folder, environment, clock and machine as arguments rather
    than reading `os.homedir()`, `process.env` or `Date.now()` themselves. Only startup code reads them.
+10. **Checkouts are made in code.** Before a space's session starts, the core checks out each git folder in its context
+    as a worktree in the space's work folder. Never leave this to agent instructions.
 
 ## Decisions
 
@@ -348,16 +352,16 @@ Why some things are the way they are. Add one when you make a choice the next co
   the first prompt in `<instructions>`, as ACP has no system prompt every agent takes; tools are classed by ACP's
   `kind`, and their calls ask through Kothar's permission cards; Kothar's MCP server goes over HTTP only to agents
   that say they take it, extensions' over stdio. Two things it can't do for an unknown agent: start it clean (it
-  loads its own config and plugins, unlike design rule 8) and sign it in (an agent that wants a sign-in says so on
+  loads its own config and plugins, unlike design rule 4) and sign it in (an agent that wants a sign-in says so on
   its row; sign in with its own CLI). OpenCode keeps its own adapter for what it does beyond ACP: a clean config,
   accounts, `complete` and its tool switches.
 
 ## Pull requests
 
 - **Keep PRs small** and about one thing. Run the [checks](#checks) first.
-- **Stack PRs while a stack is open.** Open PRs usually form a stack: each PR's base is the branch of the PR below it,
-  so they merge bottom-up without conflicts. Start your branch from the top of the open stack (`gh pr list`), base
-  your PR on that branch, and link it into the stack with `gh stack link <PR numbers...>`.
+- **Base your PR on `main`** if you're contributing from a fork. The maintainer's own PRs often form a stack (each
+  PR's base is the branch of the PR below it, linked with `gh stack link`, so they merge bottom-up without conflicts);
+  if your change builds on one of them, say so in the description and it will be stacked for you.
 - **Change an open PR with a new PR on top** rather than amending it, unless the fix is needed for it to pass CI.
 - **Sign off every commit** (see [Sign-off](#sign-off-dco)).
 
@@ -516,7 +520,7 @@ Contributions are licensed under the licence of the files they change (inbound =
 ## Adding a theme or extension to the marketplace
 
 Themes and community extensions don't live in this repo. Publish yours from a repo of your own and submit it to the
-catalog: see [kothar-marketplace](https://github.com/billwang7599/kothar-marketplace#submit-a-theme-or-extension). The
+catalog: see [kothar-marketplace](https://github.com/billwang7599/kothar-marketplace#submit-a-theme-or-mod). The
 theme format and a template are in [kothar-themes](https://github.com/billwang7599/kothar-themes#make-your-own-theme);
 an extension starts from the template [kothar-sample-mod](https://github.com/billwang7599/kothar-sample-mod).
 
