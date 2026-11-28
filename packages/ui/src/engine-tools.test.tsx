@@ -3,16 +3,19 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { Tooltip } from 'radix-ui'
-import { afterEach, beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { ClientMessage, EngineInfo, EngineToolRow, EngineToolsSettings } from '@kothar/core/shared'
 import { SettingsDialog } from './settings.tsx'
 import { ENGINE_TOOLS_OFF } from './settings/engine-tools.tsx'
+import { engineToolAnchor, revealSetting, searchSettings, settingsIndex } from './settings/search.ts'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 let root: Root
 let container: HTMLElement
 beforeEach(() => {
+  localStorage.clear()
+  Element.prototype.scrollIntoView = vi.fn()
   container = document.body.appendChild(document.createElement('div'))
   root = createRoot(container)
 })
@@ -132,4 +135,142 @@ test("an engine's own master switch turns all its tools off, with a warning, kee
   expect(page().textContent).not.toContain(ENGINE_TOOLS_OFF)
   act(() => switchOf('All Claude Code tools')!.click())
   expect(sent).toEqual([{ type: 'engineTools.setEnabled', engine: 'claude-code', enabled: true }])
+})
+
+const fold = (label: string) => page().querySelector<HTMLDetailsElement>(`details[aria-label="${label}"]`)!
+const buttonOf = (label: string) => page().querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+const frames = () => act(async () => await new Promise((done) => setTimeout(done, 60)))
+const MANY: EngineToolRow[] = [
+  tool('Bash', { capability: 'shell' }),
+  tool('Edit', { capability: 'edit' }),
+  tool('Read', { capability: 'read', on: false, saved: true }),
+  tool('Agent', { capability: 'subagents', group: 'replaced', defaultOn: false, on: false, replacedBy: 'Workers' }),
+  tool('CronCreate', { capability: 'scheduling', group: 'outside', defaultOn: false, on: false }),
+]
+
+function typeFilter(text: string) {
+  const input = page().querySelector<HTMLInputElement>('input[aria-label="Filter tools"]')!
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  act(() => {
+    setter.call(input, text)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+const show = (label: 'All' | 'On' | 'Off') =>
+  act(() => [...page().querySelectorAll<HTMLButtonElement>('[aria-label="Show tools"] button')].find((b) => b.textContent === label)!.click())
+
+test('a folded engine still says how many tools are on and, in amber, how many the user turned off', () => {
+  render(settingsOf({}, MANY))
+  const engine = fold('Claude Code')
+  expect(engine.open).toBe(false)
+  const summary = engine.querySelector('summary')!
+  expect(summary.textContent).toContain('2 of 5 on')
+  expect(summary.querySelector('.text-amber')!.textContent).toBe('1 turned off')
+  expect(fold('Claude Code Core').querySelector('summary')!.textContent).toContain('2 of 3 on')
+  // Off by default isn't flagged: only what's on by default and was turned off.
+  expect(fold('Claude Code Outside Kothar').querySelector('summary .text-amber')).toBeNull()
+  render(settingsOf({}, MANY, false))
+  expect(fold('Claude Code').querySelector('summary')!.textContent).toContain('0 of 5 onAll off')
+})
+
+test('engines fold closed at first and groups open, and both remember being toggled', async () => {
+  render(settingsOf({}, MANY))
+  expect(fold('Claude Code').open).toBe(false)
+  expect(fold('Claude Code Core').open).toBe(true)
+  act(() => fold('Claude Code').querySelector('summary')!.click())
+  act(() => fold('Claude Code Core').querySelector('summary')!.click())
+  await frames()
+  expect(localStorage.getItem('kothar.settings.engineTools.claude-code')).toBe('true')
+  expect(localStorage.getItem('kothar.settings.engineTools.claude-code.core')).toBe('false')
+  act(() => root.unmount())
+  root = createRoot(container)
+  render(settingsOf({}, MANY))
+  expect(fold('Claude Code').open).toBe(true)
+  expect(fold('Claude Code Core').open).toBe(false)
+})
+
+test("the engine's master switch in its header doesn't fold it", () => {
+  const sent = render(settingsOf({}, MANY))
+  act(() => switchOf('All Claude Code tools')!.click())
+  expect(fold('Claude Code').open).toBe(false)
+  expect(sent).toEqual([{ type: 'engineTools.setEnabled', engine: 'claude-code', enabled: false }])
+})
+
+test('All on and All off change every tool of the engine that differs, saving only what differs from the default', () => {
+  const sent = render(settingsOf({}, MANY))
+  act(() => buttonOf('Claude Code: all on')!.click())
+  expect(sent).toEqual([
+    { type: 'engineTools.setTool', engine: 'claude-code', tool: 'Read' },
+    { type: 'engineTools.setTool', engine: 'claude-code', tool: 'Agent', on: true },
+    { type: 'engineTools.setTool', engine: 'claude-code', tool: 'CronCreate', on: true },
+  ])
+  sent.length = 0
+  act(() => buttonOf('Claude Code: all off')!.click())
+  expect(sent).toEqual([
+    { type: 'engineTools.setTool', engine: 'claude-code', tool: 'Bash', on: false },
+    { type: 'engineTools.setTool', engine: 'claude-code', tool: 'Edit', on: false },
+  ])
+})
+
+test('a group has its own All on and All off, for its tools only', () => {
+  const sent = render(settingsOf({}, MANY))
+  act(() => buttonOf('Turn on 3 Claude Code Core tools')!.click())
+  expect(sent).toEqual([{ type: 'engineTools.setTool', engine: 'claude-code', tool: 'Read' }])
+  expect(buttonOf('Turn off 2 Claude Code Outside Kothar tools')).toBeNull()
+  expect(buttonOf('Turn off 1 Claude Code Outside Kothar tools')!.disabled).toBe(true)
+})
+
+test('with a filter, the bulk buttons say they act on what is shown, and only touch that', () => {
+  const sent = render(settingsOf({}, MANY))
+  typeFilter('re')
+  // Read (by its name and kind) and CronCreate match; the engine and their groups open to show them.
+  expect(fold('Claude Code').open).toBe(true)
+  expect(switchOf('Read on')).not.toBeNull()
+  expect(switchOf('CronCreate on')).not.toBeNull()
+  expect(switchOf('Bash on')).toBeNull()
+  expect(page().querySelector('details[aria-label="Claude Code Kothar has its own"]')).toBeNull()
+  const on = [...page().querySelectorAll('button')].find((b) => b.textContent === 'Turn on 2 shown')!
+  act(() => on.click())
+  expect(sent).toEqual([
+    { type: 'engineTools.setTool', engine: 'claude-code', tool: 'Read' },
+    { type: 'engineTools.setTool', engine: 'claude-code', tool: 'CronCreate', on: true },
+  ])
+  expect([...page().querySelectorAll('button')].find((b) => b.textContent === 'Turn off 2 shown')!.disabled).toBe(true)
+  // Cleared, the engine goes back to folded, as it was.
+  typeFilter('')
+  expect(fold('Claude Code').open).toBe(false)
+  expect([...page().querySelectorAll('button')].some((b) => b.textContent === 'All on')).toBe(true)
+})
+
+test('All, On and Off show every tool, just the ones on, or just the ones off', () => {
+  render(settingsOf({}, MANY))
+  show('Off')
+  expect(['Read', 'Agent', 'CronCreate'].every((n) => switchOf(`${n} on`))).toBe(true)
+  expect(switchOf('Bash on')).toBeNull()
+  expect([...page().querySelectorAll('button')].some((b) => b.textContent === 'Turn on 3 shown')).toBe(true)
+  show('On')
+  expect(switchOf('Bash on')).not.toBeNull()
+  expect(switchOf('Read on')).toBeNull()
+  typeFilter('nothing like this')
+  expect(page().textContent).toContain('No tools match.')
+  show('All')
+  typeFilter('')
+  expect(switchOf('CronCreate on')).not.toBeNull()
+})
+
+test('search finds a single tool, and going to it opens Advanced, its engine and its group without remembering', async () => {
+  const settings = settingsOf({}, MANY)
+  localStorage.setItem('kothar.settings.engineTools.claude-code.outside', 'false')
+  render(settings)
+  const index = settingsIndex({ engines: [engine('claude-code'), engine('pi', false)], extensions: [], engineTools: settings })
+  const [hit] = searchSettings(index, 'croncreate')
+  expect(hit!.anchor).toBe(engineToolAnchor('claude-code', 'CronCreate'))
+  expect(hit!.section).toBe('Claude Code tools')
+  expect(index.some((e) => e.label === 'bash')).toBe(false)
+  revealSetting(hit!.anchor)
+  await frames()
+  expect(fold('Claude Code').open).toBe(true)
+  expect(fold('Claude Code Outside Kothar').open).toBe(true)
+  expect(localStorage.getItem('kothar.settings.engineTools.claude-code')).toBeNull()
+  expect(localStorage.getItem('kothar.settings.engineTools.claude-code.outside')).toBe('false')
 })

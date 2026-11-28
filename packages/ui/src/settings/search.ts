@@ -45,6 +45,9 @@ export const ANCHORS = {
 
 export const settingAnchor = (...parts: string[]) => `setting-${parts.join('-').replace(/[^a-z0-9-]/gi, '-')}`
 
+/** The anchor of one engine tool's row in Engine tools. */
+export const engineToolAnchor = (engine: string, tool: string) => settingAnchor('engine-tool', engine, tool)
+
 // The settings every Kothar has, page by page. A function, as the modules it reads may still be loading when this one is.
 const fixedEntries = (): SettingEntry[] => [
   // General
@@ -110,17 +113,25 @@ const promptEntry = (page: string, anchor: string, prompt: PromptInfo, section =
   advanced: true,
 })
 
-type IndexProps = Pick<PageProps, 'engines' | 'extensions' | 'corePrompts' | 'communityExtensions'> & {
+type IndexProps = Pick<PageProps, 'engines' | 'extensions' | 'corePrompts' | 'communityExtensions' | 'engineTools'> & {
   workFolder?: Pick<PageProps['workFolder'], 'terminals'>
 }
 
 /** Every setting there is right now: the fixed ones, then those of the engines, models, prompts and extensions there are. */
-export function settingsIndex({ engines, extensions, corePrompts = [], communityExtensions = false, workFolder }: IndexProps): SettingEntry[] {
+export function settingsIndex({ engines, extensions, corePrompts = [], communityExtensions = false, workFolder, engineTools }: IndexProps): SettingEntry[] {
   // Terminal shows only where there's one to pick (macOS).
   const entries = fixedEntries().filter((e) => e.anchor !== ANCHORS.terminal || !!workFolder?.terminals)
   for (const engine of engines) {
     entries.push({ page: 'engines', anchor: settingAnchor('engine', engine.id), section: 'Engines', label: engineName(engine) || engine.id, text: engine.id })
     entries.push({ page: 'engines', anchor: `accounts-${engine.id}`, section: 'Accounts', label: `${engineName(engine) || engine.id} accounts`, text: 'sign in api key' })
+  }
+  // Each tool of an engine that's on, as Engine tools lists them: search opens its engine and group to it.
+  const on = new Set(engines.filter((e) => e.enabled).map((e) => e.id))
+  for (const engine of engineTools?.engines ?? []) {
+    if (!on.has(engine.engine)) continue
+    for (const tool of engine.tools) {
+      entries.push({ page: 'engines', anchor: engineToolAnchor(engine.engine, tool.name), section: `${engine.name} tools`, label: tool.name, text: `engine tool ${tool.capability ?? ''}`, advanced: true })
+    }
   }
   for (const role of modelRolesOf(extensions)) {
     entries.push({ page: 'engines', anchor: settingAnchor('models', role.id), section: 'Models', label: `${role.label} models`, text: role.description })

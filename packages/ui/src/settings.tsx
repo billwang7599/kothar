@@ -105,8 +105,8 @@ export function SettingsDialog({ open, page, openPage, close, ...props }: Settin
     if (open && moved.anchor) revealSetting(moved.anchor)
   }, [open, page, moved.anchor])
   const [query, setQuery] = useState('')
-  const { engines, extensions, corePrompts, communityExtensions, workFolder } = props
-  const index = settingsIndex({ engines, extensions, corePrompts, communityExtensions, workFolder })
+  const { engines, extensions, corePrompts, communityExtensions, workFolder, engineTools } = props
+  const index = settingsIndex({ engines, extensions, corePrompts, communityExtensions, workFolder, engineTools })
   const titleOf = (id: string) => pages.find((p) => p.id === id)?.title ?? id
   const results = searchSettings(index, query, titleOf).filter((r) => pages.some((p) => p.id === r.page))
   const go = (entry: SettingEntry) => {

@@ -338,18 +338,31 @@ const selectItem = (o: SelectOption) => (
   </SelectPrimitive.Item>
 )
 
-type SwitchProps = { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }
+type SwitchProps = {
+  label: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (checked: boolean) => void
+  /** small: for dense lists, such as one switch per engine tool. */
+  size?: 'normal' | 'small'
+}
 
-export function Switch({ label, checked, disabled, onChange }: SwitchProps) {
+const SWITCH_SIZES = {
+  normal: { root: 'h-20 w-34', thumb: 'size-14 data-[state=checked]:translate-x-14' },
+  small: { root: 'h-16 w-28', thumb: 'size-10 data-[state=checked]:translate-x-12' },
+}
+
+export function Switch({ label, checked, disabled, onChange, size = 'normal' }: SwitchProps) {
+  const sized = SWITCH_SIZES[size]
   return (
     <SwitchPrimitive.Root
       aria-label={label}
       checked={checked}
       disabled={disabled}
       onCheckedChange={onChange}
-      className="relative h-20 w-34 shrink-0 rounded-full border bg-hover shadow-sunken transition-[background-color] duration-150 focus-visible:outline-offset-2 disabled:opacity-50 data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+      className={`relative ${sized.root} shrink-0 rounded-full border bg-hover shadow-sunken transition-[background-color] duration-150 focus-visible:outline-offset-2 disabled:opacity-50 data-[state=checked]:border-accent data-[state=checked]:bg-accent`}
     >
-      <SwitchPrimitive.Thumb className="absolute top-2 left-2 size-14 rounded-full bg-muted shadow-raised transition-transform duration-150 data-[state=checked]:translate-x-14 data-[state=checked]:bg-on-accent" />
+      <SwitchPrimitive.Thumb className={`absolute top-2 left-2 ${sized.thumb} rounded-full bg-muted shadow-raised transition-transform duration-150 data-[state=checked]:bg-on-accent`} />
     </SwitchPrimitive.Root>
   )
 }
