@@ -68,6 +68,8 @@ export type Item =
       toolId: string
       name: string
       summary: string
+      // The call's full arguments, as the engine sent them: shown when a labelled row is open.
+      input?: unknown
       state: 'running' | 'waiting' | 'done' | 'error' | 'stopped'
       output: string
       // Pictures the result carried, saved in the chat's folder: their paths.
@@ -264,6 +266,7 @@ function applyEntry(items: Item[], entry: Shown, logged?: number): Item[] {
           toolId: entry.toolId,
           name: entry.name,
           summary: entry.summary,
+          ...(entry.input !== undefined && { input: entry.input }),
           state: 'running',
           output: '',
         },

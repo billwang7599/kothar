@@ -352,6 +352,7 @@ export function Chat(props: ChatProps) {
     detailViews: props.detailViews,
     noteViews: props.extensionUi?.chatId === chat.id ? props.extensionUi.noteViews : undefined,
     ...(viewOnly && space !== chat && { space, select: props.select }),
+    chatName: (chatId: string) => props.chats.find((c) => c.id === chatId)?.name ?? chatId,
     openChat: (chatId: string) => {
       const select = props.select
       return select && props.chats.some((c) => c.id === chatId) ? () => select(chatId) : undefined
