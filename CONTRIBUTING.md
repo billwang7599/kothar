@@ -211,8 +211,8 @@ remove them, and don't use the old names in new code.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml` on a macOS runner: it builds, signs, notarizes and staples
 the app and DMG (`packages/desktop/scripts/signing.ts`), checks them with `spctl`, and publishes a GitHub Release with
-`Kothar-<version>-arm64.dmg`, an unversioned `Kothar-arm64.dmg` (the website's Download link), their `.sha256`, and
-the update files: `Kothar-<version>-arm64-mac.zip`, its `.blockmap` and `latest-mac.yml`. Installed copies read
+`Kothar-<version>-arm64.dmg`, an unversioned `Kothar-arm64.dmg` (the website's Download link), and the update
+files: `Kothar-<version>-arm64-mac.zip`, its `.blockmap` and `latest-mac.yml`. Installed copies read
 `latest-mac.yml` from the newest release, so a release without it (or with a wrong hash) updates no one;
 `scripts/release-files.ts` checks it before anything is published. A tag with a hyphen makes a pre-release, which
 installed copies skip. **Actions → Release → Run workflow** is a dry run that publishes nothing.
@@ -251,7 +251,7 @@ certificate and the `kothar-notary` profile on your Mac (`packages/desktop/READM
 1. Steps 1 and 2 above (bump, merge, push the tag). If the tag's workflow run fails, that's fine.
 2. `npm ci && npm run package`. Its first line must say it's signed and notarized.
 3. `cd packages/desktop && node scripts/release-files.ts upload v0.2.0`. It checks `latest-mac.yml` against the zip,
-   writes the checksums and `Kothar-arm64.dmg`, then creates the release with every file (or adds them to an existing
+   writes `Kothar-arm64.dmg`, then creates the release with every file (or adds them to an existing
    one).
 
 ## Licence of contributions

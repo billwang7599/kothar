@@ -75,13 +75,12 @@ it('catches a wrong version, hash or size, and a missing zip or blockmap', () =>
   expect(checkFeed(empty, '0.2.0')[0]).toMatch(/no latest-mac.yml/)
 })
 
-it('prepare writes the checksums and the unversioned DMG, and lists every file to upload', () => {
+it('prepare writes the unversioned DMG, and lists every file to upload', () => {
   const dir = releaseDir()
   const files = prepare(dir, '0.2.0')
   expect(files.map((f) => f.slice(dir.length + 1))).toEqual(releaseAssets('0.2.0'))
   for (const file of files) expect(existsSync(file)).toBe(true)
   expect(readFileSync(join(dir, 'Kothar-arm64.dmg'), 'utf8')).toBe('dmg bytes')
-  expect(readFileSync(join(dir, 'Kothar-arm64.dmg.sha256'), 'utf8')).toMatch(/^[0-9a-f]{64} {2}Kothar-arm64\.dmg\n$/)
 })
 
 it('prepare stops on a bad feed before writing anything', () => {

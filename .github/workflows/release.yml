@@ -162,8 +162,8 @@ jobs:
           check spctl -a -vvv "$unzipped/Kothar.app"
           rm -rf "$unzipped"
 
-      # Checks latest-mac.yml against the zip (version, name, size, sha512), then writes the checksums and the
-      # unversioned Kothar-arm64.dmg.
+      # Checks latest-mac.yml against the zip (version, name, size, sha512), then writes the unversioned
+      # Kothar-arm64.dmg.
       - name: Prepare the release files
         working-directory: packages/desktop
         run: node scripts/release-files.ts prepare
@@ -173,9 +173,7 @@ jobs:
           name: kothar-release
           path: |
             packages/desktop/release/Kothar-${{ steps.version.outputs.version }}-arm64.dmg
-            packages/desktop/release/Kothar-${{ steps.version.outputs.version }}-arm64.dmg.sha256
             packages/desktop/release/Kothar-arm64.dmg
-            packages/desktop/release/Kothar-arm64.dmg.sha256
             packages/desktop/release/Kothar-${{ steps.version.outputs.version }}-arm64-mac.zip
             packages/desktop/release/Kothar-${{ steps.version.outputs.version }}-arm64-mac.zip.blockmap
             packages/desktop/release/latest-mac.yml
@@ -200,8 +198,8 @@ jobs:
           name: kothar-release
           path: dist
       # dist/ holds the DMG, its unversioned copy Kothar-arm64.dmg (so .../releases/latest/download/Kothar-arm64.dmg,
-      # the website's Download button, always fetches the newest), the update zip with its blockmap, latest-mac.yml and
-      # the checksums. A release without latest-mac.yml would leave every installed Kothar unable to update, so check.
+      # the website's Download button, always fetches the newest), the update zip with its blockmap and latest-mac.yml.
+      # A release without latest-mac.yml would leave every installed Kothar unable to update, so check.
       - name: Check the files
         working-directory: dist
         run: |
