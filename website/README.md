@@ -1,8 +1,9 @@
 # Kothar website
 
 The landing page (`/`) and the user docs (`/docs/`), built with [Astro](https://astro.build) and
-[Starlight](https://starlight.astro.build) as plain static files. No server code, analytics or trackers, and nothing
-loads from another site: the Inter font is bundled.
+[Starlight](https://starlight.astro.build) as plain static files. No server code, analytics or trackers, and the Inter font
+is bundled. The only request to another site is the browser asking GitHub's public API for the star count on the
+Star on GitHub buttons; if it fails, the buttons just show no count.
 
 This folder is its own npm project. It isn't one of the repo's workspaces, so the root `npm ci`, typecheck, lint and
 tests don't touch it.

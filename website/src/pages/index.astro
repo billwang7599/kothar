@@ -1,6 +1,8 @@
 ---
 import Site from '../layouts/Site.astro'
-import { githubMark } from '../lib/icons'
+import { Image } from 'astro:assets'
+import { starIcon } from '../lib/icons'
+import overview from '../assets/screenshots/overview.webp'
 import { latestRelease, REPO, RELEASES } from '../lib/release'
 
 const release = await latestRelease()
@@ -35,15 +37,21 @@ const sections = [
     <p class="sub" data-hero>Run Claude Code, Codex and more side by side, with extensions you write once.</p>
     <div class="actions" data-hero>
       <a class="button primary" href={release.href} data-download>Download for Mac</a>
-      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+      <a class="button star" href={REPO} data-star><Fragment set:html={starIcon} />Star on GitHub<span class="count" data-stars></span></a>
     </div>
     <p class="fine" data-hero>{releaseNote} · <a href={RELEASES}>All releases</a></p>
   </section>
 
   <div class="wrap stage" data-hero>
-    <!-- PLACEHOLDER: replace with a real screenshot of a space (light and dark), 16:10, about 2400×1500. -->
     <figure class="frame glass" data-shot>
-      <div class="placeholder">Screenshot: a space with a streaming reply, tool calls and the right panel</div>
+      <Image
+        src={overview}
+        alt="Kothar with a space open: Claude Code's reply streaming in after Read, Grep, Edit and Bash tool calls, an approved git push, and the Context panel on the right"
+        widths={[800, 1200, 1600, 2400]}
+        sizes="(max-width: 1088px) calc(100vw - 48px), 1040px"
+        loading="eager"
+        fetchpriority="high"
+      />
     </figure>
   </div>
 
@@ -66,9 +74,10 @@ const sections = [
     <p class="sub">Free to download. Signed and notarized for macOS.</p>
     <div class="actions">
       <a class="button primary" href={release.href} data-download>Download for Mac</a>
-      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+      <a class="button star" href={REPO} data-star><Fragment set:html={starIcon} />Star on GitHub<span class="count" data-stars></span></a>
     </div>
     <p class="fine">{releaseNote} · <a href={RELEASES}>All releases</a></p>
+    <p class="thanks">Kothar is built by one person. A star on GitHub helps more than you'd think.</p>
   </section>
 </Site>
 
@@ -105,10 +114,12 @@ const sections = [
     margin: 0;
     padding: 10px;
     border-radius: 22px;
-    aspect-ratio: 16 / 10;
     transform-origin: 50% 0;
   }
-  .frame .placeholder {
+  .frame img {
+    display: block;
+    width: 100%;
+    height: auto;
     border-radius: 14px;
   }
 
@@ -150,6 +161,11 @@ const sections = [
   .cta .sub {
     margin-bottom: 32px;
   }
+  .thanks {
+    margin-top: 28px;
+    color: var(--muted);
+    font-size: 15px;
+  }
 
   @media (max-width: 600px) {
     .hero {
@@ -162,7 +178,7 @@ const sections = [
       padding: 6px;
       border-radius: 16px;
     }
-    .frame .placeholder {
+    .frame img {
       border-radius: 11px;
     }
     .beat {

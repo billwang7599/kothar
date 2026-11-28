@@ -1,7 +1,14 @@
 ---
 import Site from '../layouts/Site.astro'
 import { latestRelease, REPO } from '../lib/release'
-import { githubMark } from '../lib/icons'
+import { Image } from 'astro:assets'
+import { starIcon } from '../lib/icons'
+import engines from '../assets/screenshots/engines.webp'
+import extensions from '../assets/screenshots/extensions.webp'
+import context from '../assets/screenshots/context.webp'
+import workers from '../assets/screenshots/workers.webp'
+import approval from '../assets/screenshots/approval.webp'
+import usage from '../assets/screenshots/usage.webp'
 
 const release = await latestRelease()
 
@@ -11,42 +18,48 @@ const features = [
     kicker: 'Engines',
     title: 'Your agents, your logins.',
     body: 'Kothar drives Claude Code, Codex, OpenCode, pi and any agent that speaks ACP. Each runs with the account you already have.',
-    shot: 'Settings → Engines, each showing installed and signed in',
+    shot: engines,
+    alt: 'Settings, Engines: Claude Code, pi and OpenCode, each marked Ready with its version and a switch to turn it on',
     href: '/docs/engines/',
   },
   {
     kicker: 'Extensions',
     title: 'Write once. Works everywhere.',
     body: 'Panels, commands, tools and permission rules that work with every engine. Install more from the Marketplace in Settings.',
-    shot: 'Settings → Built-in extensions and the Marketplace',
+    shot: extensions,
+    alt: 'The Marketplace in grid view: themes and a community extension, each with an Install button',
     href: '/docs/extensions/',
   },
   {
     kicker: 'Spaces and memory',
     title: 'A space for each job.',
     body: 'A folder becomes a space, with replies and tool calls streaming live. Every chat remembers its whole conversation, even across restarts.',
-    shot: 'A space with a streaming reply and the Context panel',
+    shot: context,
+    alt: 'A space with a reply streaming in after Read and Grep tool calls, beside the Context panel with its AGENTS.md and folders',
     href: '/docs/spaces/',
   },
   {
     kicker: 'Workers',
     title: 'Hand off. Then review.',
     body: 'An agent hands tasks to workers, each in its own git worktree. When one reports, you merge, squash, keep or discard its changes.',
-    shot: "A worker's report with its Merge, Squash, Keep and Discard row",
+    shot: workers,
+    alt: "A worker's report in the chat: 2 files changed, 1 commit, with Merge, Squash, Keep and Discard buttons",
     href: '/docs/workers/',
   },
   {
     kicker: 'Permissions',
     title: 'Nothing runs behind your back.',
     body: 'On macOS, agents work in a sandboxed folder. Switches decide what runs without asking, and you approve the rest from the chat.',
-    shot: 'An approval card in the chat',
+    shot: approval,
+    alt: 'An approval card in the chat asking to allow a git push, with Approve and Deny buttons',
     href: '/docs/permissions/',
   },
   {
     kicker: 'Usage',
     title: 'See what each turn used.',
     body: 'Tokens and cost, as each engine reports them, saved per chat. A quiet total sits in the chat header.',
-    shot: "The chat header's usage total, with its breakdown on hover",
+    shot: usage,
+    alt: "The chat header's usage total of $0.32, with its breakdown open: this chat, workers, tokens and cost",
     href: '/docs/usage/',
   },
 ]
@@ -71,9 +84,8 @@ const features = [
           <p class="body">{f.body}</p>
           <a href={f.href}>Read more in the wiki ›</a>
         </div>
-        <!-- PLACEHOLDER: replace with a screenshot. -->
         <figure class="card glass">
-          <div class="placeholder">Screenshot: {f.shot}</div>
+          <Image src={f.shot} alt={f.alt} widths={[600, 900, 1200, 1600]} sizes="(max-width: 760px) calc(100vw - 48px), 560px" />
         </figure>
       </section>
     ))
@@ -83,7 +95,7 @@ const features = [
     <h2>Ready when you are.</h2>
     <div class="actions">
       <a class="button primary" href={release.href} data-download>Download for Mac</a>
-      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+      <a class="button star" href={REPO} data-star><Fragment set:html={starIcon} />Star on GitHub<span class="count" data-stars></span></a>
     </div>
   </section>
 </Site>
@@ -138,9 +150,11 @@ const features = [
     margin: 0;
     padding: 8px;
     border-radius: 20px;
-    aspect-ratio: 4 / 3;
   }
-  .card .placeholder {
+  .card img {
+    display: block;
+    width: 100%;
+    height: auto;
     border-radius: 13px;
   }
 

@@ -19,9 +19,7 @@ Run Claude Code, Codex, OpenCode and pi side by side, with extensions you write 
   · <a href="https://kothar.sh/docs/">Docs</a>
 </p>
 
-<!-- SCREENSHOT: a space with a streaming reply, tool calls and the right panel goes here, e.g.
-     <p align="center"><img src="website/src/assets/screenshots/overview.webp" alt="…" width="900"></p>
-     The website worker is producing screenshots; add one here once it lands. -->
+<p align="center"><img src="website/src/assets/screenshots/overview.webp" alt="Kothar with a space open: Claude Code's reply streaming beside its tool calls and the Context panel" width="900"></p>
 
 ## Why
 

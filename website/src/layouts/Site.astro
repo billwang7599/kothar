@@ -53,7 +53,7 @@ const { title, description, current } = Astro.props
         const ease = [0.16, 1, 0.3, 1] as const
         const all = (sel: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLElement>(sel)]
         const show = (els: HTMLElement[], step: number) =>
-          animate(els, { opacity: 1, y: 0 }, { duration: 0.8, ease, delay: stagger(step) })
+          animate(els, { opacity: 1, y: 0 }, { duration: 0.6, ease, delay: stagger(step) })
 
         // Take over the hidden state with inline styles, then drop the class.
         const hero = all('[data-hero]')
@@ -64,10 +64,11 @@ const { title, description, current } = Astro.props
         ;(window as unknown as { motionReady: boolean }).motionReady = true
 
         // The hero rises in, one line after another.
-        show(hero, 0.1)
+        show(hero, 0.08)
 
-        // Each section's parts rise in as it comes into view.
-        sections.forEach(([section, parts]) => inView(section, () => void show(parts, 0.1), { amount: 0.2 }))
+        // Each section's parts rise in as it comes into view, one after another (on Features: the words, then the
+        // screenshot).
+        sections.forEach(([section, parts]) => inView(section, () => void show(parts, 0.12), { amount: 0.2 }))
 
         // The hero screenshot settles to full size as it scrolls into place.
         const shot = document.querySelector('[data-shot]')
@@ -78,6 +79,40 @@ const { title, description, current } = Astro.props
           })
         }
       }
+    </script>
+
+    <script>
+      // The Star on GitHub buttons' count, fetched in the browser (never at build time) and kept for an hour so
+      // repeat visits don't spend GitHub's rate limit. Any failure, or no stars yet, leaves the count hidden.
+      const KEY = 'kothar-stars'
+      const HOUR = 3_600_000
+      const slots = [...document.querySelectorAll<HTMLElement>('[data-stars]')]
+      const short = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1).replace(/\.0$/, '')}k` : String(n))
+      const fill = (n: number) => {
+        if (!Number.isFinite(n) || n < 1) return
+        for (const slot of slots) {
+          slot.textContent = short(n)
+          slot.classList.add('shown')
+          slot.closest('a')?.setAttribute('aria-label', `Star Kothar on GitHub (${n.toLocaleString('en')} stars)`)
+        }
+      }
+      const load = async () => {
+        try {
+          const saved = JSON.parse(sessionStorage.getItem(KEY) ?? 'null')
+          if (saved && Date.now() - saved.at < HOUR) return fill(saved.n)
+        } catch {}
+        try {
+          const res = await fetch('https://api.github.com/repos/billwang7599/kothar', { headers: { accept: 'application/vnd.github+json' } })
+          if (!res.ok) return
+          const n = (await res.json()).stargazers_count
+          if (typeof n !== 'number') return
+          try {
+            sessionStorage.setItem(KEY, JSON.stringify({ n, at: Date.now() }))
+          } catch {}
+          fill(n)
+        } catch {}
+      }
+      if (slots.length) void load()
     </script>
   </body>
 </html>

@@ -5,3 +5,7 @@ export const githubMark =
 // Light/dark switch: a half-filled circle.
 export const themeIcon =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9A9 9 0 0 0 12 3Zm0 16V5a7 7 0 0 1 0 14Z"/></svg>'
+
+// A five-point star outline, for the Star on GitHub buttons.
+export const starIcon =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m12 3.2 2.7 5.5 6 .9-4.35 4.25 1.03 6-5.38-2.83-5.38 2.83 1.03-6L3.3 9.6l6-.9Z"/></svg>'
