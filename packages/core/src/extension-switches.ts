@@ -1,4 +1,5 @@
-// Turning extensions on and off: one extension's switch, the master switch for community extensions, what a restart
+// Turning extensions on and off: one extension's switch, the master switch for community extensions, the Marketplace's
+// switch, what a restart
 // would change, and a community extension installed, updated or uninstalled. Turning a community extension on approves
 // its exact files (approvals.ts); those approvals are kept here. The core passes in its extensions, chats and the rest.
 import type { Extension, ExtensionContext, ExtensionUse } from '@kothar/extension-api'
@@ -191,6 +192,17 @@ export function openExtensionSwitches(deps: ExtensionSwitchDeps) {
     restartChanged()
   }
 
+  // The Marketplace's switch: off closes the Marketplace (no browsing or installing); what's installed stays, and so
+  // does uninstalling it.
+  const marketplaceOn = () => settings.marketplace !== false
+  const setMarketplace = (enabled: boolean) => {
+    if (marketplaceOn() === enabled) return
+    if (enabled) delete settings.marketplace
+    else settings.marketplace = false
+    saveSettings()
+    broadcast({ type: 'marketplace.updated', enabled })
+  }
+
   // Community extension code this run doesn't match the settings: what a restart would start, update or stop.
   const restartState = (): RestartState => {
     const changes: RestartChange[] = []
@@ -266,6 +278,8 @@ export function openExtensionSwitches(deps: ExtensionSwitchDeps) {
   return {
     setExtensionEnabled,
     setCommunityExtensions,
+    marketplaceOn,
+    setMarketplace,
     restartState,
     communityChanged,
     uninstallExtension,

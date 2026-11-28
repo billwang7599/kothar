@@ -237,7 +237,7 @@ function App() {
   const signedIn = activeAccount?.signedIn ?? engine?.signedIn
 
   const connected = state.connected
-  const { catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions } = state
+  const { catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions, marketplace: marketplaceOn } = state
   const market = useMemo(
     () => ({ catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions }),
     [catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions],
@@ -250,8 +250,13 @@ function App() {
     if (picked) send({ type: 'chat.create', name: folderName(picked), folders: [picked] })
   }, [connected, send])
   const [searching, setSearching] = useState(false)
-  const [marketplace, setMarketplace] = useState(false)
-  const openMarketplace = useCallback(() => setMarketplace(true), [])
+  const [marketplaceAsked, setMarketplace] = useState(false)
+  // While the Marketplace's switch is off it doesn't open: its shortcut and Browse buttons show its switch in Settings.
+  const marketplace = marketplaceAsked && marketplaceOn
+  const openMarketplace = useCallback(() => {
+    if (marketplaceOn) setMarketplace(true)
+    else openSettings('community-extensions#section-marketplace')
+  }, [marketplaceOn, openSettings])
   // Get started opens by itself once per window, as soon as there's a work folder, until it's done or closed.
   const [getStarted, setGetStarted] = useState(false)
   const [getStartedAsked, setGetStartedAsked] = useState(false)
@@ -297,7 +302,7 @@ function App() {
     newSpace: () => connected && setNameRequest({ kind: 'new' }),
     settings: () => openSettings(),
     search: () => setSearching((open) => !open),
-    marketplace: () => setMarketplace((open) => !open),
+    marketplace: () => (marketplace ? setMarketplace(false) : openMarketplace()),
     getStarted: openGetStarted,
     ...panelShortcuts({ covered: settingsOpen || marketplace || getStarted, chatOpen: !!selected, toggleSidebar, toggleContext }),
     ...(window.kothar && { newSpaceFromFolder: () => void newChatFromFolder() }),
@@ -409,6 +414,7 @@ function App() {
               openGetStarted={openGetStarted}
               market={market}
               communityExtensions={communityExtensions}
+              marketplace={marketplaceOn}
               restart={state.restart}
               running={running}
               openMarketplace={openMarketplace}
@@ -499,6 +505,8 @@ function App() {
             openSettings={openSettingsLink}
             newSpace={newSpace}
             openMarketplace={openMarketplace}
+            extensions={state.extensions}
+            marketplace={marketplaceOn}
           />
           <MarketplaceDialog
             open={marketplace}

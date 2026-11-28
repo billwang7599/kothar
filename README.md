@@ -82,9 +82,10 @@ Built in (in [`extensions/`](extensions/README.md)):
 | Git | A Changes tab with each checkout's branch, diffs and pull request | No |
 | Pins | Pin messages and find them again in the Pinned tab | No |
 
-Community extensions and themes install from the **Marketplace** (Settings → Community hub → Browse…). Each lists what
-it uses through the API, Kothar shows that list before you install it, and every community extension stays off until
-you turn it on.
+Community extensions and themes install from the **Marketplace** (Settings → Community hub → Browse…). It has its own
+switch there and in Get started, on unless you turn it off; while it's off, it doesn't open and nothing installs from it.
+Each item lists what it uses through the API, Kothar shows that list before you install it, and every community
+extension stays off until you turn it on.
 
 **Write your own:** start from the template [kothar-sample-mod](https://github.com/billwang7599/kothar-sample-mod)
 (or [kothar-themes](https://github.com/billwang7599/kothar-themes#make-your-own-theme) for a theme), try it with

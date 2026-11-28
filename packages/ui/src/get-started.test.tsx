@@ -4,8 +4,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import type { ChatInfo, ClientMessage, EngineAccounts, EngineInfo } from '@kothar/core/shared'
-import { dismissGetStarted, getStartedDismissed, GetStartedDialog, readiness, setUpDone } from './get-started.tsx'
+import type { ChatInfo, ClientMessage, EngineAccounts, EngineInfo, ExtensionInfo } from '@kothar/core/shared'
+import { coreExtensions, dismissGetStarted, firstSentence, getStartedDismissed, GetStartedDialog, readiness, setUpDone } from './get-started.tsx'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -39,9 +39,25 @@ const betaAccounts: EngineAccounts = { engine: 'beta', active: 'default', accoun
 const space = { id: 's1', name: 'Space', folders: [], files: [], engine: 'fake', archived: false } as unknown as ChatInfo
 const home = { ...space, id: 'main', extension: 'home' } as ChatInfo
 
-type Render = { engines: EngineInfo[]; chats?: ChatInfo[]; accounts?: EngineAccounts[] }
+const extension = (id: string, change: Partial<ExtensionInfo> = {}): ExtensionInfo => ({
+  id,
+  name: id[0]!.toUpperCase() + id.slice(1),
+  description: `${id} does one thing.`,
+  enabled: false,
+  settings: [],
+  values: {},
+  ...change,
+})
 
-function show({ engines, chats = [], accounts = [betaAccounts] }: Render) {
+type Render = {
+  engines: EngineInfo[]
+  chats?: ChatInfo[]
+  accounts?: EngineAccounts[]
+  extensions?: ExtensionInfo[]
+  marketplace?: boolean
+}
+
+function show({ engines, chats = [], accounts = [betaAccounts], extensions = [], marketplace = true }: Render) {
   const sent: ClientMessage[] = []
   const actions = { close: vi.fn(), openSettings: vi.fn(), newSpace: vi.fn(), openMarketplace: vi.fn() }
   act(() =>
@@ -56,6 +72,8 @@ function show({ engines, chats = [], accounts = [betaAccounts] }: Render) {
               chats={chats}
               connected
               send={(m) => sent.push(m)}
+              extensions={extensions}
+              marketplace={marketplace}
               {...actions}
             />
           </Tooltip.Provider>
@@ -145,4 +163,78 @@ test('remembers that it was closed', () => {
   expect(getStartedDismissed()).toBe(false)
   dismissGetStarted()
   expect(getStartedDismissed()).toBe(true)
+})
+
+test('lists the built-in extensions with a switch each, folded under how many are on', () => {
+  const extensions = [
+    extension('browser', { enabled: true, description: 'Agents browse. In your own Chrome, with your logins.' }),
+    extension('notes'),
+    extension('home', { alwaysOn: true }),
+    extension('theirs', { community: { version: '1', author: 'x', uses: [], source: 'local' } }),
+  ]
+  expect(coreExtensions(extensions).map((e) => e.id)).toEqual(['browser', 'notes'])
+  const t = show({ engines: [ready], extensions })
+  const section = step('Core extensions')
+  expect(section.getAttribute('aria-label')).toBe('Core extensions')
+  expect(section.textContent).toContain('Optional')
+  const details = section.querySelector('details')!
+  expect(details.open).toBe(false)
+  expect(details.querySelector('summary')!.textContent).toBe('1 of 2 on')
+  expect(line('Home')).toBeNull()
+  expect(line('Theirs')).toBeNull()
+  // Its one line is the first sentence; the rest is in a tooltip.
+  expect(line('Browser').textContent).toContain('Agents browse.')
+  expect(line('Browser').textContent).not.toContain('logins')
+
+  // The same call as Settings → Built-in extensions.
+  click(line('Notes').querySelector<HTMLElement>('button[role="switch"]')!)
+  expect(t.sent).toContainEqual({ type: 'extension.setEnabled', extensionId: 'notes', enabled: true })
+  click(line('Browser').querySelector<HTMLElement>('button[role="switch"]')!)
+  expect(t.sent).toContainEqual({ type: 'extension.setEnabled', extensionId: 'browser', enabled: false })
+})
+
+test("an extension that's on but not set up says so and links to its page; a blocked one can't be turned on", () => {
+  const t = show({
+    engines: [ready],
+    extensions: [
+      extension('browser', { enabled: true, setup: { status: 'missing', description: 'Install it.' } as ExtensionInfo['setup'] }),
+      extension('research', { blocked: 'Needs the Browser extension' }),
+    ],
+  })
+  expect(line('Browser').textContent).toContain('Needs setup')
+  click(button('Set up…', line('Browser')))
+  expect(t.openSettings).toHaveBeenCalledWith('extension:browser')
+  expect(line('Research').textContent).toContain('Needs the Browser extension')
+  expect(line('Research').querySelector<HTMLButtonElement>('button[role="switch"]')!.disabled).toBe(true)
+})
+
+test('the Marketplace opens only once its switch is on', () => {
+  const t = show({ engines: [ready], marketplace: false })
+  const section = step('Marketplace')
+  expect(section.textContent).toContain('Optional')
+  expect(button('Open the Marketplace…').disabled).toBe(true)
+  const toggle = section.querySelector<HTMLElement>('button[role="switch"][aria-label="Enable the Marketplace"]')!
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  click(toggle)
+  expect(t.sent).toContainEqual({ type: 'marketplace.setEnabled', enabled: true })
+
+  // The core's answer turns it on at once.
+  const on = show({ engines: [ready], marketplace: true })
+  expect(button('Open the Marketplace…').disabled).toBe(false)
+  click(button('Open the Marketplace…'))
+  expect(on.openMarketplace).toHaveBeenCalled()
+})
+
+test("the optional steps don't count toward done", () => {
+  show({ engines: [ready], chats: [space], extensions: [extension('notes')], marketplace: false })
+  expect(button('Done')).toBeDefined()
+  expect(setUpDone([ready], [], [space])).toBe(true)
+  show({ engines: [missing], chats: [space], extensions: [extension('notes', { enabled: true })], marketplace: true })
+  expect(button('Close')).toBeDefined()
+})
+
+test('firstSentence keeps the first sentence, or the whole text without one', () => {
+  expect(firstSentence('One. Two.')).toBe('One.')
+  expect(firstSentence('Version 1.2 works. More.')).toBe('Version 1.2 works.')
+  expect(firstSentence('No stop')).toBe('No stop')
 })

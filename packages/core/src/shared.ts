@@ -862,6 +862,8 @@ export type ClientMessage =
   // The master switch for community extensions (off by default): while it's off, none loads, whatever its own switch
   // says.
   | { type: 'communityExtensions.setEnabled'; enabled: boolean }
+  // The Marketplace's switch (on unless the user turned it off): while it's off, it can't be browsed or installed from.
+  | { type: 'marketplace.setEnabled'; enabled: boolean }
   // Stops every chat as quitting does, then starts Kothar again, so community extension changes apply.
   | { type: 'app.restart' }
   | { type: 'models.setList'; role: ModelRole; models: ModelRow[] }
@@ -946,6 +948,8 @@ export type CoreMessage =
       themes: ThemeFile[]
       installed: InstalledItem[]
       communityExtensions: boolean
+      // The Marketplace's switch; absent from an older core, which has none (on).
+      marketplace?: boolean
       restart: RestartState
     }
   | { type: 'engine.updated'; engine: EngineInfo }
@@ -994,6 +998,7 @@ export type CoreMessage =
   | { type: 'extension.updated'; extension: ExtensionInfo }
   | { type: 'extension.removed'; extensionId: string }
   | { type: 'communityExtensions.updated'; enabled: boolean }
+  | { type: 'marketplace.updated'; enabled: boolean }
   | { type: 'restart.updated'; restart: RestartState }
   | { type: 'models.updated'; lists: ModelLists }
   | { type: 'setups.updated'; setups: Setup[] }

@@ -1,4 +1,4 @@
-// The Community hub page: the master switch for community extensions and each installed one.
+// The Community hub page: the Marketplace's switch, the master switch for community extensions and each installed one.
 import { EXTENSION_USES, type ClientMessage, type ExtensionInfo } from '@kothar/core/shared'
 import { Button, confirm, ErrorText, GROUP, Hint, Switch } from '../controls.tsx'
 import { changesSinceApproved, EXTENSION_WARNING, extensionStatus, UsesList } from '../marketplace.tsx'
@@ -22,7 +22,7 @@ async function setCommunityExtensions(enabled: boolean, send: (m: ClientMessage)
 }
 
 export function CommunityExtensionsPage(props: PageProps) {
-  const { extensions, connected, send, communityExtensions = false, restart = NO_RESTART, running = 0, openMarketplace } = props
+  const { extensions, connected, send, communityExtensions = false, marketplace = true, restart = NO_RESTART, running = 0, openMarketplace } = props
   const community = extensions.filter((m) => m.community)
   const turn = async (m: ExtensionInfo, enabled: boolean) => {
     if (enabled) {
@@ -48,6 +48,19 @@ export function CommunityExtensionsPage(props: PageProps) {
     <>
       <RestartNotice restart={restart} running={running} connected={connected} send={send} />
       <div id="section-community-hub" className={`${GROUP} mb-12 scroll-mt-12`}>
+        <div id="section-marketplace" className="scroll-mt-12">
+          <SettingRow
+            name="Marketplace"
+            description={marketplace ? 'On. Browse and install themes and extensions.' : "Off. The Marketplace doesn't open; what's installed stays."}
+          >
+            <Switch
+              label="Marketplace"
+              checked={marketplace}
+              disabled={!connected}
+              onChange={(enabled) => send({ type: 'marketplace.setEnabled', enabled })}
+            />
+          </SettingRow>
+        </div>
         <SettingRow
           name="Community extensions"
           description={
@@ -68,7 +81,15 @@ export function CommunityExtensionsPage(props: PageProps) {
       </div>
       <div className="flex items-start gap-16 pb-12">
         <p className="flex-1 text-sm text-amber">{EXTENSION_WARNING}</p>
-        {openMarketplace && <Button onClick={() => openMarketplace()}>Browse…</Button>}
+        {openMarketplace && (
+          <Hint text={marketplace ? undefined : 'Turn on the Marketplace first.'}>
+            <span tabIndex={marketplace ? undefined : 0} className="inline-flex rounded">
+              <Button disabled={!marketplace} onClick={() => openMarketplace()}>
+                Browse…
+              </Button>
+            </span>
+          </Hint>
+        )}
       </div>
       {!community.length && <p className="text-muted">No community extensions installed. Find them in the Marketplace.</p>}
       {community.length > 0 && (

@@ -358,4 +358,33 @@ describe('the core', () => {
     ])
     expect(t.messages.some((m) => m.type === 'themes.updated')).toBe(false)
   })
+
+  it('has a switch, on by default: off, it lists and installs nothing, but what is installed can still go', async () => {
+    const t = start(served([nord]).fetch)
+    expect(t.core.marketplace()).toBe(true)
+    t.handle({ type: 'market.install', kind: 'theme', id: 'nord' })
+    await settle()
+    expect(t.core.themes()).toEqual([nord])
+
+    t.handle({ type: 'marketplace.setEnabled', enabled: false })
+    expect(t.core.marketplace()).toBe(false)
+    expect(t.messages.at(-1)).toEqual({ type: 'marketplace.updated', enabled: false })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).marketplace).toBe(false)
+    t.replies.length = 0
+    t.handle({ type: 'marketplace.list' })
+    t.handle({ type: 'market.install', kind: 'theme', id: 'gruvbox' })
+    t.handle({ type: 'market.installLocal', path: '/nowhere' })
+    await settle()
+    expect(t.replies.map((r) => r.type)).toEqual(['marketplace.catalog', 'market.installFailed', 'market.localFailed'])
+    expect(t.replies.every((r) => 'error' in r && /The Marketplace is off/.test(String(r.error)))).toBe(true)
+    t.handle({ type: 'market.uninstall', kind: 'theme', id: 'nord' })
+    expect(t.core.themes()).toEqual([])
+
+    t.handle({ type: 'marketplace.setEnabled', enabled: true })
+    expect(t.messages.at(-1)).toEqual({ type: 'marketplace.updated', enabled: true })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).marketplace).toBeUndefined()
+    t.handle({ type: 'marketplace.list' })
+    await settle()
+    expect(t.replies.at(-1)).toMatchObject({ type: 'marketplace.catalog', entries: [{ id: 'nord' }] })
+  })
 })

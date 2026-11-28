@@ -187,6 +187,7 @@ export async function startServer(options: {
       themes: core.themes(),
       installed: core.installed(),
       communityExtensions: core.communityExtensions(),
+      marketplace: core.marketplace(),
       restart: core.restart(),
     })
     socket.on('message', (data) => {

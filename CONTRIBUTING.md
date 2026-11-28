@@ -131,6 +131,10 @@ Why some things are the way they are. Add one when you make a choice the next co
   chat keys, `Mod*` aliases and `ChatDetail.mod`) was deleted rather than kept forever. Don't add it back.
 - **Fresh installs start lean.** Deep Research and Pins are off by default; a switch saved in `settings.json` wins, so
   only installs that never touched them change. The fake engine is for development and tests (`KOTHAR_DEV`), not the app.
+- **The Marketplace has its own switch, on by default.** It installs themes as well as extensions, so it isn't the
+  community extensions switch. `settings.json` saves `marketplace: false` only while it's off; off, the core refuses to
+  list or install (uninstalling still works), and the UI's ways in (Get started, Browse…, its shortcut) show the switch
+  instead of opening it.
 - **Usage is its own file, not the log.** Each chat's `usage.jsonl` holds what engines reported (`turn.usage` and
   one-shot calls), apart from `log.jsonl`, so deleting or forgetting messages never drops what they cost, and memory
   and the transcript never see it. A worker's records move to its lead's file before its folder goes, so a space's

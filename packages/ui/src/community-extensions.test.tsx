@@ -69,7 +69,7 @@ function render(node: ReactNode) {
   )
 }
 
-type Extra = { communityExtensions?: boolean; restart?: RestartState; running?: number }
+type Extra = { communityExtensions?: boolean; marketplace?: boolean; openMarketplace?: () => void; restart?: RestartState; running?: number }
 
 function settings(extensions: ExtensionInfo[], sent: ClientMessage[] = [], extra: Extra = { communityExtensions: true }, page: SettingsPage = 'community-extensions') {
   render(
@@ -430,4 +430,21 @@ test('the state keeps the last answer to Install from folder, counted', () => {
   let state = reduce(initialState, { type: 'market.localFailed', path: '/x', error: 'nope' })
   state = reduce(state, { type: 'market.localInstalled', path: '/x', kind: 'theme', ids: ['nord'] })
   expect(state.localInstall).toEqual({ path: '/x', kind: 'theme', ids: ['nord'], count: 2 })
+})
+
+test("the Marketplace's switch: on by default; off, Browse… is disabled until it's on again", () => {
+  expect(initialState.marketplace).toBe(true)
+  expect(reduce(initialState, { type: 'marketplace.updated', enabled: false }).marketplace).toBe(false)
+  const openMarketplace = vi.fn()
+  const sent = settings([], [], { marketplace: false, openMarketplace })
+  expect(extensionSwitch('Marketplace').getAttribute('aria-checked')).toBe('false')
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain("Off. The Marketplace doesn't open")
+  expect(buttons('Browse…')[0]!.disabled).toBe(true)
+  act(() => extensionSwitch('Marketplace').click())
+  expect(sent).toContainEqual({ type: 'marketplace.setEnabled', enabled: true })
+
+  settings([], [], { marketplace: true, openMarketplace })
+  expect(buttons('Browse…')[0]!.disabled).toBe(false)
+  act(() => buttons('Browse…')[0]!.click())
+  expect(openMarketplace).toHaveBeenCalled()
 })

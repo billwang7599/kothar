@@ -995,7 +995,7 @@ function assembleCore(options: {
     broadcast({ type: 'chat.updated', chat: withRun(chat) })
   }
 
-  const { setExtensionEnabled, setCommunityExtensions, restartState, communityChanged, uninstallExtension, approvalOf } =
+  const { setExtensionEnabled, setCommunityExtensions, marketplaceOn, setMarketplace, restartState, communityChanged, uninstallExtension, approvalOf } =
     openExtensionSwitches({
       garage,
       now,
@@ -1428,6 +1428,8 @@ function assembleCore(options: {
     settingsViewChanged,
     settingsViewAction,
     setCommunityExtensions,
+    marketplaceOn,
+    setMarketplace,
     marketplace,
     builtInIds,
     communityChanged,
@@ -1476,6 +1478,7 @@ function assembleCore(options: {
     themes: marketplace.themes,
     installed: marketplace.installed,
     communityExtensions: communityOn,
+    marketplace: marketplaceOn,
     restart: restartState,
     accounts: accounts.list,
     refreshAccounts: accounts.refresh,

@@ -109,6 +109,7 @@ const fixedEntries = (): SettingEntry[] => [
   // Extensions
   { page: 'extensions', anchor: 'section-built-in-extensions', label: 'Built-in extensions', text: 'turn on off extension mods' },
   { page: 'community-extensions', anchor: 'section-community-hub', label: 'Community hub', text: 'community extensions marketplace install from folder' },
+  { page: 'community-extensions', anchor: 'section-marketplace', label: 'Marketplace', text: 'turn on off enable marketplace browse themes' },
 ]
 
 const promptEntry = (page: string, anchor: string, prompt: PromptInfo, section = 'Prompts'): SettingEntry => ({

@@ -153,6 +153,8 @@ export type State = {
   marketFailures: Record<string, { error: string; count: number }>
   // The master switch for community extensions, and the community extension changes that wait for a restart.
   communityExtensions: boolean
+  // The Marketplace's switch: while it's off the Marketplace doesn't open.
+  marketplace: boolean
   restart: RestartState
   // The core's answer to the last Install from folder, counted so the same answer twice still reads as new.
   localInstall?: { path: string; count: number } & ({ kind: MarketKind; ids: string[] } | { error: string })
@@ -213,6 +215,7 @@ export const initialState: State = {
   workFolder: { defaultPath: '', canSandbox: true },
   marketFailures: {},
   communityExtensions: false,
+  marketplace: true,
   restart: { changes: [], canRestart: false },
   contexts: {},
   extensionUis: {},
@@ -520,6 +523,7 @@ function reduceAll(state: State, action: Action): State {
         themes: action.themes,
         installed: action.installed,
         communityExtensions: action.communityExtensions,
+        marketplace: action.marketplace ?? true,
         restart: action.restart,
       })
     case 'engine.updated':
@@ -660,6 +664,8 @@ function reduceAll(state: State, action: Action): State {
       return { ...state, extensions: state.extensions.filter((m) => m.id !== action.extensionId) }
     case 'communityExtensions.updated':
       return { ...state, communityExtensions: action.enabled }
+    case 'marketplace.updated':
+      return { ...state, marketplace: action.enabled }
     case 'restart.updated':
       return { ...state, restart: action.restart }
     case 'models.updated':
