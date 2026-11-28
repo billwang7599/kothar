@@ -71,8 +71,8 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
   autoRunCommands: {
     label: 'Run commands without asking',
     about:
-      'Agents run shell commands without asking you first, but only while the chat is sandboxed: with edits ' +
-      'anywhere on, or on a system Kothar can’t sandbox, every command asks but plain reads.',
+      'Agents run shell commands without asking you first, but only while the chat is sandboxed: with Allow edits ' +
+      'outside the work folder on, or on a system Kothar can’t sandbox, every command asks but plain reads.',
   },
   autoNetworkCommands: {
     label: 'Run network commands without asking',

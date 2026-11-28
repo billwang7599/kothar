@@ -12,16 +12,16 @@ const MANAGE_ACCOUNTS = '__manage'
 const WARNING_CHIP = 'shrink-0 cursor-help rounded-full bg-warning-bg px-8 py-2 text-xs text-amber'
 const EDITS_ANYWHERE_HINT =
   'This chat runs without the work folder’s sandbox: its agents may edit files anywhere, asking you first. Turn ' +
-  'it off in the Context panel.'
+  'it off in the chat’s General tab.'
 const EDITS_ANYWHERE_ALL_HINT =
   'Every chat runs without the work folder’s sandbox: agents may edit files anywhere, asking you first. Turn it ' +
   'off in Settings → Permissions.'
 const ALLOW_ALL_HINT =
   'Allow all is on: this chat runs without the sandbox, and every request is approved without asking, logins and ' +
-  'keys included. Turn it off in the Context panel, or for every chat in Settings → Permissions.'
+  'keys included. Turn it off in the chat’s General tab, or for every chat in Settings → Permissions.'
 const NOT_SANDBOXED_HINT =
-  'Kothar can’t sandbox engines on this system yet, so a chat runs only with Edits anywhere on (in its Context ' +
-  'panel, or for every chat in Settings → Permissions), and its agents can write anywhere.'
+  'Kothar can’t sandbox engines on this system yet, so a chat runs only with Allow edits outside the work folder on (in ' +
+  'its General tab, or for every chat in Settings → Permissions), and its agents can write anywhere.'
 
 type ChatHeaderProps = {
   chat: ChatView

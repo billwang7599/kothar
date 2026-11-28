@@ -39,7 +39,7 @@ const ATTACHMENT_LIMIT_HINT =
   'Files bigger than this are refused when you attach them, and the core refuses them too. Under it, files over ' +
   '20 MB (or 75 MB together) still get a warning by the message box.'
 
-export const PERMISSIONS_INTRO = `The default for every ${CHAT_NOUN.one} and worker. Each can choose otherwise in its Context panel.`
+export const PERMISSIONS_INTRO = `The default for every ${CHAT_NOUN.one} and worker. Each can choose otherwise in its General tab.`
 
 // Settings → General.
 export function GeneralPage({ workFolder, chooseWorkFolder, connected, send }: PageProps) {

@@ -729,7 +729,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
       {
         key: 'workerRole',
         label: 'Workers use',
-        description: 'Which model list (Settings → Engines → Models) research workers run on.',
+        description: 'Which model list (Settings → Engines → Models) research workers run on. With Plan off, Planning models falls back to Searching models.',
         type: 'select',
         options: [
           { value: 'searching', label: 'Searching models' },
@@ -741,8 +741,8 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
       },
       {
         key: 'showWorkers',
-        label: 'Show research workers as subagents',
-        description: 'Each worker’s report shows in the chat, folded, like any worker’s. Off: they work quietly and only the report shows.',
+        label: 'Show research workers’ reports in the chat',
+        description: 'Each research worker’s report shows in the chat, folded, like any worker’s. Off: they work quietly and only the final research report shows.',
         type: 'boolean',
         default: false,
       },

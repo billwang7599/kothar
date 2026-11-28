@@ -1233,7 +1233,7 @@ function assembleCore(options: {
   const commandPlaceOf = async (chat: Chat) => {
     const editAnywhere = editsAnywhere(...switchesOf(chat))
     if (!machine.canSandbox && !editAnywhere && UNSANDBOXED_NEEDS_EDIT_ANYWHERE) {
-      throw new Error("Kothar can't sandbox commands on this system yet. Turn on Edits anywhere for this chat first.")
+      throw new Error("Kothar can't sandbox commands on this system yet. Turn on Allow edits outside the work folder in this chat's General tab first.")
     }
     const workDir = workDirOf(chat)
     mkdirSync(workDir, { recursive: true })

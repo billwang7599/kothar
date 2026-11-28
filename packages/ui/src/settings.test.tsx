@@ -155,6 +155,19 @@ test('Settings → Workers: agents’ switch, the limit for every child, and the
     { type: 'workers.set', start: false },
     { type: 'workers.set', limit: 2 },
   ])
+  // No limit is an empty box saying so, not -1; clearing the box sends -1, and 0 (no worker could run) isn't taken.
+  type(limit, '')
+  act(() => limit.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  expect(sent.at(-1)).toEqual({ type: 'workers.set', limit: -1 })
+  renderSettings(workFolder, [], { page: 'workers', workers: { ...workers, limit: -1 } })
+  const unlimited = dialog().querySelector<HTMLInputElement>('input[aria-label="Max running per chat"]')!
+  expect(unlimited.value).toBe('')
+  expect(unlimited.placeholder).toBe('No limit')
+  const count = sent.length
+  type(unlimited, '0')
+  act(() => unlimited.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  expect(sent).toHaveLength(count)
+  expect(unlimited.value).toBe('')
   // Not an extension any more: it isn't on the extensions page.
   expect([...dialog().querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('Agents')
 })

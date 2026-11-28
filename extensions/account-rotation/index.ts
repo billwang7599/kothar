@@ -56,7 +56,7 @@ export function createAccountRotation(now = () => Date.now()): Extension {
         key: 'accounts',
         label: 'Accounts to rotate through',
         description:
-          'Account names from Settings → Engines → Accounts, one per line, in the order to try them. Blank: every signed-in ' +
+          'Account names from Settings → Engines → Accounts, one per line (or separated by commas), in the order to try them. Blank: every signed-in ' +
           'account, in the order listed there.',
         type: 'text',
         default: '',

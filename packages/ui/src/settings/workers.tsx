@@ -17,11 +17,12 @@ export const WORKERS_INTRO =
 const LIMIT = {
   key: 'limit',
   label: 'Max running per chat',
-  description: 'How many workers one chat runs at once, its agent’s and its extensions’ together. More wait for a slot. -1 for no limit.',
+  description: 'How many workers one chat runs at once, its agent’s and its extensions’ together. More wait for a slot. Leave empty for no limit.',
   type: 'number',
   default: 4,
-  min: -1,
+  min: 1,
   integer: true,
+  empty: { value: -1, placeholder: 'No limit' },
 } as const
 
 type Props = { workers?: WorkersSettings; connected: boolean; send: (m: ClientMessage) => void }

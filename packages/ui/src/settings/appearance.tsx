@@ -29,7 +29,7 @@ function Display() {
       <SettingRow
         id={settingAnchor('steps')}
         name="Thinking and tool calls unfolded"
-        hint={`Instead of folding them into "N steps". Each ${CHAT_NOUN.one} can override this in its Context panel.`}
+        hint={`Instead of folding them into "N steps". Each ${CHAT_NOUN.one} can override this in its General tab.`}
       >
         <Switch label="Show thinking and tool calls unfolded" checked={steps} onChange={showStepsByDefault} />
       </SettingRow>
