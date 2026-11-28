@@ -16,55 +16,57 @@ export type Theme = {
   dialog?: { dark: string; light: string }
 }
 
-// One light from above for every theme. Dark surfaces swallow shadows, so dark ones are stronger and add a top highlight.
+// One light from above for every theme, kept low and hard like the website's paper: hairline edges and short drops
+// rather than soft glows. Dark surfaces swallow shadows, so dark ones are stronger and add a top highlight.
 export const ELEVATION = {
   dark: {
-    sunken: 'inset 0 1px 2px rgb(0 0 0 / 0.35)',
-    raised: 'inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(0 0 0 / 0.2)',
-    floating: 'inset 0 1px 0 rgb(255 255 255 / 0.06), 0 2px 4px rgb(0 0 0 / 0.3), 0 10px 28px -4px rgb(0 0 0 / 0.55)',
-    overlay: 'inset 0 1px 0 rgb(255 255 255 / 0.06), 0 4px 10px rgb(0 0 0 / 0.3), 0 28px 64px -12px rgb(0 0 0 / 0.7)',
+    sunken: 'inset 0 1px 0 rgb(0 0 0 / 0.4)',
+    raised: 'inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 0 rgb(0 0 0 / 0.55)',
+    floating: 'inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 1px rgb(0 0 0 / 0.35), 0 14px 32px -10px rgb(0 0 0 / 0.7)',
+    overlay: 'inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 1px rgb(0 0 0 / 0.35), 0 32px 72px -16px rgb(0 0 0 / 0.8)',
   },
   light: {
-    sunken: 'inset 0 1px 2px rgb(0 0 0 / 0.06)',
-    raised: '0 1px 2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06)',
-    floating: '0 2px 4px -1px rgb(0 0 0 / 0.06), 0 10px 28px -6px rgb(0 0 0 / 0.16)',
-    overlay: '0 4px 8px -2px rgb(0 0 0 / 0.06), 0 28px 60px -12px rgb(0 0 0 / 0.28)',
+    sunken: 'inset 0 1px 0 rgb(14 16 22 / 0.06)',
+    raised: '0 1px 0 rgb(14 16 22 / 0.12)',
+    floating: '0 1px 0 rgb(14 16 22 / 0.08), 0 14px 32px -12px rgb(14 16 22 / 0.24)',
+    overlay: '0 2px 0 rgb(14 16 22 / 0.08), 0 32px 64px -18px rgb(14 16 22 / 0.34)',
   },
 }
 
 // Light grays under 4.5:1 are darkened toward the theme's dark bg: text to 6:1, muted 5, faint 4.5.
 export const THEMES = {
+  // The website's specimen palette (website/DESIGN.md): ink and paper, with the field blue as the accent in the dark.
   default: {
     name: 'Default',
     dark: {
-      bg: '#111214',
-      panel: '#17181b',
-      raised: '#1f2024',
-      hover: '#26282d',
-      border: '#2b2d32',
-      text: '#e7e7ea',
-      muted: '#9b9ea6',
-      faint: '#6d7079',
-      accent: '#5b8def',
-      'on-accent': '#ffffff',
-      green: '#3fb67c',
-      amber: '#e3a33b',
-      red: '#e5534b',
+      bg: '#0e1016',
+      panel: '#13161d',
+      raised: '#1b1e26',
+      hover: '#232731',
+      border: '#2c2f38',
+      text: '#edece6',
+      muted: '#a9a8a2',
+      faint: '#85847e',
+      accent: '#8a9dc4',
+      'on-accent': '#0e1016',
+      green: '#73b07f',
+      amber: '#d9a24a',
+      red: '#e2685f',
     },
     light: {
-      bg: '#ffffff',
-      panel: '#f6f6f7',
-      raised: '#ececee',
-      hover: '#e4e4e7',
-      border: '#dfe0e3',
-      text: '#1d1e21',
-      muted: '#5f626a',
-      faint: '#6d6f76',
+      bg: '#f4f3ee',
+      panel: '#ebeae3',
+      raised: '#e2e0d8',
+      hover: '#d9d7ce',
+      border: '#cfcdc4',
+      text: '#0e1016',
+      muted: '#4a4f5c',
+      faint: '#5e626c',
       accent: '#2563d9',
       'on-accent': '#ffffff',
-      green: '#1f8a55',
-      amber: '#a76a0c',
-      red: '#c9302c',
+      green: '#3f7a4a',
+      amber: '#9a6400',
+      red: '#b3362f',
     },
   },
   glass: {
@@ -78,8 +80,8 @@ export const THEMES = {
       text: '#eef0f4',
       muted: '#a9adb8',
       faint: '#7b808c',
-      accent: '#5b8def',
-      'on-accent': '#ffffff',
+      accent: '#8a9dc4',
+      'on-accent': '#0e1016',
       green: '#3fb67c',
       amber: '#e3a33b',
       red: '#e5534b',

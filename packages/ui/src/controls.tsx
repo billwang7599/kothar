@@ -13,15 +13,16 @@ import { formatBinding, useBindings } from './shortcuts.ts'
 
 const TOAST_MS = 6_000
 export const COPIED_MS = 1_500
-const EASE_OUT = [0.2, 0, 0, 1] as const
+// The website's ease-out (--ease in styles.css): fast to arrive, slow to settle.
+const EASE_OUT = [0.16, 1, 0.3, 1] as const
 
-export const TRANSITION: Transition = { duration: 0.18, ease: EASE_OUT }
+export const TRANSITION: Transition = { duration: 0.22, ease: EASE_OUT }
 
 export const MOTION = {
   fade: { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } },
   pop: { initial: { opacity: 0, scale: 0.97 }, animate: { opacity: 1, scale: 1 }, exit: { opacity: 0, scale: 0.97 } },
   rise: { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 } },
-  menu: { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.12, ease: EASE_OUT } },
+  menu: { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.15, ease: EASE_OUT } },
   // Overflow is hidden only while animating, so focus rings aren't clipped once open.
   collapse: {
     initial: { height: 0, opacity: 0, overflow: 'hidden' },
@@ -219,8 +220,7 @@ export function CopyBlock({ text, label, className = '', children }: CopyBlockPr
 
 export const GROUP = 'flex flex-col rounded-lg border bg-panel px-14 shadow-raised'
 
-export const NAV_LABEL =
-  'mx-8 mt-14 mb-4 flex items-center gap-6 text-xs font-semibold tracking-[0.04em] text-faint uppercase'
+export const NAV_LABEL = 'mx-8 mt-14 mb-4 flex items-center gap-6 label-k text-faint'
 
 const PRESSABLE = 'enabled:shadow-raised enabled:active:shadow-sunken disabled:text-faint'
 const BUTTON_VARIANTS = {
@@ -229,6 +229,8 @@ const BUTTON_VARIANTS = {
   danger: `enabled:text-red enabled:hover:border-red enabled:hover:bg-red/10 ${PRESSABLE}`,
   ghost: 'border-transparent text-muted enabled:hover:bg-raised enabled:hover:text-text enabled:active:bg-hover',
 }
+// Full-size buttons wear the website's button face: mono capitals, and a key-like press (the press utility).
+const BUTTON_FACE = 'press font-mono text-[11.5px] font-semibold tracking-[0.05em] uppercase'
 const BUTTON_SIZES = {
   normal: 'h-control px-12',
   small: 'h-24 px-8 text-sm',
@@ -242,7 +244,8 @@ type ButtonProps = ComponentProps<'button'> & {
 }
 
 export function Button({ variant = 'default', size = 'normal', className = '', ...props }: ButtonProps) {
-  const classes = `rounded border whitespace-nowrap transition-[background-color,border-color,color,box-shadow] ${BUTTON_VARIANTS[variant]} ${BUTTON_SIZES[size]} ${className}`
+  const face = size === 'normal' && variant !== 'ghost' ? BUTTON_FACE : 'transition-[background-color,border-color,color,box-shadow]'
+  const classes = `rounded border whitespace-nowrap ${face} ${BUTTON_VARIANTS[variant]} ${BUTTON_SIZES[size]} ${className}`
   return <button className={classes} {...props} />
 }
 
@@ -360,9 +363,9 @@ export function Switch({ label, checked, disabled, onChange, size = 'normal' }: 
       checked={checked}
       disabled={disabled}
       onCheckedChange={onChange}
-      className={`relative ${sized.root} shrink-0 rounded-full border bg-hover shadow-sunken transition-[background-color] duration-150 focus-visible:outline-offset-2 disabled:opacity-50 data-[state=checked]:border-accent data-[state=checked]:bg-accent`}
+      className={`relative ${sized.root} shrink-0 rounded-sm border bg-hover shadow-sunken transition-[background-color] duration-150 focus-visible:outline-offset-2 disabled:opacity-50 data-[state=checked]:border-accent data-[state=checked]:bg-accent`}
     >
-      <SwitchPrimitive.Thumb className={`absolute top-2 left-2 ${sized.thumb} rounded-full bg-muted shadow-raised transition-transform duration-150 data-[state=checked]:bg-on-accent`} />
+      <SwitchPrimitive.Thumb className={`absolute top-2 left-2 ${sized.thumb} rounded-[1px] bg-muted shadow-raised transition-transform duration-150 data-[state=checked]:bg-on-accent`} />
     </SwitchPrimitive.Root>
   )
 }
@@ -473,7 +476,7 @@ export function ConfirmDialog() {
               >
                 <div className="flex flex-col gap-8">
                   <AlertDialog.Title
-                    className={`leading-[1.5] whitespace-pre-line ${body ? 'text-[16px] font-semibold' : 'text-body'}`}
+                    className={`leading-[1.4] whitespace-pre-line ${body ? 'text-[16px] font-bold [font-stretch:104%]' : 'text-body'}`}
                   >
                     {text}
                   </AlertDialog.Title>
