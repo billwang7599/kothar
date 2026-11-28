@@ -1,4 +1,6 @@
-// The Work folder page and the dialog that picks the work folder (also shown before the first space).
+// Settings → General (the work folder, what opens files and terminals, notifications, the largest attachment),
+// Settings → Permissions (the default permission switches every chat follows), and the dialog that picks the work folder
+// (also shown before the first space).
 import { useState, type FormEvent } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog } from 'radix-ui'
@@ -13,16 +15,18 @@ import {
   type PermissionSwitch,
   type WorkFolder,
 } from '@kothar/core/shared'
-import { FOLDED_SWITCHES, MORE_SWITCHES, MoreSwitches, PERMISSIONS, switchesShown } from '../context-panel.tsx'
+import { FOLDED_SWITCHES, MORE_SWITCHES, PERMISSIONS, switchesShown } from '../context-panel.tsx'
 import { Button, CHAT_NOUN, ErrorText, GROUP, Hint, MOTION, Select, Switch, useReturnFocus } from '../controls.tsx'
-import { SettingRow } from './rows.tsx'
+import { Advanced, Section, SettingRow } from './rows.tsx'
+import { NotificationsSection } from './notifications.tsx'
+import { ANCHORS, settingAnchor } from './search.ts'
 import { SSH_HOSTS_ABOUT, SshHostsEditor } from '../ssh-hosts.tsx'
 import type { PageProps } from './types.ts'
 
 const WORK_FOLDER_TITLE = 'Choose a work folder'
 const WORK_FOLDER_HINT =
-  'Agents and workers do all their work here, and can write nowhere else unless you allow it, here or for a chat. ' +
-  `Each ${CHAT_NOUN.one} gets a folder of its own inside it.`
+  'Agents and workers do all their work here, and can write nowhere else unless you allow it, in Permissions or for a ' +
+  `chat. Each ${CHAT_NOUN.one} gets a folder of its own inside it.`
 
 const TERMINAL_ABOUT =
   'What Open in Terminal opens. Automatic uses the app macOS opens shell scripts with, else Terminal.'
@@ -35,13 +39,52 @@ const ATTACHMENT_LIMIT_HINT =
   'Files bigger than this are refused when you attach them, and the core refuses them too. Under it, files over ' +
   '20 MB (or 75 MB together) still get a warning by the message box.'
 
-const PERMISSION_DEFAULT_HINT = 'The switches below are the default for every chat; each can choose otherwise in its Context panel.'
+export const PERMISSIONS_INTRO = `The default for every ${CHAT_NOUN.one} and worker. Each can choose otherwise in its Context panel.`
 
-export const WORK_FOLDER_INTRO = `${WORK_FOLDER_HINT} ${PERMISSION_DEFAULT_HINT}`
+// Settings → General.
+export function GeneralPage({ workFolder, chooseWorkFolder, connected, send }: PageProps) {
+  return (
+    <>
+      <Section title="Work folder">
+        <SettingRow
+          id={ANCHORS.workFolder}
+          name="Work folder"
+          hint={WORK_FOLDER_HINT}
+          description={<span className="font-mono">{workFolder.path ?? 'Not chosen'}</span>}
+        >
+          <Button disabled={!connected} onClick={chooseWorkFolder}>
+            Change…
+          </Button>
+        </SettingRow>
+        <EditorRow workFolder={workFolder} connected={connected} send={send} />
+        {workFolder.terminals && (
+          <SettingRow id={ANCHORS.terminal} name="Terminal" hint={TERMINAL_ABOUT}>
+            <Select
+              label="Terminal"
+              value={workFolder.terminal ?? 'auto'}
+              disabled={!connected}
+              options={[
+                { value: 'auto', label: 'Automatic' },
+                ...workFolder.terminals.map((t) => ({ value: t.id, label: t.name })),
+              ]}
+              onChange={(terminal) => send({ type: 'terminal.set', terminal })}
+            />
+          </SettingRow>
+        )}
+      </Section>
+      <NotificationsSection />
+      <Advanced page="general">
+        <div className={GROUP}>
+          <AttachmentLimitRow workFolder={workFolder} connected={connected} send={send} />
+        </div>
+      </Advanced>
+    </>
+  )
+}
 
-// The work folder itself, the terminal Open in Terminal uses, what file links open with, the largest attachment, and the
-// default permission switches for every chat.
-export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }: PageProps) {
+// Settings → Permissions: the switches most people set, then the rest (and the SSH hosts) under Advanced, which says
+// how many of them are on so none is on unseen.
+export function PermissionsPage({ workFolder, connected, send }: PageProps) {
   const allowAll = switchedOn('allowAll', workFolder)
   const row = (name: PermissionSwitch) => {
     const { label, about, amberWhileOn } = PERMISSIONS[name]
@@ -49,8 +92,9 @@ export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }
     return (
       <SettingRow
         key={name}
+        id={settingAnchor('permission', name)}
         name={<span className={amberWhileOn && on ? 'text-amber' : ''}>{label}</span>}
-        description={about}
+        hint={about}
       >
         <Switch
           label={label}
@@ -61,47 +105,30 @@ export function WorkFolderPage({ workFolder, chooseWorkFolder, connected, send }
       </SettingRow>
     )
   }
+  const moreOn = MORE_SWITCHES.filter((name) => switchedOn(name, workFolder)).length
   return (
-    <div className={GROUP}>
-      <SettingRow
-        name="Work folder"
-        description={<span className="font-mono">{workFolder.path ?? 'Not chosen'}</span>}
-      >
-        <Button disabled={!connected} onClick={chooseWorkFolder}>
-          Change…
-        </Button>
-      </SettingRow>
-      {workFolder.terminals && (
-        <SettingRow name="Terminal" description={TERMINAL_ABOUT}>
-          <Select
-            label="Terminal"
-            value={workFolder.terminal ?? 'auto'}
-            disabled={!connected}
-            options={[
-              { value: 'auto', label: 'Automatic' },
-              ...workFolder.terminals.map((t) => ({ value: t.id, label: t.name })),
-            ]}
-            onChange={(terminal) => send({ type: 'terminal.set', terminal })}
-          />
-        </SettingRow>
-      )}
-      <EditorRow workFolder={workFolder} connected={connected} send={send} />
-      <AttachmentLimitRow workFolder={workFolder} connected={connected} send={send} />
-      {switchesShown(allowAll).map(row)}
-      {!allowAll && <MoreSwitches on={MORE_SWITCHES.filter((name) => switchedOn(name, workFolder)).length}>{MORE_SWITCHES.map(row)}</MoreSwitches>}
+    <>
+      <div id={ANCHORS.permissions} className={`${GROUP} scroll-mt-12`}>
+        {switchesShown(allowAll).map(row)}
+      </div>
       {allowAll ? (
-        <p className="text-sm text-muted">{FOLDED_SWITCHES}</p>
+        <p className="pt-12 text-sm text-muted">{FOLDED_SWITCHES}</p>
       ) : (
-        <div className="border-t py-12">
-          <SshHostsEditor
-            hosts={sshHostsOf(workFolder)}
-            about={SSH_HOSTS_ABOUT}
-            disabled={!connected}
-            onChange={(hosts) => send({ type: 'permission.setSshHosts', hosts })}
-          />
-        </div>
+        <Advanced page="permissions" note={moreOn > 0 ? `${moreOn} on` : undefined}>
+          <div className={GROUP}>
+            {MORE_SWITCHES.map(row)}
+            <div id={ANCHORS.sshHosts} className="scroll-mt-12 rounded-sm border-t py-12 transition-[background-color,box-shadow]">
+              <SshHostsEditor
+                hosts={sshHostsOf(workFolder)}
+                about={SSH_HOSTS_ABOUT}
+                disabled={!connected}
+                onChange={(hosts) => send({ type: 'permission.setSshHosts', hosts })}
+              />
+            </div>
+          </div>
+        </Advanced>
       )}
-    </div>
+    </>
   )
 }
 
@@ -112,13 +139,7 @@ function AttachmentLimitRow({ workFolder, connected, send }: Pick<PageProps, 'wo
   const choices = ATTACHMENT_LIMITS.includes(bytes) ? ATTACHMENT_LIMITS : [...ATTACHMENT_LIMITS.slice(0, -1), bytes, 0]
   const labelOf = (b: number) => (b === 0 ? 'No limit' : `${formatBytes(b)}${b === DEFAULT_ATTACHMENT_LIMIT ? ' (default)' : ''}`)
   return (
-    <SettingRow
-      name={
-        <Hint text={ATTACHMENT_LIMIT_HINT}>
-          <span className="self-start">Largest attachment</span>
-        </Hint>
-      }
-    >
+    <SettingRow id={ANCHORS.attachments} name="Largest attachment" hint={ATTACHMENT_LIMIT_HINT}>
       <Select
         label="Largest attachment"
         value={String(bytes)}
@@ -145,8 +166,9 @@ function EditorRow({ workFolder, connected, send }: Pick<PageProps, 'workFolder'
   }
   return (
     <SettingRow
+      id={ANCHORS.editor}
       name="Open files with"
-      description={EDITOR_ABOUT}
+      hint={EDITOR_ABOUT}
       below={
         choice === 'custom' && (
           <Hint text={COMMAND_HINT} side="bottom" align="start">

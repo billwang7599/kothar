@@ -146,7 +146,7 @@ function App() {
   }, [state.loaded, state.chats])
   const [nameRequest, setNameRequest] = useState<NameRequest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsPage, setSettingsPage] = useState<SettingsPage>('engines')
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>('general')
   const [changingWorkFolder, setChangingWorkFolder] = useState(false)
   const [workPath, setWorkPath] = useState(state.workFolder.path)
   if (state.workFolder.path !== workPath) {
@@ -159,19 +159,11 @@ function App() {
     if (page) setSettingsPage(page)
     setSettingsOpen(true)
   }, [])
-  // A kothar:settings/<page>#<anchor> link in an extension's view: the page, then its anchor scrolled into view once
-  // it's drawn.
+  // A kothar:settings/<page>#<anchor> link in an extension's view: the page, then its anchor shown once it's drawn
+  // (opening the page's Advanced if it's in there).
   const openSettingsLink = useCallback(
     (page: string, anchor?: string) => {
-      openSettings(page as SettingsPage)
-      if (!anchor) return
-      let tries = 30
-      const find = () => {
-        const target = document.getElementById(anchor)
-        if (target) return target.scrollIntoView({ block: 'start' })
-        if (--tries > 0) requestAnimationFrame(find)
-      }
-      requestAnimationFrame(find)
+      openSettings((anchor ? `${page}#${anchor}` : page) as SettingsPage)
     },
     [openSettings],
   )

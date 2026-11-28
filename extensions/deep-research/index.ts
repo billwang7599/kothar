@@ -715,7 +715,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
       {
         key: 'workerRole',
         label: 'Workers use',
-        description: 'Which model list (Settings → Models) research workers run on.',
+        description: 'Which model list (Settings → Engines → Models) research workers run on.',
         type: 'select',
         options: [
           { value: 'searching', label: 'Searching models' },

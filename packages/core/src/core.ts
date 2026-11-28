@@ -493,7 +493,7 @@ function assembleCore(options: {
   }
   const takesMcp = (engine: string) => adapterFor(engine)?.kotharMcp === true && mcpUrl !== undefined
   const chosenWorkFolder = () => {
-    if (!settings.workFolder) throw new Error('Choose a work folder first, in Settings → Work folder')
+    if (!settings.workFolder) throw new Error('Choose a work folder first, in Settings → General')
     return settings.workFolder
   }
 

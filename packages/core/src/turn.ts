@@ -756,7 +756,7 @@ export function openTurns(deps: TurnDeps) {
     const adapter = adapterFor(roleRun?.engine ?? chat.info.engine)!
     const editAnywhere = editsAnywhere(...switchesOf(chat))
     if (!machine.canSandbox && !editAnywhere && UNSANDBOXED_NEEDS_EDIT_ANYWHERE) {
-      throw new Error("Kothar can't sandbox engines on this system yet. Turn on Edits anywhere in this chat's Context panel, or as the default in Settings → Work folder, to run it unsandboxed.")
+      throw new Error("Kothar can't sandbox engines on this system yet. Turn on Edits anywhere in this chat's Context panel, or as the default in Settings → Permissions, to run it unsandboxed.")
     }
     return { run, adapter, editAnywhere, roleUsed: roleRun !== undefined }
   }
@@ -1130,7 +1130,7 @@ export function openTurns(deps: TurnDeps) {
       const parentId = chat.info.parentId
       deps.activity?.emit(parentId, () => ({
         kind: 'worker',
-        title: `${chat.info.name} waits to start: this chat already runs as many workers as Settings → Workers allows`,
+        title: `${chat.info.name} waits to start: this chat already runs as many workers as Settings → Agents → Workers allows`,
       }))
     }
   }

@@ -1,130 +1,50 @@
-// The Settings dialog: its page list and navigation. Each page's content lives in settings/.
-import { Fragment } from 'react'
+// The Settings dialog: its pages, search, and navigation. Each page's content lives in settings/.
+import { Fragment, useEffect, useState } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog, Tabs } from 'radix-ui'
-import { CONTEXT_SECTIONS } from '@kothar/core/shared'
-import { SECTIONS } from './context-panel.tsx'
-import { Button, CHAT_NOUN, GROUP, MOTION, NAV_LABEL, Switch, useReturnFocus } from './controls.tsx'
-import { ShortcutsPage } from './shortcuts-page.tsx'
-import { SetupsPage } from './setups-page.tsx'
-import { EngineAccountsSection } from './settings/accounts.tsx'
-import { EnginesPage } from './settings/engines.tsx'
+import { Button, MOTION, NAV_LABEL, useReturnFocus } from './controls.tsx'
 import { AppearancePage } from './settings/appearance.tsx'
 import { CommunityExtensionsPage } from './settings/community.tsx'
+import { EnginesPage } from './settings/engines.tsx'
 import { extensionPages, ExtensionsPage } from './settings/extensions.tsx'
-import { ModelListsSection } from './settings/models.tsx'
-import { SettingRow } from './settings/rows.tsx'
+import { revealSetting, searchSettings, settingsIndex, type SettingEntry } from './settings/search.ts'
 import { NAV_GROUPS, type Page, type PageProps } from './settings/types.ts'
-import { WORK_FOLDER_INTRO, WorkFolderPage } from './settings/work-folder.tsx'
-import { CORE_PROMPTS_INTRO, CorePromptsPage, WORKERS_INTRO, WorkersPage } from './settings/workers.tsx'
+import { GeneralPage, PERMISSIONS_INTRO, PermissionsPage } from './settings/work-folder.tsx'
+import { AgentsPage } from './settings/workers.tsx'
 
 const PAGES = [
+  {
+    id: 'general',
+    group: 'Options',
+    title: 'General',
+    body: (props: PageProps) => <GeneralPage {...props} />,
+  },
   {
     id: 'engines',
     group: 'Options',
     title: 'Engines',
-    intro: 'Kothar only starts the engines you turn on here, and gives each the built-in tools you leave on.',
-    body: ({ engines, engineTools, connected, send, openGetStarted }: PageProps) => (
-      <EnginesPage
-        engines={engines}
-        engineTools={engineTools}
-        connected={connected}
-        send={send}
-        openGetStarted={openGetStarted}
-      />
-    ),
+    intro: 'The engines Kothar runs, the accounts they run as, and the models each kind of work uses.',
+    body: (props: PageProps) => <EnginesPage {...props} />,
   },
   {
-    id: 'work',
+    id: 'agents',
     group: 'Options',
-    title: 'Work folder',
-    intro: WORK_FOLDER_INTRO,
-    body: (props: PageProps) => <WorkFolderPage {...props} />,
+    title: 'Agents',
+    intro: 'Workers, saved setups, and what agents are told.',
+    body: (props: PageProps) => <AgentsPage {...props} />,
+  },
+  {
+    id: 'permissions',
+    group: 'Options',
+    title: 'Permissions',
+    intro: PERMISSIONS_INTRO,
+    body: (props: PageProps) => <PermissionsPage {...props} />,
   },
   {
     id: 'appearance',
     group: 'Options',
     title: 'Appearance',
     body: ({ openMarketplace }: PageProps) => <AppearancePage openMarketplace={openMarketplace} />,
-  },
-  {
-    id: 'shortcuts',
-    group: 'Options',
-    title: 'Shortcuts',
-    intro: 'Click an action\'s keys, then press new ones.',
-    body: () => <ShortcutsPage />,
-  },
-  {
-    id: 'accounts',
-    group: 'Options',
-    title: 'Accounts',
-    intro:
-      'Each engine runs as its Active account: one saved here, or whoever the engine itself is signed in as. ' +
-      'Accounts show while their engine is on.',
-    body: ({ engines, accounts, connected, send }: PageProps) => {
-      const shown = engines.flatMap((e) => (e.enabled ? accounts.filter((a) => a.engine === e.id) : []))
-      if (!shown.length) return <p className="text-muted">Turn on an engine to manage its accounts.</p>
-      return shown.map((a) => <EngineAccountsSection key={a.engine} accounts={a} connected={connected} send={send} />)
-    },
-  },
-  {
-    id: 'models',
-    group: 'Options',
-    title: 'Models',
-    intro:
-      'Each list runs its first model that can run, on any engine; if that engine is off or stops offering it, the ' +
-      `next one runs. A ${CHAT_NOUN.one}'s own pick in its message box comes first.`,
-    body: ({ engines, modelLists, extensions, connected, send }: PageProps) => {
-      if (!engines.some((e) => e.enabled)) return <p className="text-muted">Turn on an engine to pick models.</p>
-      return <ModelListsSection engines={engines} lists={modelLists} extensions={extensions} connected={connected} send={send} />
-    },
-  },
-  {
-    id: 'workers',
-    group: 'Options',
-    title: 'Workers',
-    intro: WORKERS_INTRO,
-    body: ({ workers, connected, send }: PageProps) => <WorkersPage workers={workers} connected={connected} send={send} />,
-  },
-  {
-    id: 'prompts',
-    group: 'Options',
-    title: 'Prompts',
-    intro: CORE_PROMPTS_INTRO,
-    body: ({ corePrompts, connected, send }: PageProps) => <CorePromptsPage prompts={corePrompts} connected={connected} send={send} />,
-  },
-  {
-    id: 'setups',
-    group: 'Options',
-    title: 'Setups',
-    intro:
-      `A setup is a saved model, thinking level, extensions and instructions for a kind of job. Pick one for a ${CHAT_NOUN.one} ` +
-      'in its General tab; a lead can also start a worker with one by name. What a setup leaves out follows Settings.',
-    body: ({ setups = [], setupSave, engines, extensions, connected, send }: PageProps) => (
-      <SetupsPage setups={setups} engines={engines} extensions={extensions} connected={connected} send={send} saved={setupSave} />
-    ),
-  },
-  {
-    id: 'context',
-    group: 'Options',
-    title: 'Context',
-    intro:
-      `What a ${CHAT_NOUN.one} uses from the global AGENTS.md and the chats above it, unless you switch it in its ` +
-      'Context panel. Its own AGENTS.md, folders and files always start on.',
-    body: ({ contextDefaults, connected, send }: PageProps) => (
-      <div className={GROUP}>
-        {CONTEXT_SECTIONS.map((section) => (
-          <SettingRow key={section} name={SECTIONS[section].label} description={SECTIONS[section].inherited}>
-            <Switch
-              label={`${SECTIONS[section].label} from above on by default`}
-              checked={contextDefaults[section]}
-              disabled={!connected}
-              onChange={(enabled) => send({ type: 'context.setDefault', section, enabled })}
-            />
-          </SettingRow>
-        ))}
-      </div>
-    ),
   },
   {
     id: 'extensions',
@@ -142,7 +62,31 @@ const PAGES = [
   },
 ] as const satisfies readonly Page[]
 
-export type SettingsPage = (typeof PAGES)[number]['id'] | `extension:${string}`
+/**
+ * Pages that became sections of another, so links to them (the app's own, kothar:settings/<page> links the core and
+ * extensions send, such as the Inspector's Edit) still land in the right place.
+ */
+export const MOVED_PAGES = {
+  work: { page: 'general' },
+  shortcuts: { page: 'appearance', anchor: 'section-shortcuts' },
+  accounts: { page: 'engines', anchor: 'section-accounts' },
+  models: { page: 'engines', anchor: 'section-models' },
+  workers: { page: 'agents', anchor: 'section-workers' },
+  setups: { page: 'agents', anchor: 'section-setups' },
+  prompts: { page: 'agents', anchor: 'section-prompts' },
+  context: { page: 'agents', anchor: 'section-context' },
+} as const satisfies Record<string, { page: (typeof PAGES)[number]['id']; anchor?: string }>
+
+type PageId = (typeof PAGES)[number]['id'] | keyof typeof MOVED_PAGES | `extension:${string}`
+/** A page, and optionally (after #) the id of what to show on it, as in a kothar:settings/<page>#<anchor> link. */
+export type SettingsPage = PageId | `${PageId}#${string}`
+
+/** The page a link to page opens, and where on it to go: the anchor it names, else where a moved page went. */
+export const pageOf = (link: string): { page: string; anchor?: string } => {
+  const [page = '', anchor] = link.split(/#(.*)/s)
+  const moved = (MOVED_PAGES as Record<string, { page: string; anchor?: string }>)[page] ?? { page }
+  return anchor ? { page: moved.page, anchor } : moved
+}
 
 type SettingsProps = PageProps & {
   open: boolean
@@ -154,9 +98,30 @@ type SettingsProps = PageProps & {
 export function SettingsDialog({ open, page, openPage, close, ...props }: SettingsProps) {
   const focus = useReturnFocus()
   const pages: readonly Page[] = [...PAGES, ...extensionPages(props.extensions, props.communityExtensions ?? false)]
-  const current = pages.find((p) => p.id === page) ?? PAGES[0]
+  const moved = pageOf(page)
+  const current = pages.find((p) => p.id === moved.page) ?? PAGES[0]
+  // A link to a place on a page, or to a page that's now a section of another: show it.
+  useEffect(() => {
+    if (open && moved.anchor) revealSetting(moved.anchor)
+  }, [open, page, moved.anchor])
+  const [query, setQuery] = useState('')
+  const { engines, extensions, corePrompts, communityExtensions, workFolder } = props
+  const index = settingsIndex({ engines, extensions, corePrompts, communityExtensions, workFolder })
+  const titleOf = (id: string) => pages.find((p) => p.id === id)?.title ?? id
+  const results = searchSettings(index, query, titleOf).filter((r) => pages.some((p) => p.id === r.page))
+  const go = (entry: SettingEntry) => {
+    openPage(entry.page as SettingsPage)
+    revealSetting(entry.anchor)
+  }
   return (
-    <Dialog.Root open={open} onOpenChange={(open) => open || close()}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(open) => {
+        if (open) return
+        setQuery('')
+        close()
+      }}
+    >
       <AnimatePresence>
         {open && (
           <Dialog.Portal forceMount>
@@ -171,7 +136,7 @@ export function SettingsDialog({ open, page, openPage, close, ...props }: Settin
               onCloseAutoFocus={focus.restore}
             >
               <m.div
-                className="fixed inset-0 m-auto flex h-[min(620px,calc(100vh-32px))] w-[min(880px,calc(100vw-32px))] overflow-hidden rounded-xl border bg-bg text-text shadow-overlay"
+                className="fixed inset-0 m-auto flex h-[min(680px,calc(100vh-32px))] w-[min(900px,calc(100vw-32px))] overflow-hidden rounded-xl border bg-bg text-text shadow-overlay"
                 {...MOTION.pop}
               >
                 <Dialog.Title className="sr-only">Settings</Dialog.Title>
@@ -181,35 +146,42 @@ export function SettingsDialog({ open, page, openPage, close, ...props }: Settin
                   value={current.id}
                   onValueChange={(id) => openPage(id as SettingsPage)}
                 >
-                  <Tabs.List
-                    aria-label="Settings"
-                    className="flex w-200 shrink-0 scroll-inset flex-col gap-1 overflow-y-auto border-r bg-panel pt-4 pr-0 pb-12 pl-8 max-[720px]:w-160 max-[600px]:w-auto max-[600px]:flex-row max-[600px]:flex-wrap max-[600px]:border-r-0 max-[600px]:border-b max-[600px]:py-8 max-[600px]:pr-44"
-                  >
-                    {NAV_GROUPS.map((group) => (
-                      <Fragment key={group}>
-                        <div className={`${NAV_LABEL} max-[600px]:hidden`}>{group}</div>
-                        {pages
-                          .filter((p) => p.group === group)
-                          .map((p) => (
-                            <Tabs.Trigger key={p.id} value={p.id} asChild>
-                              <button className="flex h-control shrink-0 items-center rounded px-8 text-left text-muted transition-colors hover:bg-raised hover:text-text data-[state=active]:bg-raised data-[state=active]:text-text">
-                                {p.title}
-                              </button>
-                            </Tabs.Trigger>
-                          ))}
-                      </Fragment>
-                    ))}
-                  </Tabs.List>
+                  <div className="flex w-200 shrink-0 flex-col border-r bg-panel max-[720px]:w-170 max-[600px]:w-auto max-[600px]:border-r-0 max-[600px]:border-b">
+                    <SearchBox query={query} setQuery={setQuery} first={results[0]} go={go} />
+                    {query.trim() ? (
+                      <Results results={results} titleOf={titleOf} go={go} />
+                    ) : (
+                      <Tabs.List
+                        aria-label="Settings"
+                        className="flex min-h-0 flex-1 scroll-inset flex-col gap-1 overflow-y-auto pt-0 pr-0 pb-12 pl-8 max-[600px]:flex-row max-[600px]:flex-wrap max-[600px]:pt-4 max-[600px]:pb-8 max-[600px]:pl-8"
+                      >
+                        {NAV_GROUPS.map((group) => (
+                          <Fragment key={group}>
+                            <div className={`${NAV_LABEL} max-[600px]:hidden`}>{group}</div>
+                            {pages
+                              .filter((p) => p.group === group)
+                              .map((p) => (
+                                <Tabs.Trigger key={p.id} value={p.id} asChild>
+                                  <button className="flex h-control min-w-0 shrink-0 items-center rounded px-8 text-left text-muted transition-colors hover:bg-raised hover:text-text data-[state=active]:bg-raised data-[state=active]:text-text">
+                                    <span className="truncate">{p.title}</span>
+                                  </button>
+                                </Tabs.Trigger>
+                              ))}
+                          </Fragment>
+                        ))}
+                      </Tabs.List>
+                    )}
+                  </div>
                   {pages.map((p) => (
                     <Tabs.Content key={p.id} value={p.id} asChild>
                       <m.div
-                        className="min-h-0 min-w-0 flex-1 scroll-inset overflow-y-auto pt-20 pr-18 pb-32 pl-32 [--scroll-top:48px] focus-visible:-outline-offset-2 max-[600px]:pr-2 max-[600px]:pl-16"
+                        className="min-h-0 min-w-0 flex-1 scroll-inset overflow-x-hidden overflow-y-auto pt-20 pr-18 pb-32 pl-32 [--scroll-top:48px] focus-visible:-outline-offset-2 max-[600px]:pr-2 max-[600px]:pl-16"
                         initial={MOTION.fade.initial}
                         animate={MOTION.fade.animate}
                       >
                         <h2 className="pr-24 text-[16px] font-semibold">{p.title}</h2>
                         {p.intro && <p className="mt-4 max-w-[60ch] pr-24 text-sm text-muted">{p.intro}</p>}
-                        <div className="mt-16 flex flex-col">{p.body(props)}</div>
+                        <div className="mt-20 flex max-w-[680px] flex-col">{p.body(props)}</div>
                       </m.div>
                     </Tabs.Content>
                   ))}
@@ -225,5 +197,57 @@ export function SettingsDialog({ open, page, openPage, close, ...props }: Settin
         )}
       </AnimatePresence>
     </Dialog.Root>
+  )
+}
+
+type SearchProps = { query: string; setQuery: (q: string) => void; first?: SettingEntry; go: (entry: SettingEntry) => void }
+
+// Filters every setting on every page; Enter goes to the first match, Esc clears what's typed before it closes Settings.
+function SearchBox({ query, setQuery, first, go }: SearchProps) {
+  return (
+    <div className="shrink-0 px-8 pt-12 pb-4 max-[600px]:pr-44">
+      <input
+        type="search"
+        aria-label="Search settings"
+        placeholder="Search settings"
+        className="h-control w-full min-w-0 text-sm"
+        value={query}
+        spellCheck={false}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && first) {
+            e.preventDefault()
+            go(first)
+          }
+          if (e.key === 'Escape' && query) {
+            e.preventDefault()
+            e.stopPropagation()
+            setQuery('')
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+function Results({ results, titleOf, go }: { results: SettingEntry[]; titleOf: (page: string) => string; go: (entry: SettingEntry) => void }) {
+  if (!results.length) return <p className="px-16 pt-8 text-sm text-muted">No settings match.</p>
+  return (
+    <ul aria-label="Matching settings" className="flex min-h-0 flex-1 scroll-inset flex-col gap-1 overflow-y-auto pt-4 pr-0 pb-12 pl-8 max-[600px]:max-h-200">
+      {results.map((entry) => (
+        <li key={`${entry.page} ${entry.anchor}`} className="min-w-0">
+          <button
+            type="button"
+            className="flex w-full min-w-0 flex-col items-start rounded px-8 py-4 text-left transition-colors hover:bg-raised"
+            onClick={() => go(entry)}
+          >
+            <span className="w-full truncate">{entry.label}</span>
+            <span className="w-full truncate text-xs text-faint">
+              {[titleOf(entry.page), entry.section !== entry.label && entry.section, entry.advanced && 'Advanced'].filter(Boolean).join(' › ')}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
   )
 }

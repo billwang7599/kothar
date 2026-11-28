@@ -1,4 +1,4 @@
-// The Models page: one ordered list of models per role, Kothar's own (Chat, Workers) and each one an extension that's on
+// Settings → Engines → Models: one ordered list of models per role, Kothar's own (Chat, Workers) and each one an extension that's on
 // declares (Extension.modelRoles).
 import {
   levelsOf,
@@ -13,6 +13,7 @@ import {
 import { Button, GROUP, Select } from '../controls.tsx'
 import { engineName, engineProblem, modelChoices, modelKey, fromModelKey, modelRolesOf } from '../state.ts'
 import { SettingRow } from './rows.tsx'
+import { settingAnchor } from './search.ts'
 
 type ModelListsProps = {
   engines: EngineInfo[]
@@ -37,7 +38,7 @@ export function ModelListsSection({ engines, lists, extensions, connected, send 
       <div className={GROUP}>
         {modelRolesOf(extensions).map(({ id: role, label: name, description, extension }) => {
           const list = lists[role] ?? []
-          const about = [description, extension && `From ${extension}.`].filter(Boolean).join(' ')
+
           const setList = (models: ModelRow[]) => send({ type: 'models.setList', role, models })
           const move = (from: number, to: number) => {
             const next = [...list]
@@ -108,8 +109,10 @@ export function ModelListsSection({ engines, lists, extensions, connected, send 
           return (
             <SettingRow
               key={role}
+              id={settingAnchor('models', role)}
               name={name}
-              description={about}
+              hint={description || undefined}
+              description={extension && `From ${extension}`}
               below={
                 items.length > 0 ? (
                   <ol aria-label={`${name} models`}>{items}</ol>

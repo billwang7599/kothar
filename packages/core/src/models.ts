@@ -169,7 +169,7 @@ export function openModels({
         if (!engine.enabled) return `${name} runs on engine "${setup.engine}", which is off. Turn it on in Settings.`
         if (!engine.models?.length) return undefined
         if (setup.model !== undefined) {
-          return `Engine "${setup.engine}" no longer offers "${setup.model}", which the setup "${setup.name}" runs. Pick another model in Settings → Setups.`
+          return `Engine "${setup.engine}" no longer offers "${setup.model}", which the setup "${setup.name}" runs. Pick another model in Settings → Agents → Setups.`
         }
         return `${name} runs on engine "${setup.engine}", which offers no model now.`
       }
@@ -181,7 +181,7 @@ export function openModels({
         return `Engine "${chat.engine}" no longer offers "${chat.model}". Pick another model for this chat.`
       }
       const list = chat.role && roles.live(chat.role) && lists()[chat.role]?.length ? roles.label(chat.role) : 'Chat'
-      return `Nothing in the ${list} model list can run. Add a model or turn its engine on in Settings → Models.`
+      return `Nothing in the ${list} model list can run. Add a model or turn its engine on in Settings → Engines → Models.`
     },
 
     setList(role: unknown, models: unknown) {

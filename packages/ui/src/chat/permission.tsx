@@ -140,7 +140,7 @@ function AlwaysAllow({ host, disabled, trust }: AlwaysAllowProps) {
   return (
     <DropdownMenu.Root modal={false}>
       <Hint
-        text={`Approve, and add ${what} to Allowed SSH hosts, so ssh, scp and rsync to it run without asking. Remove it in the Permissions tab or Settings → Work folder.`}
+        text={`Approve, and add ${what} to Allowed SSH hosts, so ssh, scp and rsync to it run without asking. Remove it in the Permissions tab or Settings → Permissions.`}
       >
         <DropdownMenu.Trigger asChild>
           <Button disabled={disabled} className="flex min-w-0 items-center gap-6" data-always-allow={host.host}>

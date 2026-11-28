@@ -120,7 +120,7 @@ export function MoreSwitches({ on, children }: { on: number; children: ReactNode
 }
 export const FOLDED_SWITCHES = `${PERMISSION_SWITCHES.length - 1} more switches and the allowed SSH hosts, not used while Allow all is on`
 const PERMISSIONS_HINT =
-  'Each shows Settings → Work folder until you pick, or for a worker, its space. A pick is for this chat only.'
+  'Each shows Settings → Permissions until you pick, or for a worker, its space. A pick is for this chat only.'
 const EMPTY_SECTION: Record<ContextSection, string> = {
   agents: '',
   folders: 'No folders.',

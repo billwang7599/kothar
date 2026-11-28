@@ -143,7 +143,9 @@ test('Settings → Workers: agents’ switch, the limit for every child, and the
     instructions: { id: 'instructions', label: 'When to start workers', where: 'instructions', default: 'Delegate.', text: 'Delegate.' },
   }
   const sent = renderSettings(workFolder, [], { page: 'workers', workers })
-  expect([...dialog().querySelectorAll('h2')].map((h) => h.textContent)).toContain('Workers')
+  // Workers is a section of Agents now; the old page's links land on it.
+  expect([...dialog().querySelectorAll('h2')].map((h) => h.textContent)).toContain('Agents')
+  expect(dialog().querySelector('section[aria-label="Workers"]')).not.toBeNull()
   expect(dialog().querySelector('#prompt-workers-instructions')).not.toBeNull()
   act(() => dialog().querySelector<HTMLButtonElement>('button[aria-label="Let agents start workers"]')!.click())
   const limit = dialog().querySelector<HTMLInputElement>('input[aria-label="Max running per chat"]')!
@@ -154,7 +156,7 @@ test('Settings → Workers: agents’ switch, the limit for every child, and the
     { type: 'workers.set', limit: 2 },
   ])
   // Not an extension any more: it isn't on the extensions page.
-  expect([...dialog().querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('Workers')
+  expect([...dialog().querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('Agents')
 })
 
 test('Settings → Prompts edits Kothar’s own prompts, each where the Inspector’s Edit link scrolls to', () => {
@@ -170,7 +172,7 @@ test('Settings → Prompts edits Kothar’s own prompts, each where the Inspecto
   expect(sent).toEqual([{ type: 'corePrompt.set', id: 'combine', text: 'Mix them.' }])
 })
 
-test('Settings → Work folder sets the default of each permission every chat follows', () => {
+test('Settings → Permissions sets the default of each permission every chat follows', () => {
   expect(PERMISSION_SWITCHES).toContain('autoFetch')
   expect(PERMISSIONS.autoFetch.label).toBe('Fetch web pages without asking')
   expect(PERMISSIONS.autoNetworkCommands.label).toBe('Run network commands without asking')
@@ -181,38 +183,38 @@ test('Settings → Work folder sets the default of each permission every chat fo
   for (const name of PERMISSION_SWITCHES) {
     const toggle = () =>
       dialog().querySelector(`[aria-label="${PERMISSIONS[name].label}"]`) as HTMLButtonElement
-    const sent = renderSettings({ ...workFolder, path: '/garage/work' })
+    const sent = renderSettings({ ...workFolder, path: '/garage/work' }, [], { page: 'permissions' })
     expect(toggle().getAttribute('aria-checked')).toBe(String(PERMISSION_DEFAULTS[name]))
     act(() => toggle().click())
     expect(sent).toEqual([{ type: 'permission.setDefault', name, enabled: !PERMISSION_DEFAULTS[name] }])
-    renderSettings({ ...workFolder, path: '/garage/work', [name]: !PERMISSION_DEFAULTS[name] }, sent)
+    renderSettings({ ...workFolder, path: '/garage/work', [name]: !PERMISSION_DEFAULTS[name] }, sent, { page: 'permissions' })
     expect(toggle().getAttribute('aria-checked')).toBe(String(!PERMISSION_DEFAULTS[name]))
   }
 })
 
-test('Settings → Work folder folds the other permission defaults away while Allow all is on', () => {
+test('Settings → Permissions folds the other permission defaults away while Allow all is on', () => {
   const shown = () => PERMISSION_SWITCHES.filter((name) => dialog().querySelector(`[aria-label="${PERMISSIONS[name].label}"]`))
-  renderSettings({ ...workFolder, path: '/garage/work', allowAll: true })
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: true }, [], { page: 'permissions' })
   expect(shown()).toEqual(['allowAll'])
   expect(dialog().textContent).toContain('not used while Allow all is on')
   expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')).toBeNull()
-  renderSettings({ ...workFolder, path: '/garage/work', allowAll: false })
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: false }, [], { page: 'permissions' })
   expect(shown()).toEqual(PERMISSION_SWITCHES)
   expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')).not.toBeNull()
 })
 
-test('Settings → Work folder adds and removes the allowed SSH hosts every chat follows', () => {
-  const sent = renderSettings({ ...workFolder, path: '/garage/work' })
+test('Settings → Permissions adds and removes the allowed SSH hosts every chat follows', () => {
+  const sent = renderSettings({ ...workFolder, path: '/garage/work' }, [], { page: 'permissions' })
   expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')!.textContent).toContain('None.')
   type(dialog().querySelector('input[aria-label="SSH host"]') as HTMLInputElement, 'build.example.com')
   act(() => button('Add')!.click())
   expect(sent).toEqual([{ type: 'permission.setSshHosts', hosts: [{ host: 'build.example.com' }] }])
-  renderSettings({ ...workFolder, path: '/garage/work', sshHosts: [{ host: 'build.example.com' }] }, sent)
+  renderSettings({ ...workFolder, path: '/garage/work', sshHosts: [{ host: 'build.example.com' }] }, sent, { page: 'permissions' })
   act(() => (dialog().querySelector('button[aria-label="Remove build.example.com"]') as HTMLButtonElement).click())
   expect(sent.at(-1)).toEqual({ type: 'permission.setSshHosts', hosts: [] })
 })
 
-test('Settings → Work folder picks the terminal Open in Terminal uses, where there is a choice', () => {
+test('Settings → General picks the terminal Open in Terminal uses, where there is a choice', () => {
   const terminals = [
     { id: 'terminal', name: 'Terminal' },
     { id: 'ghostty', name: 'Ghostty' },
@@ -232,7 +234,7 @@ test('Settings → Work folder picks the terminal Open in Terminal uses, where t
   expect(select()!.textContent).toBe('Ghostty')
 })
 
-test('Settings → Work folder sets the largest attachment, 200 MB by default, or no limit', () => {
+test('Settings → General sets the largest attachment, 200 MB by default, or no limit', () => {
   const select = () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Largest attachment"]')!
   const sent = renderSettings(workFolder)
   expect(select().textContent).toBe('200 MB (default)')
@@ -259,7 +261,7 @@ test('Settings → Work folder sets the largest attachment, 200 MB by default, o
 test('Settings has no Instructions page: the global AGENTS.md is edited in the Context panel', () => {
   renderSettings(workFolder)
   const tabs = [...dialog().querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)
-  expect(tabs).toContain('Work folder')
+  expect(tabs).toContain('General')
   expect(tabs).not.toContain('Instructions')
 })
 
@@ -522,7 +524,7 @@ test('Settings → Models lists each role once across engines, each model with i
   // Kothar's own lists first, then each extension's, and none for a role no extension that's on declares.
   const roleNames = [...dialog().querySelectorAll('button[aria-label^="Add a "]')].map((b) => b.getAttribute('aria-label'))
   expect(roleNames).toEqual(['Add a Chat model', 'Add a Workers model', 'Add a Planning model', 'Add a Searching model'])
-  expect(dialog().textContent).toContain('Planning work. From Plan.')
+  expect(dialog().textContent).toContain('From Plan')
   expect(select('Remove Opus · Claude Code')!.disabled).toBe(true)
 
   open('Thinking for One · pi in Planning')

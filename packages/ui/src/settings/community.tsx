@@ -47,7 +47,7 @@ export function CommunityExtensionsPage(props: PageProps) {
   return (
     <>
       <RestartNotice restart={restart} running={running} connected={connected} send={send} />
-      <div className={`${GROUP} mb-12`}>
+      <div id="section-community-hub" className={`${GROUP} mb-12 scroll-mt-12`}>
         <SettingRow
           name="Community extensions"
           description={
