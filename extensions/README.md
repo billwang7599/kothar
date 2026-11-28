@@ -20,7 +20,7 @@ on its page in Settings; switches and settings apply from the next message.
 | `account-rotation` | Account rotation | When an account hits its usage limit, switches to the next saved account and carries on | No |
 | `browser` | Browser | Agents browse in your own Chrome, with your logins, through the Kothar Chrome extension (`browser/chrome-extension/`) | No |
 | `deep-research` | Deep Research | Long, multi-source research that ends in a cited report, every claim backed by a quote from its page | No |
-| `git` | Git | A Changes tab: each checkout's branch, its changed files and diffs, and its pull request if `gh` is signed in | No |
+| `git` | Git | A Changes tab: each checkout's branch, its changed files and diffs, and its pull request if `gh` is signed in; a pop-out view where you comment on diff lines and send them all to the agent | No |
 | `pins` | Pins | Pin messages and find them again in the Pinned tab | No |
 
 Each extension's settings, prompts and tool descriptions are listed, and editable, on its Settings page.
