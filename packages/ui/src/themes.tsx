@@ -275,7 +275,7 @@ export function Appearance({ browse }: { browse?: () => void } = {}) {
           />
         </div>
       </div>
-      <div className="pt-24 pb-8 font-semibold">Themes</div>
+      <div className="pt-24 pb-8 label-k text-muted">Themes</div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-12">
         {shownThemes().map(([id, theme]) => (
           <button

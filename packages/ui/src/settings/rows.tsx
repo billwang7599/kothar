@@ -50,7 +50,8 @@ export function Section({ id, title, hint, action, plain, children }: SectionPro
   return (
     <section id={id} aria-label={!plain && typeof title === 'string' ? title : undefined} className="flex scroll-mt-12 flex-col rounded pt-24 transition-colors first:pt-0">
       <div className="flex min-h-26 flex-wrap items-center gap-8 pb-8">
-        <h3 className="min-w-0 flex-1 text-[13px] font-semibold">
+        {/* A mono kicker, like the website's section labels. */}
+        <h3 className="min-w-0 flex-1 label-k text-muted">
           {hint ? (
             <Hint text={hint}>
               <span>{title}</span>
