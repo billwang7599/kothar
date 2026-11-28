@@ -259,7 +259,7 @@ export function WorkFolderDialog({ open, workFolder, connected, send, toasts, pi
                 onSubmit={submit}
               >
                 <div className="flex flex-col gap-4">
-                  <Dialog.Title className="text-[16px] font-semibold">{WORK_FOLDER_TITLE}</Dialog.Title>
+                  <Dialog.Title className="display text-[16px] leading-[1.2]">{WORK_FOLDER_TITLE}</Dialog.Title>
                   <p className="text-sm text-muted">{WORK_FOLDER_HINT}</p>
                 </div>
                 <label className="flex flex-col gap-4">

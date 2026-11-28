@@ -24,7 +24,8 @@ const BUSIEST: ChatStatus[] = ['waiting', 'stopping', 'running', 'idle']
 // pushes the row sideways.
 const INDENTS = ['pl-8', 'pl-22', 'pl-36', 'pl-50']
 // Selected rows are filled; hovered ones get a lighter wash, so the open chat stays distinct under the pointer.
-const ROW_SELECTED = 'bg-raised text-text'
+// The open chat: a raised row with the accent down its left edge, like the website's selected Wiki page.
+const ROW_SELECTED = 'bg-raised text-text shadow-[inset_2px_0_0_var(--accent)]'
 const ROW_HOVER = 'hover:bg-raised/50 has-data-[state=open]:bg-raised/50 has-data-[state=open]:text-text'
 // A row's ⋯: shown on hover, on keyboard focus and while its menu is open. Its place is always kept (never display:
 // none), so nothing in the row moves when the pointer comes in: the workers chevron beside it stays put under the click.
@@ -999,7 +1000,7 @@ export function NameDialog({ request, connected, send, close }: NameDialogProps)
                 {...MOTION.pop}
                 onSubmit={submit}
               >
-                <Dialog.Title className="text-[16px] font-semibold">
+                <Dialog.Title className="display text-[16px] leading-[1.2]">
                   {isNew ? `New ${CHAT_NOUN.one}` : `Rename ${CHAT_NOUN.one}`}
                 </Dialog.Title>
                 <label className="flex flex-col gap-4">

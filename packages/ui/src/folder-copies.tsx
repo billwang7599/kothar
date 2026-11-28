@@ -104,7 +104,7 @@ function CopyBackDialog({ open, close, chatId, path, send }: {
                 className="fixed inset-0 z-30 m-auto flex h-fit max-h-[calc(100vh-32px)] w-[min(520px,calc(100vw-32px))] flex-col gap-12 scroll-inset overflow-y-auto rounded-xl border bg-panel pt-14 pr-2 pb-16 pl-16 text-text shadow-overlay"
                 {...MOTION.pop}
               >
-                <Dialog.Title className="text-[16px] font-semibold">Copy changes back</Dialog.Title>
+                <Dialog.Title className="display text-[16px] leading-[1.2]">Copy changes back</Dialog.Title>
                 <p className="font-mono text-xs wrap-anywhere text-muted">{path}</p>
                 {!current ? (
                   <p className="text-sm text-muted">Looking for changes…</p>

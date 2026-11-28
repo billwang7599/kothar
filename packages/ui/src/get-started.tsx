@@ -119,7 +119,7 @@ export function GetStartedDialog({ open, close, engines, accounts, chats, connec
                 className="fixed inset-0 outline-none m-auto flex h-fit max-h-[calc(100vh-32px)] w-[min(560px,calc(100vw-32px))] flex-col gap-16 scroll-inset overflow-y-auto rounded-xl border bg-panel pt-14 pr-2 pb-16 pl-16 text-text shadow-overlay"
                 {...MOTION.pop}
               >
-                <Dialog.Title className="text-[16px] font-semibold">Get started</Dialog.Title>
+                <Dialog.Title className="display text-[16px] leading-[1.2]">Get started</Dialog.Title>
                 <ol className="flex flex-col gap-16 pr-14">
                   <Step
                     n={1}

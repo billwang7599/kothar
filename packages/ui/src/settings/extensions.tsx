@@ -116,7 +116,7 @@ function ExtensionSetupDialog({ open, extension, connected, send, close }: Setup
                 {...MOTION.pop}
               >
                 <div className="flex flex-col gap-4">
-                  <AlertDialog.Title className="text-[16px] font-semibold">{setupTitle(extension)}</AlertDialog.Title>
+                  <AlertDialog.Title className="display text-[16px] leading-[1.2]">{setupTitle(extension)}</AlertDialog.Title>
                   {extension.setup?.description && <p className="text-sm text-muted">{linked(extension.setup.description)}</p>}
                 </div>
                 <SetupStatus extension={extension} />

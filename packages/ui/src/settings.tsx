@@ -179,7 +179,7 @@ export function SettingsDialog({ open, page, openPage, close, ...props }: Settin
                         initial={MOTION.fade.initial}
                         animate={MOTION.fade.animate}
                       >
-                        <h2 className="pr-24 text-[16px] font-semibold">{p.title}</h2>
+                        <h2 className="display pr-24 text-[18px] leading-[1.2]">{p.title}</h2>
                         {p.intro && <p className="mt-4 max-w-[60ch] pr-24 text-sm text-muted">{p.intro}</p>}
                         <div className="mt-20 flex max-w-[680px] flex-col">{p.body(props)}</div>
                       </m.div>

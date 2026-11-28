@@ -83,7 +83,7 @@
   --color-warning-bg: color-mix(in srgb, var(--amber) 12%, var(--bg));
   --color-error-bg: color-mix(in srgb, var(--red) 12%, var(--bg));
   --color-permission-border: color-mix(in srgb, var(--amber) 55%, var(--border));
-  --color-permission-bg: color-mix(in srgb, var(--amber) 7%, var(--panel));
+  --color-permission-bg: color-mix(in srgb, var(--amber) 4%, var(--panel));
   --color-backdrop: rgb(0 0 0 / 0.45);
 
   --text-*: initial;
