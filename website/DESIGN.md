@@ -5,8 +5,8 @@ look, after the type-specimen sheet it started from: a flat muted-blue field, pa
 lines, numbered sections, and an edge-to-edge KOTHAR wordmark.
 
 This file and the code are kept together. Every token below names the CSS variable and the file it lives in. If you
-change one, change the other in the same PR. The desktop app has its own design system in `docs/design.md`; this
-file covers only `website/`.
+change one, change the other in the same PR. The desktop app wears the same look; its
+tokens, type and motion are in [`packages/ui/DESIGN.md`](../packages/ui/DESIGN.md). This file covers only `website/`.
 
 | File | What it holds |
 |---|---|
