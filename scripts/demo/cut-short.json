@@ -1,0 +1,5 @@
+[
+  {"card": "Kothar", "seconds": 1.2},
+  {"from": "claude:approval", "to": "claude:done", "speed": 3, "caption": "Claude Code fixes a failing test in Kothar", "pad": [-0.6, 1.2], "top": true},
+  {"card": "Kothar", "sub": "One app for every coding agent · kothar.sh", "seconds": 1.6}
+]

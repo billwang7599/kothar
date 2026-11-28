@@ -1,0 +1,20 @@
+[
+  {"card": "Kothar", "sub": "One app for every coding agent, with extensions that work across all of them.", "seconds": 4.5},
+  {"from": "getstarted", "to": "engines:on", "speed": 1, "caption": "First run: Kothar finds the agents you already have", "pad": [0.3, 0]},
+  {"from": "engines:on", "to": "space:perm", "speed": 3, "caption": "A space for your repo, with its own permissions"},
+  {"from": "claude:send", "to": "claude:approval", "speed": 1, "caption": "Claude Code: fix the failing test", "pad": [-2.0, 0]},
+  {"from": "claude:approval", "to": "claude:approved", "speed": 1, "caption": "Every command waits for your approval", "pad": [0, 0.6]},
+  {"from": "claude:approved", "to": "claude:done", "speed": 3, "caption": "Claude Code fixes the bug and commits", "pad": [0.6, 1.8]},
+  {"from": "pi:typing", "to": "pi:send", "speed": 3, "caption": "Same chat, a different agent: pi", "pad": [-2.5, 0]},
+  {"from": "pi:send", "to": "pi:done", "speed": 4, "caption": "pi adds a --tip option and its tests", "pad": [0, 2]},
+  {"from": "ext:open", "to": "ext:notes-on", "speed": 1.5, "caption": "Extensions: switch one on, for every agent"},
+  {"from": "ext:notes-on", "to": "ext:closed", "speed": 1.5, "caption": "Or find more in the Marketplace"},
+  {"from": "note-pi:send", "to": "note-pi:done", "speed": 2, "caption": "pi saves a note with the Notes extension", "pad": [-2.0, 1.5]},
+  {"from": "note-claude:typing", "to": "note-claude:done", "speed": 4, "caption": "Claude Code reads it, through the same extension", "pad": [-1.0, 1.5]},
+  {"from": "note-claude:done", "to": "notes:popup", "speed": 1, "caption": "One extension, every agent", "pad": [1.5, 1.8]},
+  {"from": "workers:send", "to": "workers:back", "speed": 3, "caption": "The lead starts two workers in parallel", "pad": [-1.5, 0], "take": "take2b"},
+  {"from": "workers:approval", "to": "workers:approved", "speed": 1, "caption": "Workers' commands come to you for approval too", "pad": [0, 0.8], "take": "take2c"},
+  {"card": "A few minutes later", "sub": "Both workers finish and report back to the lead", "seconds": 2},
+  {"from": "workers:reported", "to": "workers:reported", "speed": 1, "caption": "Each worker's changes, ready to merge or discard", "take": "take2c", "pad": [-6, 0]},
+  {"card": "kothar.sh", "sub": "github.com/billwang7599/kothar", "seconds": 4}
+]
