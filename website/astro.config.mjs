@@ -15,8 +15,11 @@ export default defineConfig({
     starlight({
       title: 'Kothar',
       description: 'A desktop app for running coding agents.',
-      logo: { src: './src/assets/logo.svg', alt: 'Kothar' },
       favicon: '/favicon.svg',
+      head: [
+        { tag: 'link', attrs: { rel: 'icon', href: '/favicon.png', type: 'image/png', sizes: '64x64' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
+      ],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/billwang7599/kothar' }],
       editLink: { baseUrl: 'https://github.com/billwang7599/kothar/edit/main/website/' },
       customCss: [

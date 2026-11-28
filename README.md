@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="packages/desktop/assets/icon.png" alt="Kothar's icon: a blue anvil and a spark" width="128" height="128">
+  <img src="packages/desktop/assets/icon.png" alt="Kothar's icon: a black stencil K on a muted blue tile" width="128" height="128">
 </p>
 
 <h1 align="center">Kothar</h1>

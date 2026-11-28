@@ -129,6 +129,9 @@ Why some things are the way they are. Add one when you make a choice the next co
 - **No Hotrod-rename migrations.** Kothar never shipped as Hotrod, and the one garage from then has moved, so the
   rename's migration code (garage and Electron folder moves, `HOTROD_` fallbacks, `hotrod.*` keys, old settings and
   chat keys, `Mod*` aliases and `ChatDetail.mod`) was deleted rather than kept forever. Don't add it back.
+- **The icon is the website's K, not the anvil.** Since website direction D, the app icon and every favicon are a
+  stencil K in the site's ink and field blue (`website/DESIGN.md` → The icon), so the Dock, the browser tab and the site
+  read as one brand. The anvil-and-spark mark and its one-colour `logo.svg` copies are gone.
 - **Fresh installs start lean.** Deep Research and Pins are off by default; a switch saved in `settings.json` wins, so
   only installs that never touched them change. The fake engine is for development and tests (`KOTHAR_DEV`), not the app.
 - **The Marketplace has its own switch, on by default.** It installs themes as well as extensions, so it isn't the

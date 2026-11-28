@@ -191,6 +191,16 @@ so. Keep that label.
   the engine cards sit on its top edge.
 - The closing band repeats it as an outline in `--field`.
 
+### The icon
+
+- The app icon, the favicons and the Wiki's favicon are one mark: a black (`--ink`) Archivo K on a `--field` tile, cut
+  across by the same stencil bridge as the wordmark. The nav's `(K)` is text, not the icon.
+- Sources: `packages/desktop/assets/icon.svg` (with `icon-16.svg` and `icon-32.svg` for the smallest sizes, which drop
+  the grid and thicken the cut) and `packages/ui/public/favicon.svg`. `packages/desktop/scripts/build-icons.sh`
+  renders the app's PNG and ICNS and copies the favicons into `website/public/` (`favicon.svg`, `favicon.png`,
+  `apple-touch-icon.png`). Edit the sources and rerun it; don't edit the copies.
+- If `--field` or `--ink` changes, change the icon's hex values with it.
+
 ## Motion
 
 | Rule | Value | Where |
