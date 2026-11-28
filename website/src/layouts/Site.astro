@@ -1,9 +1,13 @@
 ---
-// Shell for the marketing pages: head, theme, the frosted nav, footer and the reveal animations.
-import '@fontsource-variable/inter'
+// Shell for Overview and Features: head and social tags, the self-hosted fonts, the sticky nav, the footer and the
+// page scripts (site.ts for reveals and smooth jumps, replay.ts for the engine cards, the star count).
+// The look is written down in website/DESIGN.md.
+import '@fontsource-variable/archivo/wdth.css'
+import '@fontsource/ibm-plex-mono/400.css'
+import '@fontsource/ibm-plex-mono/600.css'
 import '../styles/site.css'
 import Nav from '../components/Nav.astro'
-import { REPO } from '../lib/release'
+import { REPO, RELEASES } from '../lib/release'
 
 interface Props {
   title: string
@@ -11,27 +15,39 @@ interface Props {
   current: 'overview' | 'features'
 }
 const { title, description, current } = Astro.props
+const url = new URL(Astro.url.pathname, Astro.site)
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" id="top">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+    <link rel="canonical" href={url} />
+    <meta name="theme-color" content="#8a9dc4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Kothar" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={url} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
     <script is:inline>
-      // Shares the docs' theme choice (Starlight keeps it under this key): 'light', 'dark' or '' for the system's.
-      const pick = localStorage.getItem('starlight-theme')
-      const dark = pick === 'dark' || pick === 'light' ? pick === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
-      document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-      // Hide what will animate in only when JS runs and motion is welcome. If the animation script never loads,
-      // show everything after a moment.
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        document.documentElement.classList.add('motion')
-        setTimeout(() => window.motionReady || document.documentElement.classList.remove('motion'), 2500)
+      // Before the first paint: .js lets the engine cards show their first frame instead of their last. With reduced
+      // motion, .still keeps every card on its final frame and nothing moves. Otherwise .motion hides what will
+      // reveal; if site.ts never runs, it is dropped after a moment so nothing stays hidden.
+      {
+        const root = document.documentElement
+        root.classList.add('js')
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) root.classList.add('still')
+        else {
+          root.classList.add('motion')
+          setTimeout(() => window.kotharSite || root.classList.remove('motion'), 2500)
+        }
       }
     </script>
   </head>
@@ -40,45 +56,22 @@ const { title, description, current } = Astro.props
     <main>
       <slot />
     </main>
-    <footer class="wrap">
-      <span>Kothar is source-available under FSL-1.1-ALv2. The extension API is MIT.</span>
-      <span><a href="/docs/">Wiki</a> · <a href={REPO}>GitHub</a> · <a href="/docs/faq/">FAQ</a></span>
+    <footer class="inked">
+      <div class="w foot">
+        <span>Source-available under FSL-1.1-ALv2, which becomes Apache 2.0 two years after each release. The extension API is MIT.</span>
+        <span class="foot-links">
+          <a href="/docs/">Wiki</a>
+          <a href={REPO}>GitHub</a>
+          <a href={RELEASES}>Releases</a>
+          <a href="/docs/faq/">FAQ</a>
+          <a class="top-link" href="#top">Back to top <span aria-hidden="true">↑</span></a>
+        </span>
+      </div>
     </footer>
 
     <script>
-      import { animate, inView, scroll, stagger } from 'motion'
-
-      const root = document.documentElement
-      if (root.classList.contains('motion')) {
-        const ease = [0.16, 1, 0.3, 1] as const
-        const all = (sel: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLElement>(sel)]
-        const show = (els: HTMLElement[], step: number) =>
-          animate(els, { opacity: 1, y: 0 }, { duration: 0.6, ease, delay: stagger(step) })
-
-        // Take over the hidden state with inline styles, then drop the class.
-        const hero = all('[data-hero]')
-        const sections = all('[data-reveal]').map((s) => [s, [...s.children] as HTMLElement[]] as const)
-        animate(hero, { opacity: 0, y: 16 }, { duration: 0 })
-        sections.forEach(([, parts]) => animate(parts, { opacity: 0, y: 16 }, { duration: 0 }))
-        root.classList.remove('motion')
-        ;(window as unknown as { motionReady: boolean }).motionReady = true
-
-        // The hero rises in, one line after another.
-        show(hero, 0.08)
-
-        // Each section's parts rise in as it comes into view, one after another (on Features: the words, then the
-        // screenshot).
-        sections.forEach(([section, parts]) => inView(section, () => void show(parts, 0.12), { amount: 0.2 }))
-
-        // The hero screenshot settles to full size as it scrolls into place.
-        const shot = document.querySelector('[data-shot]')
-        if (shot) {
-          scroll(animate(shot, { scale: [0.94, 1] }, { ease: 'linear' }), {
-            target: shot,
-            offset: ['start end', 'center center'],
-          })
-        }
-      }
+      import '../scripts/site'
+      import '../components/replay/replay'
     </script>
 
     <script>
@@ -118,20 +111,22 @@ const { title, description, current } = Astro.props
 </html>
 
 <style>
-  footer {
+  .foot {
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
-    gap: 12px;
-    padding-block: 28px 40px;
-    border-top: 1px solid var(--hair);
-    color: var(--muted);
-    font-size: 13px;
+    gap: 10px 24px;
+    padding: 18px 10px 24px;
+    border-top: 1px solid rgb(237 236 230 / 0.18);
+    font: 400 11.5px/1.5 var(--mono);
+    color: var(--on-ink-muted);
   }
-  footer a {
-    color: inherit;
+  .foot-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
   }
-  footer a:hover {
-    color: var(--text);
+  .foot a {
+    color: var(--paper);
   }
 </style>

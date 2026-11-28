@@ -1,0 +1,49 @@
+---
+// A numbered section: [TAG] and a big number on the left, the words in the middle, a framed screenshot on the right.
+// One column below 1000px. Styles: .spec, .num, .copy and .fig in site.css. See DESIGN.md, "Numbered sections".
+import { Image } from 'astro:assets'
+import type { ImageMetadata } from 'astro'
+
+export interface SpecItem {
+  id: string
+  tag: string
+  n: string
+  label: string
+  title: string
+  body: string
+  link: { href: string; label: string }
+  img: ImageMetadata
+  alt: string
+  where: string
+  /** A small popover: shown near its real size on a dark mat rather than stretched. */
+  narrow?: boolean
+}
+
+interface Props {
+  spec: SpecItem
+}
+const { spec: s } = Astro.props
+---
+
+<section class="w spec" id={s.id} aria-labelledby={`${s.id}-h`} data-reveal>
+  <div class="num" style="--i: 0">
+    <span class="k">[{s.tag}]</span>
+    <span class="big" aria-hidden="true">{s.n}</span>
+  </div>
+  <div class="copy" style="--i: 1">
+    <span class="k">{s.label}</span>
+    <h2 id={`${s.id}-h`}>{s.title}</h2>
+    <p>{s.body}</p>
+    <a class="more" href={s.link.href}>{s.link.label} <span aria-hidden="true">→</span></a>
+  </div>
+  <figure class="fig" style="--i: 2">
+    <div class="fig-h">
+      <b>[{s.tag}] Fig. {s.n}</b>
+      <span>{s.where}</span>
+    </div>
+    <div class:list={['shot', { narrow: s.narrow }]}>
+      <Image src={s.img} alt={s.alt} widths={[600, 1000, 1300]} sizes="(max-width: 1000px) 92vw, 640px" />
+    </div>
+    <figcaption>Screenshot of Kothar on a demo project.</figcaption>
+  </figure>
+</section>

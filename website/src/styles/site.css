@@ -1,215 +1,485 @@
-/* The marketing pages (Overview, Features): a neutral palette, the blue accent only for links and the primary
-   button, glass used sparingly on the nav, the screenshot frame and cards. */
+/* The marketing pages (Overview, Features): the "specimen" look. A flat muted-blue field, paper and ink, thin paired
+   column lines, numbered sections and an edge-to-edge KOTHAR wordmark. Every token, rule and component here is
+   written down in website/DESIGN.md; change the two together. The Wiki gets the same palette from theme.css. */
+
+/* ── Tokens ── */
 :root {
-  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter Variable', system-ui, sans-serif;
-  --bg: #fbfbfd;
-  --bg-alt: #f2f2f5;
-  --surface: #ffffff;
-  --text: #1d1d1f;
-  --muted: #6e6e73;
-  --hair: rgb(0 0 0 / 0.1);
-  --accent: #2563d9;
-  --accent-hover: #1d52b8;
-  --on-accent: #ffffff;
-  --glass: rgb(255 255 255 / 0.66);
-  --glass-edge: rgb(255 255 255 / 0.7);
-  --glass-shadow: 0 1px 1px rgb(0 0 0 / 0.04), 0 24px 64px -24px rgb(0 0 0 / 0.22);
-  --nav: rgb(251 251 253 / 0.72);
+  /* Colour */
+  --field: #8a9dc4; /* the muted blue: hero, page heads, the wordmark's cut */
+  --ink: #0e1016; /* text, the solid button, the closing section */
+  --ink-2: #262a35; /* the solid button on hover */
+  --ink-soft: #2b2f39; /* body copy on paper */
+  --ink-muted: #4a4f5c; /* captions, labels, secondary text */
+  --paper: #edece6; /* the page */
+  --card: #f7f6f2; /* cards and figure frames */
+  --chip: #e2e0d8; /* inline code and user bubbles inside a card */
+  --line: rgb(14 16 22 / 0.16); /* grid lines and hairlines on paper and field */
+  --line-strong: rgb(14 16 22 / 0.25); /* figure and card borders */
+  --blue: #2563d9; /* focus rings, the running state, the Approve button in a card */
+  --amber: #9a6400; /* a card's waiting state */
+  --green: #3f7a4a; /* a card's done state */
+  --on-ink-muted: #a9a8a2; /* secondary text on ink */
+  --on-ink-soft: #c9c8c2; /* body copy on ink */
+
+  /* Type */
+  --display: 'Archivo Variable', 'Arial Black', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+  /* Layout */
+  --max: 1360px; /* the content width; the column lines span it */
+  --gutter: 20px; /* the page margin on each side */
+  --cols: 6; /* column lines: 6 wide, 4 from 1000px, 2 from 640px */
+  --nav-h: 56px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out for anything arriving or responding */
+  --ease-io: cubic-bezier(0.65, 0, 0.35, 1); /* ease-in-out for jumps */
+  --fast: 150ms; /* press */
+  --base: 220ms; /* hover, focus, colour */
+  --slow: 500ms; /* reveals */
+
   color-scheme: light;
 }
-:root[data-theme='dark'] {
-  --bg: #0a0a0b;
-  --bg-alt: #121214;
-  --surface: #1a1a1c;
-  --text: #f5f5f7;
-  --muted: #a1a1a6;
-  --hair: rgb(255 255 255 / 0.12);
-  --accent: #5b8def;
-  --accent-hover: #7aa3f2;
-  --on-accent: #ffffff;
-  --glass: rgb(30 30 33 / 0.55);
-  --glass-edge: rgb(255 255 255 / 0.1);
-  --glass-shadow: 0 1px 1px rgb(0 0 0 / 0.3), 0 30px 80px -24px rgb(0 0 0 / 0.7);
-  --nav: rgb(10 10 11 / 0.66);
-  color-scheme: dark;
-}
 
-* {
+/* ── Base ── */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
-html {
-  background: var(--bg);
-}
+/* No rubber-band at the top or bottom, and nothing can scroll sideways. */
+html,
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 17px/1.5 var(--font);
-  letter-spacing: -0.011em;
+  overscroll-behavior: none;
+  overflow-x: clip;
+}
+html {
+  background: var(--paper);
+  /* In-page jumps stop below the sticky nav. */
+  scroll-padding-top: calc(var(--nav-h) + 16px);
+}
+/* The no-JS fallback for smooth jumps; with JS, site.ts animates them within the motion budget. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.js) {
+    scroll-behavior: smooth;
+  }
+}
+body {
+  color: var(--ink);
+  background: var(--paper);
+  font: 16px/1.5 var(--display);
+  font-stretch: 100%;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
-a:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
+p,
 h1,
 h2,
-h3 {
+h3,
+figure {
   margin: 0;
-  font-weight: 650;
-  color: var(--text);
 }
-p {
-  margin: 0;
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+a {
+  color: inherit;
 }
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--blue);
   outline-offset: 3px;
-  border-radius: 6px;
+}
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-/* One width for every page. */
-.wrap {
-  width: min(1040px, 100% - 48px);
+/* ── Layout ── */
+.w {
+  position: relative;
+  z-index: 1;
+  width: min(var(--max), 100% - 2 * var(--gutter));
   margin-inline: auto;
 }
+/* A mono label: section kickers, figure heads, the nav. */
+.k {
+  font: 600 11px/1.3 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 
-/* Pill buttons. */
-.button {
+/* Thin paired column lines behind a band, the same rhythm on every band of every page. */
+.lines {
+  position: relative;
+  isolation: isolate;
+}
+.lines::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0 max(var(--gutter), (100% - var(--max)) / 2);
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--line) 1px, transparent 1px),
+    linear-gradient(to right, var(--line) 1px, transparent 1px);
+  background-size: calc(100% / var(--cols)) 100%;
+  background-position:
+    0 0,
+    10px 0;
+  border-right: 1px solid var(--line);
+}
+.field {
+  background: var(--field);
+}
+.inked {
+  --line: rgb(237 236 230 / 0.1);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* ── Links ── */
+/* An underline that draws in from the left on hover and focus. */
+.ul {
+  text-decoration: none;
+  background: linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat;
+  padding-bottom: 2px;
+  transition: background-size var(--base) var(--ease);
+}
+.ul:hover,
+.ul:focus-visible,
+.ul[aria-current='page'] {
+  background-size: 100% 1px;
+}
+/* An inline link in running copy: always underlined, the line thickens on hover. */
+.copy p a,
+.fine a,
+.foot a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition:
+    text-decoration-thickness var(--base) var(--ease),
+    color var(--base) var(--ease);
+}
+.copy p a:hover,
+.fine a:hover,
+.foot a:hover {
+  text-decoration-thickness: 2px;
+}
+/* "Read more →": the arrow steps right on hover. */
+.more {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 22px;
-  border-radius: 999px;
-  border: 1px solid var(--hair);
-  color: var(--text);
-  font-size: 16px;
-  font-weight: 500;
-  background: transparent;
-  transition:
-    background-color 0.2s ease,
-    border-color 0.2s ease;
-}
-.button:hover {
+  gap: 6px;
+  font: 600 12px/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   text-decoration: none;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
-.button.primary {
-  background: var(--accent);
-  border-color: transparent;
-  color: var(--on-accent);
+.more span {
+  display: inline-block;
+  transition: transform var(--base) var(--ease);
 }
-.button.primary:hover {
-  background: var(--accent-hover);
-}
-.button :is(svg) {
-  width: 18px;
-  height: 18px;
-}
-.actions {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.fine {
-  color: var(--muted);
-  font-size: 14px;
-}
-.fine a {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-color: var(--hair);
-  text-underline-offset: 3px;
-}
-.fine a:hover {
-  color: var(--text);
+.more:hover span,
+.more:focus-visible span {
+  transform: translateX(4px);
 }
 
-/* Glass: translucent, blurred, with a light inner edge and a soft wide shadow. */
-.glass {
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid var(--hair);
-  box-shadow:
-    inset 0 0 0 1px var(--glass-edge),
-    var(--glass-shadow);
-}
-
-/* Star on GitHub: the star fills on hover. The count's slot is always there (the button keeps one width whether
-   the count loads or not), so nothing shifts when it fades in. */
-.button.star {
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  min-width: 13.25em;
-}
-.button.star svg {
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  border: 1.5px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  font: 600 13px/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
   transition:
-    fill 0.3s ease,
-    color 0.3s ease;
+    background-color var(--base) var(--ease),
+    color var(--base) var(--ease),
+    border-color var(--base) var(--ease),
+    box-shadow var(--base) var(--ease),
+    transform var(--base) var(--ease);
 }
-.button.star:hover svg {
-  color: #e3b341;
+/* Hover lifts a button by a hair and drops a hard shadow under it, like a key; pressing pushes it back down. */
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 0 var(--ink);
 }
-.button.star:hover svg path {
+.btn:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 0 0 var(--ink);
+  transition-duration: var(--fast);
+}
+.btn svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.btn.solid {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn.solid:hover {
+  background: var(--ink-2);
+}
+.btn.line:hover {
+  background: rgb(14 16 22 / 0.06);
+}
+.btn.paper {
+  border-color: var(--paper);
+  background: var(--paper);
+  color: var(--ink);
+}
+.btn.paper:hover {
+  background: #fff;
+  box-shadow: 0 2px 0 var(--field);
+}
+.btn.ghost-light {
+  border-color: rgb(237 236 230 / 0.5);
+  color: var(--paper);
+}
+.btn.ghost-light:hover {
+  border-color: var(--paper);
+  background: rgb(237 236 230 / 0.08);
+  box-shadow: 0 2px 0 var(--field);
+}
+/* Star on GitHub: the star fills on hover. The count's slot is always there, so the button never changes width
+   when the number appears. */
+.btn .star path {
+  transition: fill var(--base) var(--ease);
+}
+.btn:hover .star path {
   fill: currentColor;
 }
-.button.star .count {
-  display: inline-block;
-  min-width: 3.4em;
-  margin-left: -2px;
-  padding-left: 10px;
-  border-left: 1px solid transparent;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  text-align: left;
+.count {
+  min-width: 3.2ch;
+  text-align: right;
   opacity: 0;
-  transition:
-    opacity 0.4s ease,
-    border-color 0.4s ease;
+  transition: opacity var(--slow) var(--ease);
 }
-.button.star .count.shown {
-  opacity: 1;
-  border-left-color: var(--hair);
+.count.shown {
+  opacity: 0.7;
+}
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.fine {
+  font: 400 12px/1.5 var(--mono);
 }
 
-/* Screenshots and feature cards lift a little on hover. */
-.glass:is(figure) {
-  /* translate, not transform: the reveal animation owns the element's transform. */
-  transition:
-    translate 0.4s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.4s ease;
+/* ── Numbered sections (Spec.astro) ── */
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 28px;
+  padding: 0 0 22px;
+  border-bottom: 1.5px solid var(--ink);
+  font: 400 13px/1.3 var(--mono);
 }
-@media (hover: hover) {
-  figure.card.glass:hover {
-    translate: 0 -4px;
-    box-shadow:
-      inset 0 0 0 1px var(--glass-edge),
-      var(--glass-shadow),
-      0 18px 40px -20px rgb(0 0 0 / 0.35);
+.toc .k {
+  margin-right: auto;
+}
+.toc a b {
+  font-weight: 600;
+}
+.spec {
+  display: grid;
+  grid-template-columns: 1fr 2fr 3fr;
+  align-items: start;
+  padding: 48px 0 52px;
+  border-bottom: 1px solid var(--line);
+}
+.num {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 10px;
+}
+.big {
+  font: 900 clamp(56px, 7vw, 104px)/0.9 var(--display);
+  font-stretch: 125%;
+  letter-spacing: -0.03em;
+}
+.copy {
+  padding: 0 clamp(16px, 2.4vw, 36px) 0 10px;
+}
+.copy h2 {
+  margin: 10px 0 14px;
+  font: 800 clamp(22px, 2.1vw, 30px)/1.14 var(--display);
+  font-stretch: 104%;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.copy p {
+  max-width: 34em;
+  color: var(--ink-soft);
+}
+.copy p + p {
+  margin-top: 12px;
+}
+.copy .more {
+  margin-top: 18px;
+}
+
+/* ── Figures (screenshots) ── */
+.fig {
+  min-width: 0;
+  margin-right: 10px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+}
+.fig-h {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgb(14 16 22 / 0.2);
+  font: 400 11px/1.3 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.shot {
+  display: grid;
+  place-items: center;
+  background: #121315;
+  overflow: hidden;
+}
+.shot img {
+  width: 100%;
+}
+/* A small popover stays near its real size on a dark mat instead of being blown up. */
+.shot.narrow {
+  padding: clamp(16px, 3vw, 32px);
+}
+.shot.narrow img {
+  width: min(100%, 420px);
+}
+.fig figcaption {
+  padding: 8px 12px 10px;
+  border-top: 1px solid rgb(14 16 22 / 0.2);
+  font: 400 11px/1.4 var(--mono);
+  color: var(--ink-muted);
+}
+
+/* ── Page head (Features) ── */
+.page-head {
+  overflow: hidden;
+  padding: 56px 0 0;
+}
+.page-head h1 {
+  font: 900 clamp(26px, 3.1vw, 46px)/1.02 var(--display);
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+.page-head .lede {
+  max-width: 36em;
+  margin-top: 16px;
+}
+
+/* ── The wordmark ── */
+/* One SVG line stretched to the content width, so it scales with the window and can never overflow it. */
+.word {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: min(var(--max), 100% - 2 * var(--gutter));
+  margin-inline: auto;
+}
+.word text {
+  font-family: var(--display);
+  font-weight: 900;
+  font-stretch: 125%;
+  font-size: 252px;
+  fill: var(--ink);
+}
+.word .cut {
+  fill: var(--field);
+}
+
+/* ── Reveals ── */
+/* Only when JS runs and motion is welcome (Site.astro adds .motion): site.ts reveals each [data-reveal] block's
+   children as it scrolls into view. If the script never loads, Site.astro drops .motion and everything shows. */
+html.motion [data-reveal] > * {
+  opacity: 0;
+  transform: translateY(16px);
+}
+[data-reveal] > * {
+  transition:
+    opacity var(--slow) var(--ease),
+    transform var(--slow) var(--ease);
+  transition-delay: calc(var(--i, 0) * 80ms);
+}
+html.motion [data-reveal].in > * {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── Narrower windows ── */
+@media (max-width: 1000px) {
+  :root {
+    --cols: 4;
+  }
+  .spec {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .num {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .fig {
+    margin-left: 10px;
   }
 }
-
-/* Animations: hidden only while JS is about to reveal them (the `motion` class is set by an inline script and
-   removed by the animation script, or after a timeout if it never loads). */
-.motion [data-hero],
-.motion [data-reveal] > * {
-  opacity: 0;
+@media (max-width: 640px) {
+  :root {
+    --cols: 2;
+    --gutter: 16px;
+  }
+  .toc {
+    gap: 8px 18px;
+  }
+  .toc .k {
+    width: 100%;
+  }
+  .spec {
+    padding: 36px 0 40px;
+  }
+  .big {
+    font-size: 52px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    transition-duration: 0.01ms !important;
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
   }
-  figure.card.glass:hover {
-    translate: none;
+  .btn:hover,
+  .btn:active {
+    transform: none;
   }
 }

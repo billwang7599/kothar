@@ -1,9 +1,9 @@
 # Kothar website
 
 The landing page (`/`) and the user docs (`/docs/`), built with [Astro](https://astro.build) and
-[Starlight](https://starlight.astro.build) as plain static files. No server code, analytics or trackers, and the Inter font
-is bundled. The only request to another site is the browser asking GitHub's public API for the star count on the
-Star on GitHub buttons; if it fails, the buttons just show no count.
+[Starlight](https://starlight.astro.build) as plain static files. No server code, analytics or trackers, and the Archivo
+and IBM Plex Mono fonts are bundled. The only request to another site is the browser asking GitHub's public API for
+the star count on the Star on GitHub buttons; if it fails, the buttons just show no count.
 
 This folder is its own npm project. It isn't one of the repo's workspaces, so the root `npm ci`, typecheck, lint and
 tests don't touch it.
@@ -21,11 +21,10 @@ npm run build     # static site in dist/; fails on a broken internal link
 npm run preview   # serve dist/
 ```
 
-- Pages: `src/pages/index.astro` (Overview) and `src/pages/features.astro` (Features). Screenshot slots still waiting
-  for an image are marked `PLACEHOLDER` in comments.
+- Pages: `src/pages/index.astro` (Overview) and `src/pages/features.astro` (Features).
 - Docs: `src/content/docs/docs/*.md`, one page per file. Add a new page to `sidebar` in `astro.config.mjs`.
-- Styles: `src/styles/theme.css` for the docs, from Kothar's Default theme (`packages/ui/src/themes.tsx`), and
-  `src/styles/site.css` for Overview and Features.
+- Design: the look, tokens, motion and copy rules are in [DESIGN.md](DESIGN.md). Read it before changing a page.
+- Styles: `src/styles/site.css` for Overview and Features, `src/styles/theme.css` for the docs.
 - Write only what's true on `main`. Words: Kothar, space, chat, worker, extension, engine.
 
 ## Deploying (Cloudflare Workers)
