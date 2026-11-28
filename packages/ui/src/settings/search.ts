@@ -26,6 +26,7 @@ export const ANCHORS = {
   terminal: 'setting-terminal',
   attachments: 'setting-largest-attachment',
   notifications: 'section-notifications',
+  updates: 'section-updates',
   getStarted: 'setting-get-started',
   engines: 'section-engines',
   accounts: 'section-accounts',
@@ -61,6 +62,7 @@ const fixedEntries = (): SettingEntry[] => [
   { page: 'general', anchor: ANCHORS.workFolder, section: 'Work folder', label: 'Work folder', text: 'where agents and workers work folder path' },
   { page: 'general', anchor: ANCHORS.editor, section: 'Work folder', label: 'Open files with', text: 'editor file links click vscode cursor command' },
   { page: 'general', anchor: ANCHORS.terminal, section: 'Work folder', label: 'Terminal', text: 'Open in Terminal iterm ghostty warp' },
+  { page: 'general', anchor: settingAnchor('update-automatically'), section: 'Updates', label: 'Update automatically', text: 'auto update new version check for updates download restart' },
   { page: 'general', anchor: settingAnchor('notifications'), section: 'Notifications', label: 'Show notifications', text: 'notify alerts' },
   { page: 'general', anchor: settingAnchor('notify', 'needsYou'), section: 'Notifications', label: 'Needs you', text: 'notify permission request question waiting' },
   { page: 'general', anchor: settingAnchor('notify', 'finished'), section: 'Notifications', label: 'Finished', text: 'notify done turn' },
@@ -128,7 +130,12 @@ type IndexProps = Pick<PageProps, 'engines' | 'extensions' | 'corePrompts' | 'co
 /** Every setting there is right now: the fixed ones, then those of the engines, models, prompts and extensions there are. */
 export function settingsIndex({ engines, extensions, corePrompts = [], communityExtensions = false, workFolder, engineTools }: IndexProps): SettingEntry[] {
   // Terminal shows only where there's one to pick (macOS).
-  const entries = fixedEntries().filter((e) => e.anchor !== ANCHORS.terminal || !!workFolder?.terminals)
+  const entries = fixedEntries().filter(
+    (e) =>
+      (e.anchor !== ANCHORS.terminal || !!workFolder?.terminals) &&
+      // Updates show only in the packaged desktop app.
+      (e.anchor !== settingAnchor('update-automatically') || !!window.kothar?.updates),
+  )
   for (const engine of engines) {
     entries.push({ page: 'engines', anchor: settingAnchor('engine', engine.id), section: 'Engines', label: engineName(engine) || engine.id, text: engine.id })
     entries.push({ page: 'engines', anchor: `accounts-${engine.id}`, section: 'Accounts', label: `${engineName(engine) || engine.id} accounts`, text: 'sign in api key' })

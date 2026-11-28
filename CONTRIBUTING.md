@@ -139,6 +139,9 @@ Choices the next contributor might otherwise undo. Add one line when you make su
 - **A release tag must match `packages/desktop/package.json`'s version.** The workflow never writes it, so what ships
   is a reviewed commit.
 - **No Hotrod-rename migrations.** Kothar never shipped as Hotrod. Don't add them back.
+- **Auto-update is electron-updater with GitHub Releases** (`packages/desktop/src/updates.ts`), packaged app only. It
+  needs every release signed with the same Developer ID and to carry the zip and `latest-mac.yml`; Squirrel.Mac refuses
+  anything else.
 
 ## Pull requests
 
@@ -206,9 +209,12 @@ remove them, and don't use the old names in new code.
 ## Releasing
 
 Pushing a `v*` tag runs `.github/workflows/release.yml` on a macOS runner: it builds, signs, notarizes and staples
-the app and DMG (`packages/desktop/scripts/signing.ts`), checks both with `spctl`, and publishes a GitHub Release with
-`Kothar-<version>-arm64.dmg`, an unversioned `Kothar-arm64.dmg` (the website's Download link) and their `.sha256`. A
-tag with a hyphen makes a pre-release. **Actions → Release → Run workflow** is a dry run that publishes nothing.
+the app and DMG (`packages/desktop/scripts/signing.ts`), checks them with `spctl`, and publishes a GitHub Release with
+`Kothar-<version>-arm64.dmg`, an unversioned `Kothar-arm64.dmg` (the website's Download link), their `.sha256`, and
+the auto-update files: `Kothar-<version>-arm64-mac.zip`, its `.blockmap` and `latest-mac.yml`. Installed copies read
+`latest-mac.yml` from the newest release, so a release without it (or with a wrong hash) updates no one;
+`scripts/release-files.ts` checks it before anything is published. A tag with a hyphen makes a pre-release, which
+installed copies skip. **Actions → Release → Run workflow** is a dry run that publishes nothing.
 
 ### Secrets (one time)
 
@@ -233,6 +239,16 @@ the `.p12` from Keychain Access (My Certificates → the Developer ID certificat
 2. `git switch main && git pull && git tag v0.2.0 && git push origin v0.2.0`
 3. Watch Actions → Release. If it fails, fix `main` and move the tag (`git tag -f`, `git push -f origin v0.2.0`) or
    bump the version.
+
+### Releasing from your Mac (no secrets)
+
+With the Developer ID certificate and the `kothar-notary` profile on your Mac (`packages/desktop/README.md`):
+
+1. Steps 1 and 2 above (bump, merge, push the tag). Without the secrets the tag's workflow run fails; that's fine.
+2. `npm ci && npm run package`. Its first line must say it's signed and notarized.
+3. `cd packages/desktop && node scripts/release-files.ts upload v0.2.0`. It checks `latest-mac.yml` against the zip,
+   writes the checksums and `Kothar-arm64.dmg`, then creates the release with every file (or adds them to an existing
+   one).
 
 ## Licence of contributions
 

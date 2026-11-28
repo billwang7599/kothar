@@ -1,4 +1,4 @@
-// Settings → General (the work folder, what opens files and terminals, notifications, the largest attachment),
+// Settings → General (the work folder, what opens files and terminals, notifications, updates, the largest attachment),
 // Settings → Permissions (the default permission switches every chat follows), and the dialog that picks the work folder
 // (also shown before the first space).
 import { useState, type FormEvent } from 'react'
@@ -19,6 +19,7 @@ import { FOLDED_SWITCHES, MORE_SWITCHES, PERMISSIONS, switchesShown } from '../c
 import { Button, CHAT_NOUN, ErrorText, GROUP, Hint, MOTION, Select, Switch, useReturnFocus } from '../controls.tsx'
 import { Advanced, Section, SettingRow } from './rows.tsx'
 import { NotificationsSection } from './notifications.tsx'
+import { UpdatesSection } from './updates.tsx'
 import { ANCHORS, settingAnchor } from './search.ts'
 import { SSH_HOSTS_ABOUT, SshHostsEditor } from '../ssh-hosts.tsx'
 import type { PageProps } from './types.ts'
@@ -73,6 +74,7 @@ export function GeneralPage({ workFolder, chooseWorkFolder, connected, send }: P
         )}
       </Section>
       <NotificationsSection />
+      <UpdatesSection />
       <Advanced page="general">
         <div className={GROUP}>
           <AttachmentLimitRow workFolder={workFolder} connected={connected} send={send} />

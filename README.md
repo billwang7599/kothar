@@ -55,6 +55,8 @@ If Kothar is useful to you, a ⭐ on GitHub helps more people find it.
 - **Setups and themes:** saved engine, model and instruction choices for a kind of job; Default and Glass themes, with
   more in the Marketplace.
 - **Command line:** `kothar` drives a running Kothar from a terminal or script. See [Command line](#command-line).
+- **Updates itself:** the Mac app downloads new releases in the background and installs them when you quit or click
+  Restart. Turn it off in Settings → General → Updates, or use Kothar → Check for Updates….
 
 The [docs on kothar.sh](https://kothar.sh/docs/) cover each of these in detail.
 
@@ -118,14 +120,16 @@ you'd have clicked Approve on all of them anyway. Ctrl+C leaves the turn running
 ## Status
 
 Kothar is in early development. [v0.1.0](https://github.com/billwang7599/kothar/releases/tag/v0.1.0) is the first
-release: a signed and notarized DMG for Macs with Apple silicon. It also runs from source, in a browser tab or as the
+release: a signed and notarized DMG for Macs with Apple silicon. v0.1.0 can't update itself, so download the next
+release by hand once; from then on Kothar updates itself. It also runs from source, in a browser tab or as the
 desktop app; see [Running from source](CONTRIBUTING.md#running-from-source).
 
 Not built yet: Intel Mac and Windows/Linux builds, sandboxing outside macOS, remote machines, and sync.
 
 ## Building the Mac app
 
-`npm run package` builds `packages/desktop/release/Kothar-<version>-arm64.dmg` (Apple silicon). With a Developer ID
+`npm run package` builds `packages/desktop/release/Kothar-<version>-arm64.dmg` (Apple silicon), plus the zip and
+`latest-mac.yml` that auto-update reads from a release. With a Developer ID
 certificate in your keychain and a `kothar-notary` notarytool profile, it signs the app and the DMG, notarizes them
 and staples the tickets. Without those, it's ad-hoc signed, which runs on the Mac that built it; elsewhere macOS blocks
 it until it's opened with right-click → Open. The first line of the build says which. One-time setup, other ways to

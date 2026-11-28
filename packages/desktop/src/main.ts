@@ -1,8 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } from 'electron'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import electronUpdater from 'electron-updater'
 import { envVar, startCore } from '@kothar/core/main'
 import { fixPath } from './shell-path.ts'
+import { createUpdates, type Updates } from './updates.ts'
 
 // The packaged app is one bundled main.mjs with the UI, preload, icon and built-in extensions beside it (see
 // scripts/stage.mjs); from the repo, each sits where the source tree has it.
@@ -77,7 +79,15 @@ async function start() {
     vibrancy: VIBRANCY,
     visualEffectState: 'active',
     // Chromium's PDF viewer counts as a plugin, and attachment previews need it.
-    webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: true, plugins: true },
+    webPreferences: {
+      preload,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      plugins: true,
+      // Tells the preload to offer the updater (window.kothar.updates), which only the packaged app runs.
+      ...(packaged && { additionalArguments: ['--kothar-updates'] }),
+    },
   })
   window.once('ready-to-show', () => window.show())
   let lastReloadMs = 0
@@ -137,6 +147,8 @@ async function start() {
   }
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, onSignal)
 
+  const updates = packaged ? startUpdates(window) : undefined
+
   const pickFolder = async (title = 'New space from folder') => {
     const result = await dialog.showOpenDialog(window, { title, properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : (result.filePaths[0] ?? null)
@@ -190,6 +202,7 @@ async function start() {
                 label: app.name,
                 submenu: [
                   { role: 'about' as const },
+                  ...(updates ? [{ label: 'Check for Updates…', click: () => void updates.check(true) }] : []),
                   { type: 'separator' as const },
                   settings,
                   { type: 'separator' as const },
@@ -260,4 +273,53 @@ async function start() {
     openOutside(url)
   })
   await window.loadURL(kothar.openUrl)
+}
+
+// The updater (updates.ts), in the packaged app only: an unpackaged run has no app-update.yml, and Squirrel.Mac would
+// refuse an update signed differently from it anyway. Its state goes to the window as 'update-state'; the window's
+// banner and Settings → General call back through the preload (window.kothar.updates).
+function startUpdates(window: BrowserWindow): Updates {
+  const { autoUpdater } = electronUpdater
+  // electron-updater logs every step; the console is where the rest of Kothar's main process logs too.
+  autoUpdater.logger = { info: () => {}, warn: (m: unknown) => console.warn('[updates]', m), error: () => {}, debug: () => {} }
+  const show = async (options: Electron.MessageBoxOptions) => {
+    if (window.isMinimized()) window.restore()
+    window.show()
+    return dialog.showMessageBox(window, options)
+  }
+  const updates = createUpdates({
+    updater: autoUpdater,
+    current: app.getVersion(),
+    prefsFile: join(app.getPath('userData'), 'updates.json'),
+    publish: (info) => {
+      if (!window.isDestroyed()) window.webContents.send('update-state', info)
+    },
+    ask: {
+      upToDate: (current) =>
+        void show({ type: 'info', message: 'You’re up to date', detail: `Kothar ${current} is the newest version.` }),
+      failed: (message) =>
+        void show({ type: 'warning', message: 'Couldn’t check for updates', detail: message }),
+      restartNow: async (version) => {
+        const { response } = await show({
+          type: 'info',
+          message: `Kothar ${version} is ready`,
+          detail: 'Restart Kothar to update. Otherwise it updates the next time you quit.',
+          buttons: ['Restart to Update', 'Later'],
+          defaultId: 0,
+          cancelId: 1,
+        })
+        return response === 0
+      },
+    },
+  })
+  ipcMain.handle('update-info', () => updates.info())
+  ipcMain.on('update-check', () => void updates.check(true))
+  ipcMain.on('update-download', () => updates.download())
+  ipcMain.on('update-restart', () => updates.restart())
+  ipcMain.on('update-set-auto', (_event, on: unknown) => {
+    if (typeof on === 'boolean') updates.setAutoDownload(on)
+  })
+  app.on('will-quit', () => updates.stop())
+  updates.start()
+  return updates
 }

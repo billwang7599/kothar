@@ -1,7 +1,8 @@
 # Kothar desktop app
 
-`npm run package` (from the repo root) builds `packages/desktop/release/Kothar-<version>-arm64.dmg` for Apple Silicon.
-The first line it prints says how the build is signed:
+`npm run package` (from the repo root) builds `packages/desktop/release/Kothar-<version>-arm64.dmg` for Apple Silicon,
+and the auto-update files beside it: `Kothar-<version>-arm64-mac.zip`, its `.blockmap` and `latest-mac.yml` (see
+[Auto-update](#auto-update)). It never uploads anything. The first line it prints says how the build is signed:
 
 - `Kothar will be UNSIGNED …`: no Developer ID certificate was found. The app gets an ad-hoc signature, which runs on the
   Mac that built it; other Macs block it until it's opened with right-click → Open.
@@ -115,7 +116,27 @@ first line says `NOT notarized`; `KOTHAR_REQUIRE_NOTARIZED=1` makes that, or an 
 ## Releases from GitHub Actions
 
 `.github/workflows/release.yml` does this same build on a Mac runner when a `v*` tag is pushed, and publishes a GitHub
-Release with the DMG. CONTRIBUTING.md, "Releasing", has the secrets it needs and how to cut a release.
+Release with the DMG and the auto-update files. CONTRIBUTING.md, "Releasing", has the secrets it needs and how to cut a
+release, including from your own Mac: `node scripts/release-files.ts upload v<version>` (in this folder) checks the
+built files and creates the release with all of them.
+
+## Auto-update
+
+The packaged app checks GitHub Releases 10 seconds after it starts and then every 4 hours (`src/updates.ts`, with
+`electron-updater`). It reads `latest-mac.yml` from the newest release that isn't a pre-release, downloads the zip in
+the background, and installs it when Kothar quits or when the user clicks Restart in the banner. Settings → General →
+Updates turns off the automatic download (it then only offers the update), and the Kothar menu has Check for Updates….
+Errors (offline, a release without `latest-mac.yml`) are only logged, unless the user asked from the menu.
+
+- Only the packaged app runs the updater. `npm run desktop` and the browser tab show no banner or setting.
+- Squirrel.Mac installs an update only if it's signed by the same Developer ID as the running app, so an ad-hoc build
+  never updates, and every release must be signed and notarized.
+- `electron-builder.config.cjs`'s `publish` entry writes `Contents/Resources/app-update.yml` (where to look) into the
+  app and makes `latest-mac.yml`; `--publish never` (in `npm run package`) keeps electron-builder from uploading.
+- The DMG is left out of `latest-mac.yml` (`dmg.writeUpdateInfo: false`): it's stapled after electron-builder would
+  hash it, and the updater doesn't use it.
+- The preference is saved in `updates.json` in the app's Electron folder (`~/Library/Application Support/Kothar
+  Desktop`), not the garage.
 
 ## What's in the bundle
 
