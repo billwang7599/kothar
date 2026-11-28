@@ -1,0 +1,171 @@
+---
+import Site from '../layouts/Site.astro'
+import { latestRelease, REPO } from '../lib/release'
+import { githubMark } from '../lib/icons'
+
+const release = await latestRelease()
+
+// Facts come from the docs; each links to its page there.
+const features = [
+  {
+    kicker: 'Engines',
+    title: 'Your agents, your logins.',
+    body: 'Kothar drives Claude Code, Codex, OpenCode, pi and any agent that speaks ACP. Each runs with the account you already have.',
+    shot: 'Settings → Engines, each showing installed and signed in',
+    href: '/docs/engines/',
+  },
+  {
+    kicker: 'Extensions',
+    title: 'Write once. Works everywhere.',
+    body: 'Panels, commands, tools and permission rules that work with every engine. Install more from the Marketplace in Settings.',
+    shot: 'Settings → Built-in extensions and the Marketplace',
+    href: '/docs/extensions/',
+  },
+  {
+    kicker: 'Spaces and memory',
+    title: 'A space for each job.',
+    body: 'A folder becomes a space, with replies and tool calls streaming live. Every chat remembers its whole conversation, even across restarts.',
+    shot: 'A space with a streaming reply and the Context panel',
+    href: '/docs/spaces/',
+  },
+  {
+    kicker: 'Workers',
+    title: 'Hand off. Then review.',
+    body: 'An agent hands tasks to workers, each in its own git worktree. When one reports, you merge, squash, keep or discard its changes.',
+    shot: "A worker's report with its Merge, Squash, Keep and Discard row",
+    href: '/docs/workers/',
+  },
+  {
+    kicker: 'Permissions',
+    title: 'Nothing runs behind your back.',
+    body: 'On macOS, agents work in a sandboxed folder. Switches decide what runs without asking, and you approve the rest from the chat.',
+    shot: 'An approval card in the chat',
+    href: '/docs/permissions/',
+  },
+  {
+    kicker: 'Usage',
+    title: 'See what each turn used.',
+    body: 'Tokens and cost, as each engine reports them, saved per chat. A quiet total sits in the chat header.',
+    shot: "The chat header's usage total, with its breakdown on hover",
+    href: '/docs/usage/',
+  },
+]
+---
+
+<Site
+  title="Features · Kothar"
+  description="Engines, extensions, spaces and memory, workers, permissions and usage in Kothar."
+  current="features"
+>
+  <section class="intro wrap">
+    <h1 data-hero>Features</h1>
+    <p data-hero>What Kothar does, one thing at a time.</p>
+  </section>
+
+  {
+    features.map((f, i) => (
+      <section class:list={['feature wrap', { flip: i % 2 === 1 }]} data-reveal>
+        <div class="copy">
+          <p class="kicker">{f.kicker}</p>
+          <h2>{f.title}</h2>
+          <p class="body">{f.body}</p>
+          <a href={f.href}>Read more in the wiki ›</a>
+        </div>
+        <!-- PLACEHOLDER: replace with a screenshot. -->
+        <figure class="card glass">
+          <div class="placeholder">Screenshot: {f.shot}</div>
+        </figure>
+      </section>
+    ))
+  }
+
+  <section class="end wrap" data-reveal>
+    <h2>Ready when you are.</h2>
+    <div class="actions">
+      <a class="button primary" href={release.href} data-download>Download for Mac</a>
+      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+    </div>
+  </section>
+</Site>
+
+<style>
+  .intro {
+    text-align: center;
+    padding: 112px 0 120px;
+  }
+  .intro h1 {
+    font-size: clamp(44px, 7vw, 80px);
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1.04;
+    margin-bottom: 16px;
+  }
+  .intro p {
+    font-size: clamp(19px, 2.4vw, 24px);
+    color: var(--muted);
+    letter-spacing: -0.015em;
+  }
+
+  .feature {
+    display: grid;
+    grid-template-columns: 5fr 6fr;
+    gap: 64px;
+    align-items: center;
+    margin-bottom: 160px;
+  }
+  .feature.flip .copy {
+    order: 2;
+  }
+  .kicker {
+    color: var(--muted);
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 10px;
+  }
+  .feature h2 {
+    font-size: clamp(30px, 4vw, 44px);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    margin-bottom: 16px;
+  }
+  .body {
+    color: var(--muted);
+    font-size: 19px;
+    line-height: 1.45;
+    margin-bottom: 16px;
+  }
+  .card {
+    margin: 0;
+    padding: 8px;
+    border-radius: 20px;
+    aspect-ratio: 4 / 3;
+  }
+  .card .placeholder {
+    border-radius: 13px;
+  }
+
+  .end {
+    text-align: center;
+    padding: 96px 0 120px;
+    border-top: 1px solid var(--hair);
+  }
+  .end h2 {
+    font-size: clamp(32px, 5vw, 56px);
+    letter-spacing: -0.035em;
+    margin-bottom: 32px;
+  }
+
+  @media (max-width: 760px) {
+    .intro {
+      padding: 72px 0 80px;
+    }
+    .feature {
+      grid-template-columns: 1fr;
+      gap: 28px;
+      margin-bottom: 100px;
+    }
+    .feature.flip .copy {
+      order: 0;
+    }
+  }
+</style>

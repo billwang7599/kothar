@@ -16,3 +16,30 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+  # The website (website/, deployed by Cloudflare Pages) is its own npm project. Builds only when website/ changed;
+  # the build fails on a broken internal link (starlight-links-validator).
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || ! git diff --quiet "$BASE" HEAD -- website/; then
+            echo "website=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.website == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - if: steps.changed.outputs.website == 'true'
+        run: npm ci
+        working-directory: website
+      - if: steps.changed.outputs.website == 'true'
+        run: npm run build
+        working-directory: website

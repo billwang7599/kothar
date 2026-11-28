@@ -1,0 +1,175 @@
+---
+import Site from '../layouts/Site.astro'
+import { githubMark } from '../lib/icons'
+import { latestRelease, REPO, RELEASES } from '../lib/release'
+
+const release = await latestRelease()
+const releaseNote = [release.version, 'macOS 13+', 'Apple silicon'].filter(Boolean).join(' · ')
+
+const sections = [
+  {
+    title: 'Bring your own agents.',
+    body: 'Claude Code, Codex, OpenCode, pi and any ACP agent, each signed in with your own account.',
+    link: { label: 'Engines', href: '/docs/engines/' },
+  },
+  {
+    title: 'Extend it once.',
+    body: 'An extension is written once and works with every engine. Notes, Plan, Artifacts and MCP servers come built in.',
+    link: { label: 'Extensions', href: '/docs/extensions/' },
+  },
+  {
+    title: 'Stay in charge.',
+    body: 'Agents work in a sandboxed folder. You approve the rest from a card in the chat.',
+    link: { label: 'Permissions', href: '/docs/permissions/' },
+  },
+]
+---
+
+<Site
+  title="Kothar: a desktop app for running coding agents"
+  description="Drive Claude Code, Codex, OpenCode, pi and any ACP agent from one desktop app, with extensions that work with every engine."
+  current="overview"
+>
+  <section class="hero wrap">
+    <h1 data-hero>One app for every coding agent.</h1>
+    <p class="sub" data-hero>Run Claude Code, Codex and more side by side, with extensions you write once.</p>
+    <div class="actions" data-hero>
+      <a class="button primary" href={release.href} data-download>Download for Mac</a>
+      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+    </div>
+    <p class="fine" data-hero>{releaseNote} · <a href={RELEASES}>All releases</a></p>
+  </section>
+
+  <div class="wrap stage" data-hero>
+    <!-- PLACEHOLDER: replace with a real screenshot of a space (light and dark), 16:10, about 2400×1500. -->
+    <figure class="frame glass" data-shot>
+      <div class="placeholder">Screenshot: a space with a streaming reply, tool calls and the right panel</div>
+    </figure>
+  </div>
+
+  {
+    sections.map((s) => (
+      <section class="beat wrap" data-reveal>
+        <h2>{s.title}</h2>
+        <p>{s.body}</p>
+        <a href={s.link.href}>{s.link.label} ›</a>
+      </section>
+    ))
+  }
+
+  <section class="beat wrap more" data-reveal>
+    <a href="/features/">See every feature ›</a>
+  </section>
+
+  <section class="cta wrap" data-reveal>
+    <h2>Try Kothar.</h2>
+    <p class="sub">Free to download. Signed and notarized for macOS.</p>
+    <div class="actions">
+      <a class="button primary" href={release.href} data-download>Download for Mac</a>
+      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+    </div>
+    <p class="fine">{releaseNote} · <a href={RELEASES}>All releases</a></p>
+  </section>
+</Site>
+
+<style>
+  .hero {
+    text-align: center;
+    padding: 120px 0 56px;
+  }
+  h1 {
+    font-size: clamp(40px, 7vw, 80px);
+    font-weight: 700;
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    max-width: 13ch;
+    margin: 0 auto 20px;
+  }
+  .sub {
+    font-size: clamp(19px, 2.4vw, 24px);
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    color: var(--muted);
+    max-width: 30em;
+    margin: 0 auto 36px;
+  }
+  .hero .fine,
+  .cta .fine {
+    margin-top: 18px;
+  }
+
+  .stage {
+    margin-bottom: 160px;
+  }
+  .frame {
+    margin: 0;
+    padding: 10px;
+    border-radius: 22px;
+    aspect-ratio: 16 / 10;
+    transform-origin: 50% 0;
+  }
+  .frame .placeholder {
+    border-radius: 14px;
+  }
+
+  .beat {
+    text-align: center;
+    max-width: 720px;
+    margin-bottom: 140px;
+  }
+  .beat h2 {
+    font-size: clamp(32px, 5vw, 56px);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    margin-bottom: 18px;
+  }
+  .beat p {
+    font-size: clamp(18px, 2.2vw, 21px);
+    color: var(--muted);
+    margin: 0 auto 18px;
+    max-width: 32em;
+  }
+  .beat a {
+    font-size: 17px;
+  }
+  .more {
+    margin-top: -60px;
+  }
+
+  .cta {
+    text-align: center;
+    padding: 96px 0 120px;
+    border-top: 1px solid var(--hair);
+  }
+  .cta h2 {
+    font-size: clamp(36px, 5.5vw, 64px);
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    margin-bottom: 14px;
+  }
+  .cta .sub {
+    margin-bottom: 32px;
+  }
+
+  @media (max-width: 600px) {
+    .hero {
+      padding-top: 72px;
+    }
+    .stage {
+      margin-bottom: 100px;
+    }
+    .frame {
+      padding: 6px;
+      border-radius: 16px;
+    }
+    .frame .placeholder {
+      border-radius: 11px;
+    }
+    .beat {
+      margin-bottom: 96px;
+    }
+    .more {
+      margin-top: -40px;
+    }
+  }
+</style>

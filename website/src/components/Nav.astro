@@ -1,0 +1,161 @@
+---
+// The frosted top bar on the Overview and Features pages. The docs get the same look from StarlightHeader.astro.
+import logo from '../assets/logo.svg?raw'
+import { githubMark, themeIcon } from '../lib/icons'
+import { latestRelease, REPO } from '../lib/release'
+
+interface Props {
+  current: 'overview' | 'features'
+}
+const { current } = Astro.props
+const release = await latestRelease()
+const tabs = [
+  { id: 'overview', label: 'Overview', href: '/' },
+  { id: 'features', label: 'Features', href: '/features/' },
+  { id: 'wiki', label: 'Wiki', href: '/docs/' },
+]
+---
+
+<header class="nav">
+  <div class="inner">
+    <a class="brand" href="/" aria-label="Kothar overview"><span class="mark" set:html={logo} /><span>Kothar</span></a>
+    <nav aria-label="Site">
+      {
+        tabs.map((tab) => (
+          <a href={tab.href} aria-current={tab.id === current ? 'page' : undefined}>
+            {tab.label}
+          </a>
+        ))
+      }
+    </nav>
+    <div class="end">
+      <a class="icon" href={REPO} aria-label="Kothar on GitHub" set:html={githubMark} />
+      <button id="theme" class="icon" type="button" aria-label="Switch between light and dark" set:html={themeIcon} />
+      <a class="pill" href={release.href} data-download>Download</a>
+    </div>
+  </div>
+</header>
+
+<script is:inline>
+  document.getElementById('theme').addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
+    document.documentElement.dataset.theme = next
+    localStorage.setItem('starlight-theme', next)
+  })
+</script>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    height: 52px;
+    background: var(--nav);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--hair);
+  }
+  .inner {
+    width: min(1040px, 100% - 32px);
+    height: 100%;
+    margin-inline: auto;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-weight: 600;
+    font-size: 16px;
+  }
+  .brand:hover {
+    text-decoration: none;
+  }
+  .mark {
+    display: inline-flex;
+    width: 22px;
+    height: 22px;
+    color: var(--accent);
+  }
+  .mark :global(svg) {
+    width: 100%;
+    height: 100%;
+  }
+  .mark :global(style) {
+    display: none;
+  }
+  nav {
+    display: flex;
+    gap: 24px;
+    font-size: 14px;
+  }
+  nav a {
+    color: var(--muted);
+    transition: color 0.2s ease;
+  }
+  nav a:hover,
+  nav a[aria-current='page'] {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .end {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .icon {
+    display: inline-flex;
+    padding: 4px;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    transition: color 0.2s ease;
+  }
+  .icon:hover {
+    color: var(--text);
+  }
+  .icon :global(svg) {
+    width: 18px;
+    height: 18px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+  }
+  .pill:hover {
+    background: var(--accent-hover);
+    text-decoration: none;
+  }
+  @media (max-width: 600px) {
+    .inner {
+      gap: 18px;
+    }
+    .brand span:last-child {
+      display: none;
+    }
+    nav {
+      gap: 16px;
+    }
+    .end {
+      gap: 8px;
+    }
+  }
+  @media (max-width: 400px) {
+    #theme {
+      display: none;
+    }
+  }
+</style>

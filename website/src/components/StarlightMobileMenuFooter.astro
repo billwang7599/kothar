@@ -1,0 +1,29 @@
+---
+// The Wiki's mobile menu footer: the site tabs and Download, since the header hides them on narrow screens.
+import Default from '@astrojs/starlight/components/MobileMenuFooter.astro'
+import { latestRelease } from '../lib/release'
+
+const release = await latestRelease()
+---
+
+<nav class="site" aria-label="Site">
+  <a href="/">Overview</a>
+  <a href="/features/">Features</a>
+  <a href={release.href} data-download>Download for Mac</a>
+</nav>
+<Default />
+
+<style>
+  .site {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--sl-color-gray-6);
+    font-size: var(--sl-text-sm);
+  }
+  .site a {
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+</style>
