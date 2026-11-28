@@ -49,6 +49,5 @@ Not directly. Kothar extensions work with every engine, so they can't rely on on
 
 ## What's the licence?
 
-Kothar's core, app and built-in extensions are under the Functional Source License (FSL-1.1-ALv2): use it,
-change it and share it for anything except a competing commercial product. Each version becomes Apache 2.0 two years
-after release. The extension API is MIT.
+Kothar is open source. Its core, app and built-in extensions are under the Apache License 2.0: use it, change it
+and share it for anything, including commercial work. The extension API is MIT.

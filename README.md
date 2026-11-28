@@ -186,9 +186,9 @@ To try a build beside your own Kothar, run it on a throwaway garage:
 
 ## License
 
-- **Kothar's core, app and built-in extensions:** [Functional Source License 1.1, Apache 2.0 future licence](LICENSE.md)
-  (FSL-1.1-ALv2). You may use, copy, modify and redistribute it for any purpose except a competing commercial
-  product or service. Two years after each version is released, that version becomes Apache 2.0.
+- **Kothar's core, app and built-in extensions:** [Apache License 2.0](LICENSE) (see also [NOTICE](NOTICE)). You
+  may use, copy, modify and redistribute it for any purpose, including commercial ones. Releases up to v0.1.0 were
+  published under FSL-1.1-ALv2.
 - **The extension API (`packages/extension-api`):** [MIT](packages/extension-api/LICENSE), so extensions can use any
   licence they like.
 

@@ -152,6 +152,11 @@ Why some things are the way they are. Add one when you make a choice the next co
   same DMG name. In `scripts/signing.ts`, notary credentials in the environment win over the `kothar-notary` profile
   (they're set on purpose, and checking the profile signs in to Apple, which a CI runner without one would wait on), and
   `KOTHAR_REQUIRE_NOTARIZED=1` turns "signed but NOT notarized" into a stop, so CI can't publish a DMG that warns.
+- **Kothar is Apache 2.0, not FSL.** Kothar moved from FSL-1.1-ALv2 (source-available, with a non-compete) to the
+  Apache License 2.0 so that it's OSI open source, like the harnesses it runs (pi, OpenCode and Codex CLI are open
+  source). This gives up FSL's protection against a competing product built from the code; the business is Kothar
+  Cloud and Team plans, not the app. Releases up to v0.1.0 stay under FSL-1.1-ALv2, which itself makes each of them
+  Apache 2.0 two years after its release. The extension API stays MIT.
 - **Workers are part of the core, not an extension.** They were the Workers extension, but it was only a switch and two
   settings over things that were already core: child chats (`chat-lifecycle.ts`) and the `spawn_worker` tool
   (`kothar-mcp.ts`). As an extension it invited other extensions to depend on it (Deep Research greyed out a setting
@@ -508,7 +513,7 @@ v0.2.0`) or bump to the next version.
 Contributions are licensed under the licence of the files they change (inbound = outbound):
 
 - `packages/extension-api/`: MIT ([packages/extension-api/LICENSE](packages/extension-api/LICENSE)).
-- Everything else: FSL-1.1-ALv2 ([LICENSE.md](LICENSE.md)).
+- Everything else: Apache 2.0 ([LICENSE](LICENSE)).
 
 ## Adding a theme or extension to the marketplace
 
