@@ -4,7 +4,7 @@ import { githubMark } from '../lib/icons'
 import { latestRelease, REPO, RELEASES } from '../lib/release'
 
 const release = await latestRelease()
-const releaseNote = [release.version, 'macOS 13+', 'Apple silicon'].filter(Boolean).join(' · ')
+const releaseNote = 'Latest release · macOS 13+ · Apple silicon'
 
 const sections = [
   {

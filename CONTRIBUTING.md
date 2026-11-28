@@ -444,7 +444,9 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`. On a macOS runner it bu
 Developer ID certificate, notarizes and staples the app and the DMG (`packages/desktop/scripts/signing.ts`, the same code
 as `npm run package` on your Mac), checks both with `spctl` (the job fails unless both say `Notarized Developer ID`), and
 publishes a GitHub Release with `Kothar-<version>-arm64.dmg`, its `.sha256` and notes generated from the merged PRs. A
-tag with a hyphen (`v0.2.0-beta.1`) makes a pre-release.
+tag with a hyphen (`v0.2.0-beta.1`) makes a pre-release. Each release also gets an unversioned copy,
+`Kothar-arm64.dmg` (and its `.sha256`), so the website's Download button
+(`releases/latest/download/Kothar-arm64.dmg`) always serves the newest non-pre-release build without a site rebuild.
 
 **Dry run:** Actions → Release → Run workflow builds, signs, notarizes and verifies any branch, keeps the DMG as a
 workflow artifact for a week, and publishes nothing.
