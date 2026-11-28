@@ -582,6 +582,7 @@ export function settingProblem(setting: ExtensionSetting, value: unknown) {
   if (setting.type === 'boolean') return typeof value === 'boolean' ? undefined : 'must be on or off'
   if (setting.type === 'text') return typeof value === 'string' ? undefined : 'must be text'
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'must be a number'
+  if (setting.empty && value === setting.empty.value) return undefined
   if (setting.integer && !Number.isInteger(value)) return 'must be a whole number'
   if (setting.min !== undefined && value < setting.min) return `must be at least ${setting.min}`
   if (setting.max !== undefined && value > setting.max) return `must be at most ${setting.max}`

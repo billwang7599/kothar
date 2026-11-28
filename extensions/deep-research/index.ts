@@ -66,6 +66,18 @@ export function phaseText(run: Run): string {
 
 const sourceCount = (run: Run) => Object.keys(run.sources).length
 
+type Caps = { workers: number; sources: number }
+type Settings = { depth: Depth; askFirst: boolean; caps: Caps }
+
+// Each depth's own limit, as the Workers and Sources per research settings list them: "quick 4, standard 10, thorough 20".
+const limitList = (key: 'workers' | 'sources') => DEPTHS.map((d) => `${d} ${DEPTH_LIMITS[d][key]}`).join(', ')
+
+/** A depth button's tooltip, with its limits as the user's settings lower them (limitsFor). */
+export function depthHint(depth: Depth, caps: Caps): string {
+  const limits = limitsFor(depth, caps)
+  return `${DEPTH_LIMITS[depth].subs} sub-questions, up to ${limits.workers} workers and ${limits.sources} sources`
+}
+
 const short = (text: string, max: number) => {
   const line = text.replace(/\s+/g, ' ').trim()
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
@@ -203,7 +215,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
     return research
   }
 
-  const settingsOf = (context: { values: ExtensionValues }) => {
+  const settingsOf = (context: { values: ExtensionValues }): Settings => {
     const v = context.values
     const depth: Depth = DEPTHS.includes(v.depth as Depth) ? (v.depth as Depth) : 'standard'
     return {
@@ -471,8 +483,8 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
     h.refresh(chatId)
   }
 
-  const newView = (spaceId: string, defaultDepth: Depth): ExtensionView => {
-    const depth = popupDepth.get(spaceId) ?? defaultDepth
+  const newView = (spaceId: string, settings: Settings): ExtensionView => {
+    const depth = popupDepth.get(spaceId) ?? settings.depth
     return {
       type: 'stack',
       gap: 'loose',
@@ -487,7 +499,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
               label: d[0]!.toUpperCase() + d.slice(1),
               variant: d === depth ? 'primary' : 'ghost',
               action: { name: 'depth', value: d },
-              hint: `${DEPTH_LIMITS[d].subs} sub-questions, up to ${DEPTH_LIMITS[d].workers} workers and ${DEPTH_LIMITS[d].sources} sources`,
+              hint: depthHint(d, settings.caps),
             })),
           ],
         },
@@ -554,7 +566,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
 
   // The Research popup: every run in every space and Home, newest first, from the store's index (no findings or reports
   // read); or the New research form.
-  const historyView = (h: ExtensionHost, spaceId: string, defaultDepth: Depth): ExtensionView => {
+  const historyView = (h: ExtensionHost, spaceId: string, settings: Settings): ExtensionView => {
     const state = historyOf(spaceId)
     if (state.composing) {
       return {
@@ -569,7 +581,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
               { type: 'button', label: 'Back', variant: 'ghost', action: { name: 'back' } },
             ],
           },
-          newView(spaceId, defaultDepth),
+          newView(spaceId, settings),
         ],
       }
     }
@@ -694,23 +706,25 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
       },
       {
         key: 'maxWorkers',
-        label: 'Most workers per research',
-        description: `0 uses the depth's: ${DEPTHS.map((d) => `${d} ${DEPTH_LIMITS[d].workers}`).join(', ')}.`,
+        label: 'Workers per research',
+        description: `How many workers one research may start in all. Leave empty to use each depth's limit (${limitList('workers')}). A number lowers it for every depth and never raises it.`,
         type: 'number',
         default: 0,
-        min: 0,
-        max: 50,
+        min: 1,
+        max: DEPTH_LIMITS.thorough.workers,
         integer: true,
+        empty: { value: 0, placeholder: 'Depth default' },
       },
       {
         key: 'maxSources',
-        label: 'Most sources per research',
-        description: `0 uses the depth's: ${DEPTHS.map((d) => `${d} ${DEPTH_LIMITS[d].sources}`).join(', ')}.`,
+        label: 'Sources per research',
+        description: `How many web pages one research may read in all. Leave empty to use each depth's limit (${limitList('sources')}). A number lowers it for every depth and never raises it.`,
         type: 'number',
         default: 0,
-        min: 0,
-        max: 200,
+        min: 1,
+        max: DEPTH_LIMITS.thorough.sources,
         integer: true,
+        empty: { value: 0, placeholder: 'Depth default' },
       },
       {
         key: 'workerRole',
@@ -979,7 +993,7 @@ export function createDeepResearchExtension(options: DeepResearchOptions = {}): 
         shortcut: 'Mod+Shift+D',
         render(chat, context) {
           ensure(context.host)
-          return historyView(context.host, spaceOf(context.host, chat.id), settingsOf(context).depth)
+          return historyView(context.host, spaceOf(context.host, chat.id), settingsOf(context))
         },
         onAction(action, chat, context) {
           const h = context.host

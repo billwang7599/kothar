@@ -370,12 +370,16 @@ function BlockedLine({ text }: { text: string }) {
   )
 }
 
+// A number setting's box: empty when the value is the one an empty box stands for (ExtensionSetting's empty).
+const shown = (setting: ExtensionSetting, value: ExtensionSettingProps['value']) =>
+  setting.type === 'number' && setting.empty && value === setting.empty.value ? '' : String(value)
+
 export function ExtensionSettingRow({ id, setting, value, disabled, blocked, save }: ExtensionSettingProps) {
-  const [draft, setDraft] = useState(String(value))
+  const [draft, setDraft] = useState(shown(setting, value))
   const [was, setWas] = useState(value)
   if (value !== was) {
     setWas(value)
-    setDraft(String(value))
+    setDraft(shown(setting, value))
   }
   const row = (control: ReactNode, below?: ReactNode) => (
     <SettingRow
@@ -441,15 +445,16 @@ export function ExtensionSettingRow({ id, setting, value, disabled, blocked, sav
     )
   }
   const commit = () => {
-    const next = Number(draft)
-    if (draft.trim() && !settingProblem(setting, next) && next !== value) save(next)
-    else setDraft(String(value))
+    const next = draft.trim() ? Number(draft) : setting.empty?.value
+    if (next !== undefined && !settingProblem(setting, next) && next !== value) save(next)
+    else setDraft(shown(setting, value))
   }
   return row(
     <input
-      className="w-72"
+      className={setting.empty ? 'w-120' : 'w-72'}
       aria-label={setting.label}
       type="number"
+      placeholder={setting.empty?.placeholder}
       min={setting.min}
       max={setting.max}
       step={setting.integer ? 1 : 'any'}

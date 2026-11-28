@@ -559,6 +559,44 @@ test("Settings' scrolling nav and page keep their scrollbars inset, the page's b
   expect(page.className).toContain('[--scroll-top:48px]')
 })
 
+test('a number setting with an empty value shows an empty box with its placeholder; clearing the box saves that value', () => {
+  const cap = { key: 'cap', label: 'Workers per research', type: 'number', default: 0, min: 1, max: 20, integer: true, empty: { value: 0, placeholder: 'Depth default' } } satisfies ExtensionSetting
+  const withValue = (value: number): ExtensionInfo => ({ id: 'capped', name: 'Capped', description: '', enabled: true, settings: [cap], values: { cap: value } })
+  const box = () => dialog().querySelector('input[aria-label="Workers per research"]') as HTMLInputElement
+  const edit = (value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(box(), value)
+      box().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  const blur = () => act(() => box().dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+
+  const sent = renderExtensions([withValue(0)], 'extension:capped')
+  expect(box().value).toBe('')
+  expect(box().placeholder).toBe('Depth default')
+  blur()
+  expect(sent).toEqual([])
+
+  edit('8')
+  blur()
+  expect(sent).toEqual([{ type: 'extension.setValue', extensionId: 'capped', key: 'cap', value: 8 }])
+
+  renderExtensions([withValue(8)], 'extension:capped', sent)
+  expect(box().value).toBe('8')
+  edit('')
+  blur()
+  expect(sent.at(-1)).toEqual({ type: 'extension.setValue', extensionId: 'capped', key: 'cap', value: 0 })
+
+  // Out of range goes back to what's saved, and nothing is sent.
+  renderExtensions([withValue(8)], 'extension:capped', sent)
+  const count = sent.length
+  edit('40')
+  blur()
+  expect(sent).toHaveLength(count)
+  expect(box().value).toBe('8')
+})
+
 test('an extension with nothing to set gets no page; one with settings gets the header, its switch and what it does', () => {
   const plain: ExtensionInfo = { id: 'plain', name: 'Plain', description: 'Does one quiet thing.', enabled: true, settings: [], values: {}, uses: ['events'] }
   renderExtensions([plain], 'extensions')

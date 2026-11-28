@@ -50,7 +50,7 @@ Every setting has a `key`, a `label` and an optional `description`, plus one of 
 | `type` | Extra fields | Value |
 |---|---|---|
 | `boolean` | `default: boolean` | A switch. |
-| `number` | `default: number`, optional `min`, `max`, `integer` | A number field. |
+| `number` | `default: number`, optional `min`, `max`, `integer`, `empty` | A number field. |
 | `select` | `options: { value, label }[]`, `default` | A picker. Values are strings or numbers. |
 | `text` | `default: string`, optional `rows` | A text field; `rows` is how many lines it shows. |
 
@@ -62,6 +62,10 @@ How values behave:
 
 - A saved value that's no longer valid, such as an option you removed, reads as the default.
 - A blank `text` value reads as the default.
+- A `number` with `empty: { value, placeholder }` shows an empty box with the placeholder in grey while its value is
+  `value`, and clearing the box saves `value`. Use it for a number that means "use the default" or "no limit", such as
+  `empty: { value: 0, placeholder: 'Depth default' }`, so nobody has to guess what 0 means. `value` is valid even outside
+  `min` and `max`.
 - `enabled` isn't allowed as a key. Kothar uses it for the extension's own switch.
 - Values are typed `string | number | boolean`, so convert them where you use them, as `String(values.rules)` does above.
 - A change applies at each chat's next message. Hooks always get the current values.

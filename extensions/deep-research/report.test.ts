@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { checkSynthesis, cleanUrl, pageText, parseFindings, plainSynthesis, quoteFound, writeReport, type Finding } from './report.ts'
+import { settingProblem } from '@kothar/core/shared'
+import { createDeepResearchExtension, depthHint } from './index.ts'
 import { checkPlan, limitsFor, parseJson, planFromText } from './run.ts'
 
 const finding = (id: string, url: string, verified = true, sub = 0): Finding => ({
@@ -171,6 +173,39 @@ describe('plans and limits', () => {
   it('caps workers and sources by the user’s settings, or by depth', () => {
     expect(limitsFor('standard', { workers: 0, sources: 0 })).toEqual({ parallel: 3, workers: 10, sources: 30, rounds: 1 })
     expect(limitsFor('thorough', { workers: 2, sources: 5 })).toEqual({ parallel: 2, workers: 2, sources: 5, rounds: 2 })
+  })
+
+  it('treats the settings as a ceiling: they lower a depth’s limits and never raise them', () => {
+    // 0 or nothing saved: each depth's own.
+    expect(limitsFor('quick', { workers: 0, sources: 0 })).toMatchObject({ workers: 4, sources: 12 })
+    expect(limitsFor('quick', { workers: Number(undefined) || 0, sources: Number('') || 0 })).toMatchObject({ workers: 4, sources: 12 })
+    // Below a depth's: lowered, and parallel never exceeds the workers.
+    expect(limitsFor('standard', { workers: 8, sources: 20 })).toEqual({ parallel: 3, workers: 8, sources: 20, rounds: 1 })
+    // Above: the depth's own stays.
+    expect(limitsFor('quick', { workers: 8, sources: 50 })).toMatchObject({ workers: 4, sources: 12 })
+    expect(limitsFor('thorough', { workers: 50, sources: 200 })).toMatchObject({ workers: 20, sources: 60 })
+    // Fractions round down, and never below 1.
+    expect(limitsFor('standard', { workers: 2.9, sources: 0.4 })).toMatchObject({ parallel: 2, workers: 2, sources: 1 })
+  })
+
+  it('shows the limits as the settings lower them in the depth buttons’ tooltips', () => {
+    expect(depthHint('thorough', { workers: 0, sources: 0 })).toBe('6 to 8 sub-questions, up to 20 workers and 60 sources')
+    expect(depthHint('thorough', { workers: 8, sources: 30 })).toBe('6 to 8 sub-questions, up to 8 workers and 30 sources')
+    expect(depthHint('quick', { workers: 8, sources: 30 })).toBe('3 sub-questions, up to 4 workers and 12 sources')
+  })
+
+  it('offers the limits as optional numbers: empty means each depth’s own, and old saved 0s stay valid', () => {
+    const settings = createDeepResearchExtension().settings!
+    for (const key of ['maxWorkers', 'maxSources']) {
+      const setting = settings.find((s) => s.key === key)!
+      expect(setting).toMatchObject({ type: 'number', default: 0, empty: { value: 0, placeholder: 'Depth default' } })
+      expect(setting.label).not.toMatch(/most/i)
+      expect(setting.description).toContain('Leave empty to use each depth')
+      expect(settingProblem(setting, 0)).toBeUndefined()
+      expect(settingProblem(setting, 1)).toBeUndefined()
+      expect(settingProblem(setting, -1)).toBeDefined()
+    }
+    expect(settings.find((s) => s.key === 'maxWorkers')!.description).toContain('quick 4, standard 10, thorough 20')
   })
 
   it('reads JSON in a code fence', () => {

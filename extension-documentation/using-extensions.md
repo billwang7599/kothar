@@ -205,8 +205,9 @@ Deep Research answers a question from many web sources and writes a report with 
   one opens its report beside the chat in one click; **⋯** shows the evidence (every finding, kept or dropped, with its
   quote) or deletes it.
 - **Limits:** depth sets how far it goes: Quick (about 3 sub-questions, up to 4 workers and 12 sources), Standard (4 to 6,
-  10 and 30, one follow-up round) and Thorough (6 to 8, 20 and 60, two). **Most workers** and **Most sources** in its
-  settings cap any run. Reaching a cap ends the research with a partial report.
+  10 and 30, one follow-up round) and Thorough (6 to 8, 20 and 60, two). **Workers per research** and **Sources per
+  research** in its settings lower those limits for every depth (left empty, each depth keeps its own; a number above a
+  depth's limit changes nothing for it). Reaching a cap ends the research with a partial report.
 - **Files:** each run's plan, findings and sources are in `<data folder>/extensions/deep-research/runs/<space id>/`, so
   you can check where a claim came from later. They go when the space is deleted.
 - **What it can't check:** some sites refuse plain page fetches, and their findings are dropped. PDFs aren't read.

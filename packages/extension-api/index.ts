@@ -4,7 +4,9 @@
 // as if it were off. The saved value comes back when the other extension does.
 export type ExtensionSetting = { key: string; label: string; description?: string; requires?: string } & (
   | { type: 'select'; options: { value: string | number; label: string }[]; default: string | number }
-  | { type: 'number'; default: number; min?: number; max?: number; integer?: boolean }
+  // empty: the value an empty box stands for, such as 0 for "use the default" or -1 for "no limit". The box shows
+  // empty with the placeholder in grey, and clearing it saves the value. It passes min and max even when outside them.
+  | { type: 'number'; default: number; min?: number; max?: number; integer?: boolean; empty?: { value: number; placeholder: string } }
   | { type: 'boolean'; default: boolean }
   // A blank value means the default.
   | { type: 'text'; default: string; rows?: number }
