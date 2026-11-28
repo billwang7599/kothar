@@ -6,5 +6,5 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src", "scripts/signing.test.ts", "electron-builder.config.cjs"]
+  "include": ["src", "scripts/signing.test.ts", "scripts/release-files.test.ts", "electron-builder.config.cjs"]
 }

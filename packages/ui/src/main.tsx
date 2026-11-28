@@ -33,6 +33,8 @@ import { dockedPanels, MIN_WINDOW_PX, storedColumn } from './layout.ts'
 import { fileLinksChecked } from './file-links.tsx'
 import { receiveCopyChanges } from './folder-copies.tsx'
 import { wantComposerFocus } from './composer-focus.ts'
+import { useUpdates, type UpdatesBridge } from './updates.ts'
+import { UpdateNotice } from './update-notice.tsx'
 import './styles.css'
 
 const SELECTED_KEY = 'kothar.selectedChat'
@@ -66,6 +68,8 @@ declare global {
       /** A system notification; clicking it brings the window to the front and calls onOpenChat with open. */
       notify?(notification: { title: string; body: string; open?: string }): void
       onOpenChat?(listener: (chatId: string) => void): () => void
+      /** The updater, only in the packaged app (updates.ts). */
+      updates?: UpdatesBridge
     }
   }
 }
@@ -313,6 +317,7 @@ function App() {
   const launchers = placedLaunchers(useLauncherPlace(), launcherEntries(panels, keys, showContext))
   const [quitting, setQuitting] = useState(false)
   useEffect(() => window.kothar?.onQuitting(() => setQuitting(true)), [])
+  const updates = useUpdates()
   const reduceMotion = useReducedMotion()
 
   return (
@@ -372,6 +377,7 @@ function App() {
                 Stopping engines…
               </Banner>
             )}
+            {!quitting && <UpdateNotice info={updates} running={running} />}
             {state.rejected ? (
               <Banner tone="error">
                 The core rejected this window. Open the link the core printed; it carries the token.

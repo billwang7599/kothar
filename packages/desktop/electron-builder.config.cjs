@@ -1,4 +1,10 @@
-// Packs Kothar into Kothar.app and a DMG (npm run package). The app folder it packs is laid out by scripts/stage.mjs.
+// Packs Kothar into Kothar.app, a DMG and a zip (npm run package). The app folder it packs is laid out by
+// scripts/stage.mjs.
+//
+// The DMG is what people download. The zip and latest-mac.yml are for auto-update (src/updates.ts): electron-updater
+// reads latest-mac.yml from the newest GitHub Release and installs the zip, because Squirrel.Mac updates from a zip, not
+// a DMG. Nothing is uploaded here (the release workflow and scripts/release-files.ts do that), but the `publish` entry
+// still matters: it writes app-update.yml into the app, telling the updater where to look, and makes latest-mac.yml.
 //
 // Signing and notarization switch on by themselves once you have a Developer ID certificate and a notarytool profile;
 // scripts/signing.ts decides how (and says so in one line at the start of the build), and README.md has the one-time
@@ -23,7 +29,12 @@ module.exports = {
   npmRebuild: false,
   files: ['**/*', '!**/*.map'],
   mac: {
-    target: [{ target: 'dmg', arch: ['arm64'] }],
+    target: [
+      { target: 'dmg', arch: ['arm64'] },
+      // electron-builder's default name, Kothar-<version>-arm64-mac.zip. It holds the app as afterSign left it: signed,
+      // notarized and stapled.
+      { target: 'zip', arch: ['arm64'] },
+    ],
     category: 'public.app-category.developer-tools',
     icon: 'assets/icon.icns',
     minimumSystemVersion: '13.0',
@@ -43,7 +54,11 @@ module.exports = {
     artifactName: '${productName}-${version}-${arch}.${ext}',
     // Signed with the app's identity, then notarized and stapled, so the download itself opens without a warning.
     sign: plan.signed,
+    // Kept out of latest-mac.yml, with no blockmap: the updater only installs the zip, and the DMG is stapled after
+    // electron-builder would have hashed it, so its hash there would be wrong.
+    writeUpdateInfo: false,
   },
+  publish: [{ provider: 'github', owner: 'billwang7599', repo: 'kothar', releaseType: 'release' }],
   afterSign: signing.afterSign(plan),
   afterAllArtifactBuild: signing.afterAllArtifactBuild(plan),
 }

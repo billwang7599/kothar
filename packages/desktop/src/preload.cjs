@@ -28,4 +28,21 @@ contextBridge.exposeInMainWorld('kothar', {
   },
   vibrancy: process.platform === 'darwin',
   setAppearance: (/** @type {unknown} */ appearance) => ipcRenderer.send('set-appearance', appearance),
+  // The updater (src/updates.ts), only in the packaged app: main.ts passes --kothar-updates there. The UI shows no
+  // update banner or setting without it.
+  ...(process.argv.includes('--kothar-updates') && {
+    updates: {
+      info: () => ipcRenderer.invoke('update-info'),
+      onState: (/** @type {(info: unknown) => void} */ listener) => {
+        const handler = (/** @type {unknown} */ _event, /** @type {unknown} */ info) => listener(info)
+        ipcRenderer.on('update-state', handler)
+        return () => ipcRenderer.removeListener('update-state', handler)
+      },
+      check: () => ipcRenderer.send('update-check'),
+      download: () => ipcRenderer.send('update-download'),
+      decline: () => ipcRenderer.send('update-decline'),
+      later: () => ipcRenderer.send('update-later'),
+      restart: () => ipcRenderer.send('update-restart'),
+    },
+  }),
 })

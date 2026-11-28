@@ -1,7 +1,8 @@
 # Kothar desktop app
 
-`npm run package` (from the repo root) builds `packages/desktop/release/Kothar-<version>-arm64.dmg` for Apple Silicon.
-The first line it prints says how the build is signed:
+`npm run package` (from the repo root) builds `packages/desktop/release/Kothar-<version>-arm64.dmg` for Apple Silicon,
+and the update files beside it: `Kothar-<version>-arm64-mac.zip`, its `.blockmap` and `latest-mac.yml` (see
+[Updates](#updates)). It never uploads anything. The first line it prints says how the build is signed:
 
 - `Kothar will be UNSIGNED …`: no Developer ID certificate was found. The app gets an ad-hoc signature, which runs on the
   Mac that built it; other Macs block it until it's opened with right-click → Open.
@@ -115,7 +116,36 @@ first line says `NOT notarized`; `KOTHAR_REQUIRE_NOTARIZED=1` makes that, or an 
 ## Releases from GitHub Actions
 
 `.github/workflows/release.yml` does this same build on a Mac runner when a `v*` tag is pushed, and publishes a GitHub
-Release with the DMG. CONTRIBUTING.md, "Releasing", has the secrets it needs and how to cut a release.
+Release with the DMG and the update files. CONTRIBUTING.md, "Releasing", has the secrets it needs and how to cut a
+release, including from your own Mac: `node scripts/release-files.ts upload v<version>` (in this folder) checks the
+built files and creates the release with all of them.
+
+## Updates
+
+The packaged app checks GitHub Releases 10 seconds after it starts and then every 4 hours (`src/updates.ts`, with
+`electron-updater`), reading `latest-mac.yml` from the newest release that isn't a pre-release. Checks are silent.
+Nothing downloads or installs until the user says so: `autoDownload` and `autoInstallOnAppQuit` stay off.
+
+- **The notice:** a newer version shows "Kothar X.Y.Z is available" at the top of the chat pane, with Update, Not now
+  and a link to the release notes. It shows at most once per version: a later check finding the same version changes
+  nothing, and only a version newer than any shown so far pops up mid-session. One left undecided is asked about once
+  more on the next launch.
+- **Update** downloads the zip with progress in the notice, then offers Restart (saying how many running chats it
+  stops) or Restart later, which installs on the next quit. Restart quits the normal way, stopping engines first, then
+  installs and relaunches.
+- **Not now** saves the version as declined, and it's never offered by itself again. Settings → General → Updates shows
+  the version, what the last check found, Check now, and Update for any version found, declined or not. Kothar → Check
+  for Updates… opens the notice even for a declined version, and answers "You're up to date" or the error.
+- Errors (offline, a release without `latest-mac.yml`) are only logged, unless the user asked from the menu.
+- Only the packaged app runs the updater. `npm run desktop` and the browser tab show no notice or Updates section.
+- Squirrel.Mac installs an update only if it's signed by the same Developer ID as the running app, so an ad-hoc build
+  never updates, and every release must be signed and notarized.
+- `electron-builder.config.cjs`'s `publish` entry writes `Contents/Resources/app-update.yml` (where to look) into the
+  app and makes `latest-mac.yml`; `--publish never` (in `npm run package`) keeps electron-builder from uploading.
+- The DMG is left out of `latest-mac.yml` (`dmg.writeUpdateInfo: false`): it's stapled after electron-builder would
+  hash it, and the updater doesn't use it.
+- The declined version is saved in `updates.json` in the app's Electron folder (`~/Library/Application Support/Kothar
+  Desktop`), not the garage.
 
 ## What's in the bundle
 
