@@ -85,7 +85,7 @@ test('spaces follow their saved order, pinned ones in their own group on top, wo
   render([C, HOME, { ...B, pinned: true, order: 0 }, WORKER, A, chat({ id: 'n', name: 'New' })])
   expect(container.querySelector('#pinned-label')?.textContent).toBe('Pinned')
   expect(names(group('pinned'))).toEqual(['Beta'])
-  expect(names(group('spaces'))).toEqual(['New', 'Alpha', 'Workerworker', 'Gamma'])
+  expect(names(group('spaces'))).toEqual(['New', 'Alpha', 'Worker', 'Gamma'])
   expect(rowOf('Home').compareDocumentPosition(group('pinned')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })
 

@@ -20,7 +20,12 @@ const DOTS: Record<ChatStatus, string> = {
 }
 /** A folded row shows the busiest status among the workers it hides. */
 const BUSIEST: ChatStatus[] = ['waiting', 'stopping', 'running', 'idle']
+// Each level puts a worker's dot under its parent's name; deeper levels stop there, so a long chain of workers never
+// pushes the row sideways.
 const INDENTS = ['pl-8', 'pl-22', 'pl-36', 'pl-50']
+// Selected rows are filled; hovered ones get a lighter wash, so the open chat stays distinct under the pointer.
+const ROW_SELECTED = 'bg-raised text-text'
+const ROW_HOVER = 'hover:bg-raised/50 has-data-[state=open]:bg-raised/50 has-data-[state=open]:text-text'
 // A row's ⋯: shown on hover, on keyboard focus and while its menu is open. Its place is always kept (never display:
 // none), so nothing in the row moves when the pointer comes in: the workers chevron beside it stays put under the click.
 const ROW_ACTION =
@@ -140,20 +145,16 @@ function ChatRow(props: RowProps) {
   const { chat } = row
   const depth = row.depth + (inGroup ? 1 : 0)
   const status = fold?.folded ? BUSIEST.find((s) => [own, ...fold.hidden.map((c) => c.status)].includes(s))! : own
-  const highlight = selected
-    ? 'bg-raised text-text'
-    : unread
-    ? 'text-text hover:bg-raised has-data-[state=open]:bg-raised'
-    : 'text-muted hover:bg-raised hover:text-text has-data-[state=open]:bg-raised has-data-[state=open]:text-text'
+  const highlight = selected ? ROW_SELECTED : unread ? `text-text ${ROW_HOVER}` : `text-muted hover:text-text ${ROW_HOVER}`
   return (
     <m.div
-      className={`group/row relative flex shrink-0 items-center rounded transition-colors ${highlight} ${reorder?.dragging ? 'opacity-50' : ''}`}
+      className={`group/row relative flex min-w-0 shrink-0 items-center rounded transition-colors ${highlight} ${reorder?.dragging ? 'opacity-50' : ''}`}
       {...MOTION.collapse}
       initial={animate && MOTION.collapse.initial}
     >
       <button
         className={`flex h-control min-w-0 flex-1 items-center gap-8 pr-8 text-left whitespace-nowrap ${INDENTS[Math.min(depth, INDENTS.length - 1)]}`}
-        title={title}
+        title={`${title}${chat.worker ? ' (worker)' : ''}${showEngine ? ` · ${chat.engine}` : ''}`}
         onClick={select}
         data-chat-id={chat.id}
         draggable={reorder && row.depth === 0 ? true : undefined}
@@ -165,12 +166,19 @@ function ChatRow(props: RowProps) {
       >
         <span className={`size-7 shrink-0 rounded-full ${DOTS[status]}`} data-status={status} />
         {chat.extension === 'home' && <HouseIcon />}
-        <span className={`min-w-0 flex-1 truncate ${unread ? 'font-semibold' : ''}`} data-unread={unread || undefined}>
+        {/* The name takes what the engine label (at most a third of the row) leaves, and always keeps a few letters. */}
+        <span
+          className={`min-w-[2.5em] flex-1 truncate ${unread ? 'font-semibold' : ''}`}
+          data-unread={unread || undefined}
+        >
           {chat.name}
         </span>
-        {chat.worker && <span className="rounded border px-5 text-xs text-muted">worker</span>}
         {/* Always shown: the ⋯ has its own place, so nothing needs to make room for it on hover. */}
-        {showEngine && <span className="shrink-0 text-xs text-faint">{chat.engine}</span>}
+        {showEngine && (
+          <span className="max-w-[33%] min-w-0 truncate text-xs text-faint" data-engine>
+            {chat.engine}
+          </span>
+        )}
       </button>
       {fold && (
         <Hint text={fold.folded ? 'Show workers' : 'Hide workers'}>
@@ -454,7 +462,8 @@ export function ChatNav({
         selected={chat.id === selectedId}
         status={asksBelow ? 'waiting' : chat.status}
         unread={showsUnread(chat, looking && chat.id === selectedId)}
-        showEngine={mixedEngines}
+        // A worker usually runs on its parent's engine, so only a different one is worth a label.
+        showEngine={mixedEngines && chats.find((c) => c.id === chat.parentId)?.engine !== chat.engine}
         select={() => select(chat.id)}
         menu={chat.extension || chat.worker ? undefined : chatMenu(chat)}
         fold={below.length ? { folded: isFolded, hidden: below, toggle: () => foldChat(chat.id, !isFolded) } : undefined}
@@ -602,7 +611,7 @@ export function ChatNav({
   const overUngrouped = !!drag?.over && 'into' in drag.over && drag.over.into === ''
 
   return (
-    <nav className="flex flex-1 scroll-inset flex-col gap-1 overflow-y-auto pt-10 pr-0 pb-8 pl-8">
+    <nav className="flex min-w-0 flex-1 scroll-inset flex-col gap-1 overflow-x-hidden overflow-y-auto pt-10 pr-0 pb-8 pl-8">
       <AnimatePresence>{tree.active.slice(0, split).filter(shown).map(row)}</AnimatePresence>
       {launchers.length > 0 && (
         <div role="group" aria-label="Extensions" className="flex flex-col gap-1">
@@ -753,7 +762,7 @@ function GroupRow(props: GroupRowProps) {
     >
       <HoverCard.Trigger asChild>
         <m.div
-          className={`group/row relative flex shrink-0 items-center rounded text-muted transition-colors hover:bg-raised hover:text-text has-data-[state=open]:bg-raised ${dragging ? 'opacity-50' : ''} ${into ? 'bg-accent/15 text-text ring-1 ring-accent' : ''}`}
+          className={`group/row relative flex min-w-0 shrink-0 items-center rounded text-muted transition-colors hover:text-text ${ROW_HOVER} ${dragging ? 'opacity-50' : ''} ${into ? 'bg-accent/15 text-text ring-1 ring-accent' : ''}`}
           {...MOTION.collapse}
           initial={animate && MOTION.collapse.initial}
         >
@@ -777,7 +786,7 @@ function GroupRow(props: GroupRowProps) {
               {group.name}
             </span>
             {collapsed && (
-              <span className="text-xs text-faint tabular-nums" data-count>
+              <span className="shrink-0 text-xs text-faint tabular-nums" data-count>
                 {count}
               </span>
             )}
@@ -981,7 +990,7 @@ export function NameDialog({ request, connected, send, close }: NameDialogProps)
 // As tall as a chat row, its label under the chat names: an empty slot where a row's dot sits (pl-7 plus the
 // button's 1px border makes the rows' pl-8), like the New space row.
 const LAUNCHER_ROW = 'flex h-control w-full shrink-0 items-center gap-8 pr-8 pl-7 text-left text-muted hover:text-text'
-const FOOTER_ROW = 'flex h-control w-full items-center gap-8 px-8'
+const FOOTER_ROW = 'flex h-control w-full min-w-0 items-center gap-8 px-8 text-left'
 
 /** A launcher an extension panel asks for (ExtensionPanel.launcher): a row in the left sidebar that opens the panel. */
 export type Launcher = { key: string; label: string; keys?: Binding | null; open: () => void }
@@ -991,8 +1000,9 @@ function LauncherRows({ launchers, top = false }: { launchers: Launcher[]; top?:
   return launchers.map((launcher) => {
     const row = (
       <Button variant="ghost" size="none" className={top ? LAUNCHER_ROW : FOOTER_ROW} onClick={launcher.open}>
-        {top && <span aria-hidden="true" className="w-7 shrink-0" />}
-        {launcher.label}
+        {/* An empty slot where a row's dot sits, so every label in the sidebar starts on one line. */}
+        <span aria-hidden="true" className="w-7 shrink-0" />
+        <span className="min-w-0 truncate">{launcher.label}</span>
       </Button>
     )
     return launcher.keys ? (
@@ -1016,7 +1026,9 @@ export function SidebarFooter({ settingsKeys, openSettings, launchers = [] }: Fo
       <LauncherRows launchers={launchers} />
       <Hint text={settingsKeys && <Keys binding={settingsKeys} />} side="right">
         <Button variant="ghost" size="none" className={FOOTER_ROW} onClick={openSettings}>
-          <span aria-hidden="true">⚙</span>
+          <span aria-hidden="true" className="flex w-7 shrink-0 justify-center">
+            ⚙
+          </span>
           Settings
         </Button>
       </Hint>
