@@ -13,7 +13,7 @@ import { request as httpRequest } from 'node:http'
 import { createServer, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import type { Extension, SentTurn } from '@kothar/extension-api'
+import type { ActivityEvent, Extension, SentTurn } from '@kothar/extension-api'
 import { afterEach, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { createFakeAdapter } from './adapters/fake.ts'
@@ -1184,5 +1184,86 @@ it("lets a lead review a worker's changes with review_worker, but merges only on
   const checkout = chatIn(core, spaceId).worktrees![repo]!.path
   expect(readFileSync(join(checkout, 'fix.txt'), 'utf8')).toBe('fixed\n')
   expect(chatIn(core, spaceId).workerBranches).toBeUndefined()
+  sessionOf(spaceId).end('Done')
+})
+
+// Allow all approves everything, so it also answers the cards that otherwise only the user can (forget, review_worker).
+async function startWatched() {
+  const events: ActivityEvent[] = []
+  const watcher: Extension = { id: 'watcher', name: 'Watcher', description: '', enabledByDefault: true, onActivity: (event) => void events.push(event) }
+  return { ...(await startHeld({ extensions: [mainExtension, watcher] })), events }
+}
+
+it("asks the user before a forget while Allow all is off, and lets Allow all approve it, logged and noted", async () => {
+  const { core, send, sessionOf, tool, events } = await startWatched()
+  core.handle({ type: 'chat.create', name: 'Notes' }, () => {})
+  const id = core.chats().find((c) => c.name === 'Notes')!.id
+  const cards = () => chatIn(core, id).entries.filter((e) => e.type === 'permission.requested' && e.name === 'Forget 1 message')
+  const resolved = (requestId: string) => chatIn(core, id).entries.find((e) => e.type === 'permission.resolved' && e.requestId === requestId)
+
+  send(id, 'the secret is 42')
+  await waitUntil(() => !!sessionOf(id))
+  sessionOf(id).end('Noted')
+  await waitUntil(() => chatIn(core, id).status === 'idle')
+
+  // Off: the card waits for the user, and Cancel keeps the message.
+  send(id, 'forget the secret')
+  await waitUntil(() => sessionOf(id).prompt !== undefined && chatIn(core, id).status === 'running')
+  const bearer = sessionOf(id).options.kotharMcp!.token
+  const asking = tool(bearer, 'forget', { ids: [0] })
+  await waitUntil(() => cards().length === 1)
+  const card = cards()[0]!
+  if (card.type !== 'permission.requested') throw new Error('no card')
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(resolved(card.requestId)).toBeUndefined()
+  expect(chatIn(core, id).status).toBe('waiting')
+  core.handle({ type: 'permission.respond', chatId: id, requestId: card.requestId, allow: false }, () => {})
+  expect((await asking).text).toBe('The user kept these messages.')
+  expect(events.find((e) => e.kind === 'permission' && e.detail?.startsWith('Forget 1 message'))).toMatchObject({ decision: 'denied', rule: 'You' })
+
+  // On: approved at once with Allow all's rule, in the Activity, with the usual note in the chat.
+  core.handle({ type: 'chat.setPermission', chatId: id, name: 'allowAll', enabled: true }, () => {})
+  const forgot = await tool(bearer, 'forget', { ids: [0] })
+  expect(forgot.text).toMatch(/^Forgot 1 message\./)
+  const auto = cards()[1]!
+  if (auto.type !== 'permission.requested') throw new Error('no card')
+  expect(resolved(auto.requestId)).toMatchObject({ allow: true, auto: true })
+  expect(events.findLast((e) => e.kind === 'permission' && e.detail?.startsWith('Forget 1 message'))).toMatchObject({ decision: 'allowed', rule: 'Switch: Allow all' })
+  expect(chatIn(core, id).entries.some((e) => e.type === 'extension.note' && /forgotten/.test(e.text))).toBe(true)
+  expect(chatIn(core, id).entries.some((e) => e.type === 'user.message' && e.text === 'the secret is 42')).toBe(false)
+  sessionOf(id).end('Done')
+})
+
+it("lets Allow all approve a lead's review_worker merge without a card to answer", async () => {
+  const { core, garage, json, tool, send, sessionOf, events } = await startWatched()
+  workersOn(core, -1)
+  const repo = join(garage, 'repo')
+  mkdirSync(repo, { recursive: true })
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8' }).trim()
+  git('init', '-q', '-b', 'main')
+  writeFileSync(join(repo, 'README.md'), 'hi\n')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'first')
+  core.handle({ type: 'chat.create', name: 'App', folders: [repo] }, () => {})
+  const spaceId = core.chats().find((c) => c.name === 'App')!.id
+  core.handle({ type: 'chat.setPermission', chatId: spaceId, name: 'allowAll', enabled: true }, () => {})
+
+  send(spaceId, 'Fix it')
+  await waitUntil(() => !!sessionOf(spaceId))
+  const token = sessionOf(spaceId).options.kotharMcp!.token
+  const { chatId } = await json(token, 'spawn_worker', { task: 'Fix the bug' })
+  await waitUntil(() => !!sessionOf(chatId))
+  writeFileSync(join(sessionOf(chatId).options.cwd, 'fix.txt'), 'fixed\n')
+  sessionOf(chatId).end('Fixed')
+  await waitUntil(() => chatIn(core, spaceId).workerBranches?.[chatId]?.state === 'review')
+
+  expect((await tool(token, 'review_worker', { workerId: chatId, action: 'merge' })).text).toMatch(/^Merged worker "Fix the bug"'s changes/)
+  const card = chatIn(core, spaceId).entries.findLast((e) => e.type === 'permission.requested')!
+  if (card.type !== 'permission.requested') throw new Error('no card')
+  expect(card.name).toBe(`Merge worker "Fix the bug"'s changes`)
+  expect(chatIn(core, spaceId).entries.find((e) => e.type === 'permission.resolved' && e.requestId === card.requestId)).toMatchObject({ allow: true, auto: true })
+  expect(events.find((e) => e.kind === 'permission' && e.detail?.startsWith('Merge worker'))).toMatchObject({ decision: 'allowed', rule: 'Switch: Allow all' })
+  expect(chatIn(core, spaceId).entries.some((e) => e.type === 'extension.note' && e.text.startsWith('Merged worker'))).toBe(true)
   sessionOf(spaceId).end('Done')
 })

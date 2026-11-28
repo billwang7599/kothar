@@ -150,18 +150,16 @@ describe('forget', () => {
     expect(t.entries(chatId).some((e) => e.type === 'entry.removed' || e.type === 'extension.note')).toBe(false)
   })
 
-  it('shows the card even with Allow all on, answered by the user alone', async () => {
+  it('lets Allow all approve it: the card shows, resolved at once, and the messages go', async () => {
     const t = await start()
     const chatId = t.space('School')
     t.handle({ type: 'chat.setPermission', chatId, name: 'allowAll', enabled: true })
     t.send(chatId, SECRET).end('ok')
     const running = t.send(chatId, 'forget it')
     const result = t.tool(running, 'forget', { ids: [0] })
-    await until(() => t.card(chatId) !== undefined)
-    expect(t.kothar.core.chats().find((c) => c.id === chatId)!.status).toBe('waiting')
-    expect(t.entries(chatId).some((e) => e.type === 'permission.resolved')).toBe(false)
-    await t.answer(chatId, true)
     expect((await result).text).toMatch(/^Forgot 1 message\./)
+    expect(t.card(chatId)).toBeDefined()
+    expect(t.entries(chatId).find((e) => e.type === 'permission.resolved')).toMatchObject({ allow: true, auto: true })
     expect(t.logFile(chatId)).not.toContain('TallyVotes')
   })
 

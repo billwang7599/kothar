@@ -56,8 +56,9 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
   allowAll: {
     label: 'Allow all',
     about:
-      'On: no sandbox, and every request is approved without asking, logins and keys included. Only folders set to ' +
-      'Read only stay read only. The other switches are kept for when you turn it off. From the chat’s next message.',
+      'On: no sandbox, and every request is approved without asking, logins and keys included, and so are merging or ' +
+      'discarding a worker’s changes and an agent’s forget. Only folders set to Read only stay read only. The other ' +
+      'switches are kept for when you turn it off. From the chat’s next message.',
     amberWhileOn: true,
   },
   editAnywhere: {

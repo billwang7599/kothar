@@ -178,8 +178,8 @@ Why some things are the way they are. Add one when you make a choice the next co
   own. A quiet child (an extension's own work, such as research) shares the space's checkout unless it asks, since it
   rarely edits a repo and a worktree per search would be waste. Review lives on the worker's report in its lead's chat
   (the only place left once the worker's gone): Merge, Squash, Keep, Discard, each saying what it did in a note. The
-  lead's `review_worker` asks the user on a card only they can answer (as `forget` does) for anything but Keep, since
-  a merge changes the space's branch and a discard deletes work. A merge refuses a space checkout with uncommitted
+  lead's `review_worker` asks the user on a card only they (or Allow all) can answer, as `forget` does, for anything
+  but Keep, since a merge changes the space's branch and a discard deletes work. A merge refuses a space checkout with uncommitted
   changes, and a conflict runs `merge --abort` (`reset --merge` for squash), so the space is never left half-merged.
   `workers.ts` only gains the switch
   (`checkout: 'shared'` when off); the rest is `worker-checkouts.ts`.
@@ -234,8 +234,10 @@ Why some things are the way they are. Add one when you make a choice the next co
 - **Allow all is a full bypass, and it folds the other switches rather than resetting them.** The user asked for
   "approve everything": while `allowAll` is on, the chat runs with no sandbox (`editsAnywhere` counts it) and the core
   approves every permission request (`ALLOW_ALL_RULE` in `permissions.ts`), logins, keys, `.env` files and Kothar's
-  saved accounts included, and extensions' policies can't overrule it. Two things still hold, because they aren't
-  questions the user is asked: a folder the user set to Read only, and a read-only turn. It layers like every switch
+  saved accounts included, and extensions' policies can't overrule it. It also answers the cards otherwise asked of the
+  user alone (`userOnly` in turn.ts): `review_worker`'s Merge, Squash and Discard, and `forget`. Two things still hold,
+  because they aren't questions the user is asked: a folder the user set to Read only, and a read-only turn (where
+  those user-only cards still ask). It layers like every switch
   (chat, chats above, Settings → Work folder), so a chat can turn it off under a space that has it on. While it's on,
   the Permissions tab and Settings show only it, with the others folded away: their picks stay saved and come back
   unchanged when it's turned off, so turning it on is never a one-way door. The chat header shows an amber **Allow
@@ -332,12 +334,15 @@ Why some things are the way they are. Add one when you make a choice the next co
 - **With every tool off, a few things stay.** Claude Code keeps `ToolSearch`, which it may need to load deferred MCP
   tools (Kothar's among them); pi uses `--no-builtin-tools`, not `--no-tools`, which would drop MCP too; OpenCode turns
   each built-in off by name, never `*`, which would match `kothar_*` as well.
-- **forget always asks, and nothing can answer for you.** An agent's `forget` tool erases messages for good (the
+- **forget asks, and only Allow all can answer for you.** An agent's `forget` tool erases messages for good (the
   same removal as Delete: `entry.removed` in place, `log.jsonl` rewritten, files only they used deleted, Memory told
-  through `onMessagesRemoved`). Its card is asked of the user alone (`userOnly` in turn.ts): Allow all, automatic
-  permission answers, extensions' policies and read-only turns never answer it. An agent that could quietly erase its
-  own history could hide its mistakes, and a prompt injection could use it to wipe evidence; there's no undo once the
-  text is gone. It acts only on its own chat's finished turns (no other chat, not a parent's frozen view), reads ids as
+  through `onMessagesRemoved`). Its card is asked of the user alone (`userOnly` in turn.ts): automatic permission
+  answers, extensions' policies and read-only turns never answer it. An agent that could quietly erase its own history
+  could hide its mistakes, and a prompt injection could use it to wipe evidence; there's no undo once the text is gone.
+  Allow all is the one exception (outside a read-only turn): the user asked for it to approve everything, and a chat
+  with it on can already delete files and worktrees through the shell, so the card guards nothing there. The approval
+  is still logged in the Activity under `Switch: Allow all`, and the chat still shows the card, resolved, and its
+  "messages forgotten" note. It acts only on its own chat's finished turns (no other chat, not a parent's frozen view), reads ids as
   the session was shown them (`chat.seen`), so a second forget in the same turn still names the right messages, and
   keeps only ids in the log: the call's `reason` is dropped as it's logged, and the card keeps its count once the
   messages are gone. It's a core tool beside `list_chats`, not Memory's, because it works with Memory off too and uses

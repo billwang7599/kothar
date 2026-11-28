@@ -1190,7 +1190,8 @@ function assembleCore(options: {
     }
   }
 
-  // The lead's review_worker: Keep at once, anything else once the user says so on a card only they can answer.
+  // The lead's review_worker: Keep at once, anything else once the user says so on a card only they, or Allow all
+  // (turn.ts), can answer.
   const reviewWorkerFor = async (caller: Chat, workerId: string, action: ReviewAction) => {
     const space = chainOf(caller)[0]!
     const entry = space.info.workerBranches?.[workerId]

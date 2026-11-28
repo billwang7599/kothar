@@ -33,6 +33,7 @@ import { runningChildren } from './workers.ts'
 import { saveQueue } from './queue-store.ts'
 import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
 import {
+  allowsAll,
   editsAnywhere,
   IMAGE_TYPES,
   LARGE_ATTACHMENT_BYTES,
@@ -545,7 +546,7 @@ export function openTurns(deps: TurnDeps) {
   const sshHostsAsked = new Map<string, SshHost>()
   // Permission requests an extension raised (host.requestPermission), by id: answered here, not by the engine.
   const extensionAsks = new Map<string, { chat: Chat; resolve: (verdict: RuledVerdict) => void }>()
-  // Requests only the user may answer (AskOptions.userOnly), by id, until they're raised.
+  // Requests only the user (or Allow all) may answer (AskOptions.userOnly), by id, until they're raised.
   const userOnly = new Set<string>()
   // Each chat's live session events, for an extension's request to go through as an engine's does.
   const liveEvents = new WeakMap<Chat, ReturnType<typeof sessionEvents>>()
@@ -978,8 +979,12 @@ export function openTurns(deps: TurnDeps) {
         recordPermission(chat, event, verdict.allow, verdict.rule, verdict.message)
         respondTo(ref.session, requestId, verdict)
       }
-      // Asked of the user alone (forget): no rule, switch or extension answers it.
-      if (userOnly.delete(requestId)) return settle(undefined)
+      // Asked of the user alone (forget, review_worker): no rule or extension answers it. Allow all does, since it
+      // approves everything; in a read-only turn the card still asks.
+      if (userOnly.delete(requestId)) {
+        const { switches, readOnly } = permissionsOf()
+        return settle(!readOnly && allowsAll(...switches) ? { allow: true, rule: ALLOW_ALL_RULE } : undefined)
+      }
       const own = decide(event, permissionsOf())
       // The core's denials stand, and so does Allow all; otherwise an extension's policy goes first.
       if (own?.allow === false || own?.rule === ALLOW_ALL_RULE) return settle(own)
@@ -996,7 +1001,8 @@ export function openTurns(deps: TurnDeps) {
     // An extension's request (host.requestPermission), raised in this session as if the engine had: the core's rules,
     // extensions' policies, else the user's card, and the Activity record. changes: what it does may change something,
     // so a read-only turn refuses it.
-    // ask.userOnly: only the user answers it, read-only turn or not (forget); requestId: the caller's own id for it.
+    // ask.userOnly: only the user answers it, or Allow all outside a read-only turn (forget, review_worker); a read-only
+    // turn doesn't refuse it. requestId: the caller's own id for it.
     const ask = (request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean, options: AskOptions = {}) =>
       new Promise<RuledVerdict>((resolve) => {
         const requestId = options.requestId ?? `x-${randomBytes(6).toString('hex')}`

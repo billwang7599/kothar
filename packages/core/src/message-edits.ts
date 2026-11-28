@@ -181,7 +181,8 @@ export type MessageEditsDeps = {
   // Queues a message as if the user had sent it (turn.ts enqueue): it runs at once on an idle chat.
   enqueue: (chat: Chat, message: Omit<QueuedMessage, 'id'>) => void
   checkActive: (chat: Chat) => void
-  // Asks the user alone, on a card in the chat's running turn (turn.ts, userOnly): no switch or rule answers it.
+  // Asks the user alone, on a card in the chat's running turn (turn.ts, userOnly): no rule or extension answers it, and
+  // of the switches only Allow all does.
   askUser: (chat: Chat, request: ForgetRequest, requestId: string) => Promise<{ allow: boolean }>
   // Logs a line in the chat (an extension.note with no extension).
   note: (chat: Chat, text: string) => void
@@ -242,7 +243,7 @@ export function openMessageEdits(deps: MessageEditsDeps) {
   return {
     /**
      * The forget tool: removes the messages the agent names by id (forgetIds) from its own chat, once the user says so
-     * on a card nothing else can answer. Resolves with what the agent is told.
+     * on a card nothing but Allow all can answer. Resolves with what the agent is told.
      */
     async forget(chat: Chat, rawIds: unknown): Promise<string> {
       const ids = forgetIds(rawIds)
