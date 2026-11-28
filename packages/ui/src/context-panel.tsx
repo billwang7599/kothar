@@ -56,12 +56,13 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
   allowAll: {
     label: 'Allow all',
     about:
-      'On: no sandbox, and every request is approved without asking, logins and keys included. Only folders set to ' +
-      'Read only stay read only. The other switches are kept for when you turn it off. From the chat’s next message.',
+      'On: no sandbox, and every request is approved without asking, logins and keys included, and so are merging or ' +
+      'discarding a worker’s changes and an agent’s forget. Only folders set to Read only stay read only. The other ' +
+      'switches are kept for when you turn it off. From the chat’s next message.',
     amberWhileOn: true,
   },
   editAnywhere: {
-    label: 'Allow edits outside the work folder',
+    label: 'Allow edits outside the work folder, asking first',
     about:
       'On: no sandbox, and edits outside the work folder and the folders set to Edit in place ask you first. Off: ' +
       'agents write only in the chat’s folder in the work folder and in folders set to Edit in place, and edits ' +
@@ -71,8 +72,8 @@ export const PERMISSIONS: Record<PermissionSwitch, { label: string; about: strin
   autoRunCommands: {
     label: 'Run commands without asking',
     about:
-      'Agents run shell commands without asking you first, but only while the chat is sandboxed: with edits ' +
-      'anywhere on, or on a system Kothar can’t sandbox, every command asks but plain reads.',
+      'Agents run shell commands without asking you first, but only while the chat is sandboxed: with Allow edits ' +
+      'outside the work folder, asking first, on, or on a system Kothar can’t sandbox, every command asks but plain reads.',
   },
   autoNetworkCommands: {
     label: 'Run network commands without asking',
@@ -120,7 +121,7 @@ export function MoreSwitches({ on, children }: { on: number; children: ReactNode
 }
 export const FOLDED_SWITCHES = `${PERMISSION_SWITCHES.length - 1} more switches and the allowed SSH hosts, not used while Allow all is on`
 const PERMISSIONS_HINT =
-  'Each shows Settings → Work folder until you pick, or for a worker, its space. A pick is for this chat only.'
+  'Each shows Settings → Permissions until you pick, or for a worker, its space. A pick is for this chat only.'
 const EMPTY_SECTION: Record<ContextSection, string> = {
   agents: '',
   folders: 'No folders.',
@@ -896,7 +897,7 @@ export function ContextPanel(props: ContextPanelProps) {
         {hide && <PanelToggle side="right" label="Context panel" noun="context" open toggle={hide} action="toggleContextPanel" />}
       </header>
       <div
-        className="flex flex-1 scroll-inset flex-col gap-18 overflow-y-auto py-12 pl-12"
+        className="flex min-w-0 flex-1 scroll-inset flex-col gap-18 overflow-x-hidden overflow-y-auto py-12 pl-12"
         role="tabpanel"
         aria-label={extensionTab?.title ?? TAB_LABEL[shown]}
         {...whileStale(extensionTab ? panelView?.stale || extensionUi?.stale : props.itemsStale || extensionUi?.stale)}

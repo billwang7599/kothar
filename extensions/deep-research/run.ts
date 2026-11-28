@@ -54,9 +54,13 @@ export type Outcome = {
 }
 
 /** The run's limits: the depth's, with the user's caps (0: the depth's own) applied. */
+/**
+ * A depth's limits, lowered by the user's settings: a number above 0 is a ceiling for every depth, so it never raises
+ * one. 0 (or nothing saved) leaves the depth's own.
+ */
 export function limitsFor(depth: Depth, caps: { workers: number; sources: number }): Limits {
   const base = DEPTH_LIMITS[depth]
-  const cap = (own: number, user: number) => (user > 0 ? Math.max(1, Math.floor(user)) : own)
+  const cap = (own: number, user: number) => (user > 0 ? Math.min(own, Math.max(1, Math.floor(user))) : own)
   const workers = cap(base.workers, caps.workers)
   return { parallel: Math.min(base.parallel, workers), workers, sources: cap(base.sources, caps.sources), rounds: base.rounds }
 }

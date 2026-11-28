@@ -75,7 +75,7 @@ export function splitCommand(line: string): string[] {
 // added at the end if the command never says {file}.
 export function customLaunch(command: string, { file, line, col }: FileSpot): EditorLaunch {
   const words = splitCommand(command)
-  if (!words.length) throw new Error('Set a command for Open files with in Settings → Work folder')
+  if (!words.length) throw new Error('Set a command for Open files with in Settings → General')
   const fill = (word: string) =>
     word.replaceAll('{file}', file).replaceAll('{line}', String(line ?? 1)).replaceAll('{col}', String(col ?? 1))
   const args = words.slice(1).map(fill)

@@ -1,53 +1,93 @@
 ---
+// Features: every feature as a numbered section, with a full-window screenshot each. Same look as the homepage;
+// see DESIGN.md.
 import Site from '../layouts/Site.astro'
+import Spec, { type SpecItem } from '../components/Spec.astro'
 import { latestRelease, REPO } from '../lib/release'
-import { githubMark } from '../lib/icons'
+import { starIcon } from '../lib/icons'
+import engines from '../assets/screenshots/engines.webp'
+import extensions from '../assets/home/extensions.webp'
+import context from '../assets/screenshots/context.webp'
+import workers from '../assets/screenshots/workers.webp'
+import approval from '../assets/screenshots/approval.webp'
+import usage from '../assets/home/usage.webp'
 
-const release = await latestRelease()
+const release = latestRelease()
 
 // Facts come from the docs; each links to its page there.
-const features = [
+const features: SpecItem[] = [
   {
-    kicker: 'Engines',
+    id: 'engines',
+    tag: 'ENG',
+    n: '01',
+    label: 'Engines',
     title: 'Your agents, your logins.',
-    body: 'Kothar drives Claude Code, Codex, OpenCode, pi and any agent that speaks ACP. Each runs with the account you already have.',
-    shot: 'Settings → Engines, each showing installed and signed in',
-    href: '/docs/engines/',
+    body: 'Kothar drives Claude Code, Codex, OpenCode, pi and any agent that speaks ACP. Each runs with the account you already have. A chat’s history belongs to the chat, so you can switch engines mid-chat and keep it.',
+    img: engines,
+    alt: 'Settings, Engines: Claude Code, pi and OpenCode, each marked Ready with its version and a switch to turn it on',
+    link: { href: '/docs/engines/', label: 'Engines' },
+    where: 'Settings → Engines',
   },
   {
-    kicker: 'Extensions',
-    title: 'Write once. Works everywhere.',
-    body: 'Panels, commands, tools and permission rules that work with every engine. Install more from the Marketplace in Settings.',
-    shot: 'Settings → Built-in extensions and the Marketplace',
-    href: '/docs/extensions/',
+    id: 'extensions',
+    tag: 'EXT',
+    n: '02',
+    label: 'Extensions',
+    title: 'Write once. Works with every engine.',
+    body: 'Panels, commands, tools and permission rules that work with every engine. Built-in extensions each have a switch; install more, and themes, from the Marketplace in Settings.',
+    img: extensions,
+    alt: 'Settings, Built-in extensions: Account rotation, Artifacts, Browser, Deep Research and Git, each with a description and an on/off switch',
+    link: { href: '/docs/extensions/', label: 'Extensions' },
+    where: 'Settings → Built-in extensions',
   },
   {
-    kicker: 'Spaces and memory',
+    id: 'spaces',
+    tag: 'SPC',
+    n: '03',
+    label: 'Spaces and memory',
     title: 'A space for each job.',
     body: 'A folder becomes a space, with replies and tool calls streaming live. Every chat remembers its whole conversation, even across restarts.',
-    shot: 'A space with a streaming reply and the Context panel',
-    href: '/docs/spaces/',
+    img: context,
+    alt: 'A space with a reply streaming in after Read and Grep tool calls, beside the Context panel with its AGENTS.md and folders',
+    link: { href: '/docs/spaces/', label: 'Spaces' },
+    where: 'A space · Context panel',
   },
   {
-    kicker: 'Workers',
+    id: 'workers',
+    tag: 'WRK',
+    n: '04',
+    label: 'Workers',
     title: 'Hand off. Then review.',
     body: 'An agent hands tasks to workers, each in its own git worktree. When one reports, you merge, squash, keep or discard its changes.',
-    shot: "A worker's report with its Merge, Squash, Keep and Discard row",
-    href: '/docs/workers/',
+    img: workers,
+    alt: "A worker's report in the chat: 2 files changed, 1 commit, with Merge, Squash, Keep and Discard buttons",
+    link: { href: '/docs/workers/', label: 'Workers' },
+    where: 'Chat · worker report',
   },
   {
-    kicker: 'Permissions',
+    id: 'permissions',
+    tag: 'APR',
+    n: '05',
+    label: 'Permissions',
     title: 'Nothing runs behind your back.',
     body: 'On macOS, agents work in a sandboxed folder. Switches decide what runs without asking, and you approve the rest from the chat.',
-    shot: 'An approval card in the chat',
-    href: '/docs/permissions/',
+    img: approval,
+    alt: 'An approval card in the chat asking to allow a git push, with Approve and Deny buttons',
+    link: { href: '/docs/permissions/', label: 'Permissions' },
+    where: 'Chat · approval card',
   },
   {
-    kicker: 'Usage',
+    id: 'usage',
+    tag: 'USE',
+    n: '06',
+    label: 'Usage',
     title: 'See what each turn used.',
-    body: 'Tokens and cost, as each engine reports them, saved per chat. A quiet total sits in the chat header.',
-    shot: "The chat header's usage total, with its breakdown on hover",
-    href: '/docs/usage/',
+    body: 'Tokens and cost, as each engine reports them, saved per chat. A quiet total sits in the chat header; click it for the breakdown.',
+    img: usage,
+    alt: "The chat header's usage total of $0.32, with its breakdown open: this chat, workers, tokens and cost",
+    link: { href: '/docs/usage/', label: 'Usage' },
+    where: 'Chat header · usage',
+    narrow: true,
   },
 ]
 ---
@@ -57,115 +97,85 @@ const features = [
   description="Engines, extensions, spaces and memory, workers, permissions and usage in Kothar."
   current="features"
 >
-  <section class="intro wrap">
-    <h1 data-hero>Features</h1>
-    <p data-hero>What Kothar does, one thing at a time.</p>
-  </section>
+  <header class="page-head field lines">
+    <div class="w head" data-reveal>
+      <span class="k" style="--i: 0">Kothar · Features</span>
+      <h1 style="--i: 1">Features</h1>
+      <p class="lede" style="--i: 2">What Kothar does, one thing at a time. Each section links to its page in the wiki.</p>
+    </div>
+    <svg class="word" viewBox="0 0 1000 120" aria-hidden="true">
+      <text x="0" y="128" textLength="1000" lengthAdjust="spacingAndGlyphs">FEATURES</text>
+    </svg>
+  </header>
 
-  {
-    features.map((f, i) => (
-      <section class:list={['feature wrap', { flip: i % 2 === 1 }]} data-reveal>
-        <div class="copy">
-          <p class="kicker">{f.kicker}</p>
-          <h2>{f.title}</h2>
-          <p class="body">{f.body}</p>
-          <a href={f.href}>Read more in the wiki ›</a>
-        </div>
-        <!-- PLACEHOLDER: replace with a screenshot. -->
-        <figure class="card glass">
-          <div class="placeholder">Screenshot: {f.shot}</div>
-        </figure>
-      </section>
-    ))
-  }
+  <div class="sheet lines">
+    <nav class="w toc" aria-label="On this page">
+      <span class="k">Contents</span>
+      {
+        features.map((f) => (
+          <a class="ul" href={`#${f.id}`}>
+            <b>[{f.n}]</b> {f.label}
+          </a>
+        ))
+      }
+    </nav>
+    {features.map((f) => <Spec spec={f} />)}
+  </div>
 
-  <section class="end wrap" data-reveal>
-    <h2>Ready when you are.</h2>
-    <div class="actions">
-      <a class="button primary" href={release.href} data-download>Download for Mac</a>
-      <a class="button" href={REPO}><Fragment set:html={githubMark} />View on GitHub</a>
+  <section class="end inked lines" aria-labelledby="end-h">
+    <div class="w end-in" data-reveal>
+      <h2 id="end-h" style="--i: 0">Try it on your own projects.</h2>
+      <div class="cta" style="--i: 1">
+        <a class="btn paper" href={release.href} data-download>Download for Mac</a>
+        <a class="btn ghost-light" href={REPO}><Fragment set:html={starIcon.replace('<svg', '<svg class="star"')} />Star on GitHub<span class="count" data-stars></span></a>
+      </div>
+      <p class="fine" style="--i: 2">Free. macOS 13+, Apple silicon. <a href="/docs/getting-started/">Getting started</a></p>
     </div>
   </section>
 </Site>
 
 <style>
-  .intro {
-    text-align: center;
-    padding: 112px 0 120px;
+  .head {
+    padding: 0 10px;
   }
-  .intro h1 {
-    font-size: clamp(44px, 7vw, 80px);
-    font-weight: 700;
-    letter-spacing: -0.035em;
-    line-height: 1.04;
-    margin-bottom: 16px;
+  .head .k {
+    display: block;
+    margin-bottom: 14px;
   }
-  .intro p {
-    font-size: clamp(19px, 2.4vw, 24px);
-    color: var(--muted);
-    letter-spacing: -0.015em;
+  .page-head .word {
+    margin-top: 40px;
+    margin-bottom: -3%;
   }
-
-  .feature {
-    display: grid;
-    grid-template-columns: 5fr 6fr;
-    gap: 64px;
-    align-items: center;
-    margin-bottom: 160px;
+  .page-head .word text {
+    font-size: 160px;
   }
-  .feature.flip .copy {
-    order: 2;
+  .sheet {
+    padding: 28px 0 32px;
   }
-  .kicker {
-    color: var(--muted);
-    font-size: 15px;
-    font-weight: 500;
-    margin-bottom: 10px;
-  }
-  .feature h2 {
-    font-size: clamp(30px, 4vw, 44px);
-    line-height: 1.08;
-    letter-spacing: -0.03em;
-    margin-bottom: 16px;
-  }
-  .body {
-    color: var(--muted);
-    font-size: 19px;
-    line-height: 1.45;
-    margin-bottom: 16px;
-  }
-  .card {
-    margin: 0;
-    padding: 8px;
-    border-radius: 20px;
-    aspect-ratio: 4 / 3;
-  }
-  .card .placeholder {
-    border-radius: 13px;
-  }
-
-  .end {
-    text-align: center;
-    padding: 96px 0 120px;
-    border-top: 1px solid var(--hair);
+  .end-in {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 22px;
+    padding: 64px 10px 72px;
   }
   .end h2 {
-    font-size: clamp(32px, 5vw, 56px);
-    letter-spacing: -0.035em;
-    margin-bottom: 32px;
+    font: 900 clamp(26px, 3vw, 44px)/1.05 var(--display);
+    font-stretch: 112%;
+    text-transform: uppercase;
   }
-
-  @media (max-width: 760px) {
-    .intro {
-      padding: 72px 0 80px;
+  .end .fine {
+    color: var(--on-ink-muted);
+  }
+  .end .fine a {
+    color: var(--paper);
+  }
+  @media (max-width: 640px) {
+    .page-head {
+      padding-top: 36px;
     }
-    .feature {
-      grid-template-columns: 1fr;
-      gap: 28px;
-      margin-bottom: 100px;
-    }
-    .feature.flip .copy {
-      order: 0;
+    .end .cta .btn {
+      flex: 1 1 auto;
     }
   }
 </style>

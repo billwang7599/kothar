@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Readable } from 'node:stream'
 import type { ChatDetail, ChatUsage, Extension, ExtensionContext, SentTurn, SpaceDetail, Usage, UsageRecord } from '@kothar/extension-api'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { openAccounts } from './accounts.ts'
@@ -21,6 +22,7 @@ import { type CommunityExtension, type ExtensionHook, valuesOf } from './extensi
 import { gatherExtensions } from './community-load.ts'
 import { checkSshHosts } from './ssh-hosts.ts'
 import {
+  attachmentLimitOf,
   editsAnywhere,
   type SshHost,
   type Adapter,
@@ -76,6 +78,7 @@ import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
 import { addUsage, appendUsage, carryUsage, cleanUsage, sumTotals, totalsOf as usageTotalsOf, USAGE_FILE, usedText } from './usage.ts'
 import { openMessageEdits } from './message-edits.ts'
+import { openUploads } from './uploads.ts'
 import { openAcpAgents } from './acp-agents.ts'
 
 // Kept here too, for code that imports them from the core.
@@ -154,6 +157,8 @@ function assembleCore(options: {
   mkdirSync(options.garage, { recursive: true })
   // Context paths are saved resolved, so attachment paths must be too for a pin to match its file.
   const garage = realpathSync(options.garage)
+  const uploads = openUploads(garage, now)
+  uploads.sweep()
   // Kept in place: the ACP agents the user adds join and leave it (acp-agents.ts), and every module holds this list.
   const adapters = [...options.adapters]
   const adapterFor = (engine: string) => adapters.find((adapter) => adapter.id === engine)
@@ -332,7 +337,17 @@ function assembleCore(options: {
     !(chat && setupOf(chat)?.extensionsOff?.includes(extension.id) && !ownsChat(extension, chat))
   const chatsDir = join(garage, 'chats')
   mkdirSync(chatsDir, { recursive: true })
-  const { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setSshHostsDefault, setTerminal, setEditor } = openAppSettings({
+  const {
+    workFolder,
+    setWorkFolder,
+    setEngineEnabled,
+    setMemory,
+    setPermissionDefault,
+    setSshHostsDefault,
+    setTerminal,
+    setEditor,
+    setAttachmentLimit,
+  } = openAppSettings({
     garage,
     home,
     settings,
@@ -478,7 +493,7 @@ function assembleCore(options: {
   }
   const takesMcp = (engine: string) => adapterFor(engine)?.kotharMcp === true && mcpUrl !== undefined
   const chosenWorkFolder = () => {
-    if (!settings.workFolder) throw new Error('Choose a work folder first, in Settings → Work folder')
+    if (!settings.workFolder) throw new Error('Choose a work folder first, in Settings → General')
     return settings.workFolder
   }
 
@@ -822,6 +837,8 @@ function assembleCore(options: {
     workDirOf: (chat) => workDirOf(chat),
     sandboxIn,
     attachmentsDirOf: (chat) => attachmentsDirOf(chat),
+    uploads,
+    attachmentLimit: () => attachmentLimitOf(settings),
     checkoutOf: (space, folder, workDir, sandboxed, chat) => checkoutOf(space, folder, workDir, sandboxed, chat),
     workerChanges: (chat) => workerChanges(chat),
     copyOf: (space, folder, workDir) =>
@@ -978,7 +995,7 @@ function assembleCore(options: {
     broadcast({ type: 'chat.updated', chat: withRun(chat) })
   }
 
-  const { setExtensionEnabled, setCommunityExtensions, restartState, communityChanged, uninstallExtension, approvalOf } =
+  const { setExtensionEnabled, setCommunityExtensions, marketplaceOn, setMarketplace, restartState, communityChanged, uninstallExtension, approvalOf } =
     openExtensionSwitches({
       garage,
       now,
@@ -1173,7 +1190,8 @@ function assembleCore(options: {
     }
   }
 
-  // The lead's review_worker: Keep at once, anything else once the user says so on a card only they can answer.
+  // The lead's review_worker: Keep at once, anything else once the user says so on a card only they, or Allow all
+  // (turn.ts), can answer.
   const reviewWorkerFor = async (caller: Chat, workerId: string, action: ReviewAction) => {
     const space = chainOf(caller)[0]!
     const entry = space.info.workerBranches?.[workerId]
@@ -1216,7 +1234,7 @@ function assembleCore(options: {
   const commandPlaceOf = async (chat: Chat) => {
     const editAnywhere = editsAnywhere(...switchesOf(chat))
     if (!machine.canSandbox && !editAnywhere && UNSANDBOXED_NEEDS_EDIT_ANYWHERE) {
-      throw new Error("Kothar can't sandbox commands on this system yet. Turn on Edits anywhere for this chat first.")
+      throw new Error("Kothar can't sandbox commands on this system yet. Turn on Allow edits outside the work folder, asking first, in this chat's General tab first.")
     }
     const workDir = workDirOf(chat)
     mkdirSync(workDir, { recursive: true })
@@ -1321,6 +1339,7 @@ function assembleCore(options: {
     broadcast,
     shownLog: (chat) => pageOf(chat.entries),
     attachmentsDirOf,
+    stageUpload: uploads.stage,
     removed: (chat, removed) => {
       const detail = detailOf(chat)
       callExtensions('onMessagesRemoved', (extension, context) => extension.onMessagesRemoved!({ chat: detail, ...removed }, context))
@@ -1409,6 +1428,8 @@ function assembleCore(options: {
     settingsViewChanged,
     settingsViewAction,
     setCommunityExtensions,
+    marketplaceOn,
+    setMarketplace,
     marketplace,
     builtInIds,
     communityChanged,
@@ -1418,6 +1439,7 @@ function assembleCore(options: {
     terminalFor,
     fileLinks,
     setEditor,
+    setAttachmentLimit,
   })
 
   for (const extension of extensions.filter(isOn)) void checkSetup(extension)
@@ -1456,10 +1478,18 @@ function assembleCore(options: {
     themes: marketplace.themes,
     installed: marketplace.installed,
     communityExtensions: communityOn,
+    marketplace: marketplaceOn,
     restart: restartState,
     accounts: accounts.list,
     refreshAccounts: accounts.refresh,
     onMessage: (listener: (message: CoreMessage) => void) => listeners.push(listener),
+    /**
+     * A file the window streams ahead of its message (server.ts POST /uploads), refused (UploadTooBig) past the
+     * largest attachment in Settings; declaredSize: its Content-Length, so an oversized one is refused before it streams.
+     */
+    receiveUpload: (body: Readable, declaredSize?: number) => uploads.receive(body, attachmentLimitOf(settings), declaredSize),
+    /** A streamed file the window no longer means to send. */
+    dropUpload: uploads.drop,
     attachment(chatId: string, file: string) {
       const chat = chats.get(chatId)
       if (!chat) return undefined

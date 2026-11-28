@@ -8,7 +8,7 @@ import { keepImageSrc, MarkdownImage } from './chat-image.tsx'
 import { CopyBlock } from './controls.tsx'
 import { FileLink } from './file-links.tsx'
 import { imagePathText } from './image-paths.ts'
-import { codeRef, fileRefsIn, type FileRef } from './file-refs.ts'
+import { codeRef, fileRefsIn, localLinkOf, type FileRef } from './file-refs.ts'
 import { KATEX_OPTIONS, mathText } from './math.ts'
 
 // Agents often write `<br>` for a line break, mostly inside table cells where Markdown has no other way to break a
@@ -109,11 +109,16 @@ const textOf = (node: HastNode): string =>
   'value' in node ? node.value : 'children' in node ? node.children.map(textOf).join('') : ''
 
 // An image's src stays as written (a local path or file:// would otherwise be dropped): MarkdownImage decides what
-// it may show. Every other URL is cleaned as usual.
-const urlTransform = keepImageSrc(defaultUrlTransform)
+// it may show. A file:// link stays too, for localLinkOf (file-refs.ts). Every other URL is cleaned as usual.
+const urlTransform = keepImageSrc((url) => (/^file:\/\//i.test(url) ? url : defaultUrlTransform(url)))
 
 const components: Components = {
-  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  // A link to a file in the chat's places opens it as a file link does; until the core finds it, just its text.
+  a: ({ node: _node, ...props }) => {
+    const file = typeof props.href === 'string' ? localLinkOf(props.href) : null
+    if (file) return <FileLink {...file}>{props.children}</FileLink>
+    return <a {...props} target="_blank" rel="noreferrer" />
+  },
   input: ({ node: _node, ...props }) =>
     props.type === 'checkbox' ? <TaskCheck checked={Boolean(props.checked)} /> : <input {...props} />,
   img: ({ src, alt }) => (typeof src === 'string' && src ? <MarkdownImage src={src} alt={alt ?? ''} /> : null),

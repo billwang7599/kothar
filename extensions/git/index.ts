@@ -1,14 +1,39 @@
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
-import type { ChatDetail, Checkout, Extension, ExtensionHost, ExtensionListItem, ExtensionTone, ExtensionValues, ExtensionView } from '@kothar/extension-api'
+import type {
+  ChatDetail,
+  Checkout,
+  Extension,
+  ExtensionAction,
+  ExtensionContext,
+  ExtensionHost,
+  ExtensionListItem,
+  ExtensionTone,
+  ExtensionValues,
+  ExtensionView,
+} from '@kothar/extension-api'
 import { cleanupCheckout, cleanupStrayWorktrees } from './cleanup.ts'
+import {
+  anchorOf,
+  diffRows,
+  loadComments,
+  reviewMessage,
+  saveComments,
+  SENT_FILE,
+  viewComments,
+  type Group,
+  type ReviewComment,
+  type ReviewTarget,
+} from './review.ts'
 
 // The Changes tab shows each git folder of a space as its agents left it, and a note follows a turn that
 // changed files. Agents already use git and gh through their shell, so this adds no tools and no buttons that change
-// anything. The one change it makes is its cleanup: a checkout whose branch is merged goes (cleanup.ts). Every git and
-// gh call goes through the Machine (host.run).
+// the repo. Its one change there is its cleanup: a checkout whose branch is merged goes (cleanup.ts). Every git and
+// gh call goes through the Machine (host.run). The user can pop the tab out into a large view (REVIEW) and write
+// comments on lines of a diff, which go to the space's agent in one message (review.ts).
 
 export const PANEL = 'changes'
+export const REVIEW = 'changes-review'
 const GIT_TIMEOUT_MS = 30_000
 const GH_TIMEOUT_MS = 15_000
 // gh asks GitHub, so a PR's status is kept this long between draws, unless the user refreshes or a turn ends.
@@ -194,7 +219,7 @@ export async function repoState(run: Run, target: Target, pr?: (branch: string) 
   return state
 }
 
-export type Group = 'uncommitted' | 'committed'
+export type { Group } from './review.ts'
 type Selected = { path: string; group: Group; file: string }
 
 export async function diffOf(run: Run, state: RepoState, group: Group, file: string) {
@@ -209,15 +234,16 @@ export async function diffOf(run: Run, state: RepoState, group: Group, file: str
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
 
-function fileItem(state: RepoState, group: Group, file: FileChange, selected?: Selected): ExtensionListItem {
+function fileItem(state: RepoState, group: Group, file: FileChange, selected?: Selected, comments = 0): ExtensionListItem {
   const counts = file.binary ? 'binary' : file.untracked ? 'new' : `+${file.added} −${file.removed}`
   const open = selected?.path === state.target.path && selected.group === group && selected.file === file.path
   return {
     key: `${group}:${file.path}`,
     label: file.path,
-    mono: true,
+    path: true,
     detail: counts,
     selected: open,
+    ...(comments > 0 && { badges: [{ text: `${comments}`, tone: 'accent' as const, hint: plural(comments, 'comment') }] }),
     action: { name: 'open', value: { path: state.target.path, group, file: file.path } },
     hint: open ? 'Hide the diff' : 'Show the diff',
   }
@@ -233,12 +259,29 @@ const CHECK_TONES: Record<NonNullable<PrStatus['checks']>, ExtensionTone> = {
 // A diff, or why it couldn't be read.
 export type Diff = string | { error: string }
 
-export function repoView(state: RepoState, selected?: Selected, diff?: Diff): ExtensionView {
-  const { target } = state
-  const title = target.label ?? basename(target.folder)
-  if (state.error) {
-    return { type: 'card', title, children: [{ type: 'text', text: state.error, tone: 'error', small: true }] }
+// What a repo's view needs besides git: the user's comments on it, and whether it offers a pop-out.
+export type RepoViewOptions = { comments?: ReviewComment[]; popout?: boolean; diffKey?: string }
+
+export const diffKeyOf = (s: Selected) => `${s.path}\n${s.group}\n${s.file}`
+
+// The diff of the file open in a panel, with its comments and the actions to add, edit and delete them.
+export function diffView(selected: Selected, diff: string, comments: ReviewComment[], fill = false): ExtensionView {
+  const mine = comments.filter((c) => c.path === selected.path && c.group === selected.group && c.file === selected.file)
+  return {
+    type: 'diff',
+    key: diffKeyOf(selected),
+    text: diff,
+    comments: viewComments(diffRows(diff), mine),
+    comment: 'comment',
+    remove: 'uncomment',
+    maxLines: DIFF_MAX_LINES,
+    ...(fill && { fill }),
   }
+}
+
+// A repo's header: its branch, where it stands against its upstream, and its pull request and CI.
+function badgesOf(state: RepoState, comments: number): NonNullable<ExtensionListItem['badges']> {
+  const { target } = state
   const badges: NonNullable<ExtensionListItem['badges']> = []
   if (state.detached) {
     badges.push({ text: `detached at ${state.detached}`, tone: 'warning', hint: 'No branch is checked out' })
@@ -255,23 +298,42 @@ export function repoView(state: RepoState, selected?: Selected, diff?: Diff): Ex
   } else if (state.branch && state.branch !== 'HEAD') {
     badges.push({ text: 'Not pushed', tone: 'faint', hint: 'The branch has no upstream' })
   }
-  const children: ExtensionView[] = []
   if (state.pr) {
-    const { pr } = state
-    children.push({
-      type: 'row',
-      children: [
-        { type: 'link', text: `#${pr.number} ${pr.title}`, url: pr.url },
-        { type: 'badge', text: pr.state.toLowerCase(), tone: PR_TONES[pr.state] ?? 'muted' },
-        ...(pr.checks ? [{ type: 'badge' as const, text: `CI ${pr.checks}`, tone: CHECK_TONES[pr.checks] }] : []),
-      ],
-    })
+    badges.push({ text: state.pr.state.toLowerCase(), tone: PR_TONES[state.pr.state] ?? 'muted' })
+    if (state.pr.checks) badges.push({ text: `CI ${state.pr.checks}`, tone: CHECK_TONES[state.pr.checks] })
   }
+  if (comments) badges.push({ text: plural(comments, 'comment'), tone: 'accent', hint: 'Not sent yet' })
+  return badges
+}
+
+export function repoView(state: RepoState, selected?: Selected, diff?: Diff, options: RepoViewOptions = {}): ExtensionView {
+  const { target } = state
+  const title = target.label ?? basename(target.folder)
+  const hint = target.label ? `${title}\n${target.path}` : target.path
+  const popout: ExtensionView[] = options.popout
+    ? [
+        {
+          type: 'button',
+          label: 'Pop out',
+          variant: 'ghost',
+          action: { name: 'popout', value: { path: target.path } },
+          popup: REVIEW,
+          hint: 'Open these changes in a large view, to read the diffs and comment on them',
+        },
+      ]
+    : []
+  if (state.error) {
+    return { type: 'section', title, hint, children: [{ type: 'text', text: state.error, tone: 'error', small: true }] }
+  }
+  const comments = (options.comments ?? []).filter((c) => c.path === target.path)
+  const children: ExtensionView[] = []
+  if (state.pr) children.push({ type: 'link', text: `#${state.pr.number} ${state.pr.title}`, url: state.pr.url })
   const group = (name: Group, heading: string, files: FileChange[]) => {
     if (!files.length) return
     children.push({ type: 'text', text: heading, tone: 'muted', small: true })
     const shown = files.slice(0, FILES_MAX)
-    children.push({ type: 'list', label: heading, items: shown.map((f) => fileItem(state, name, f, selected)) })
+    const count = (file: string) => comments.filter((c) => c.group === name && c.file === file).length
+    children.push({ type: 'list', label: heading, items: shown.map((f) => fileItem(state, name, f, selected, count(f.path))) })
     if (files.length > shown.length) {
       children.push({ type: 'text', text: `and ${plural(files.length - shown.length, 'more file')}`, tone: 'muted', small: true })
     }
@@ -281,13 +343,12 @@ export function repoView(state: RepoState, selected?: Selected, diff?: Diff): Ex
       children.push({ type: 'text', text: diff.error, tone: 'error', small: true })
       return
     }
-    const code: ExtensionView = { type: 'code', language: 'diff', text: diff, maxLines: DIFF_MAX_LINES }
-    children.push(diff.trim() ? code : { type: 'empty', text: 'No diff' })
+    children.push(diff.trim() ? diffView(selected, diff, comments) : { type: 'empty', text: 'No diff' })
   }
   group('uncommitted', 'Uncommitted', state.uncommitted)
   group('committed', `Committed since ${state.base}`, state.committed)
   if (!state.uncommitted.length && !state.committed.length) children.push({ type: 'empty', text: 'No changes' })
-  return { type: 'card', title, badges, children }
+  return { type: 'section', title, hint, badges: badgesOf(state, comments.length), buttons: popout, children }
 }
 
 // path → numstat line, and HEAD: enough to tell which files a turn touched.
@@ -325,10 +386,13 @@ export function noteText(counts: { branch: string; files: number }[]) {
 
 export function createGitExtension(options: { now?: () => number } = {}): Extension {
   const now = options.now ?? Date.now
+  // Per chat and panel (the tab and its pop-out each have their own, keyed by keyOf): the file open, what the panel last
+  // showed, so opening a file's diff draws from it instead of reading every repo again, and the diff it showed, which a
+  // comment's line indexes refer to.
   const selected = new Map<string, Selected>()
+  const shownDiffs = new Map<string, { selected: Selected; text: string }>()
   const prs = new Map<string, { at: number; status?: PrStatus }>()
   const before = new Map<string, Map<string, Snapshot>>()
-  // Per chat, what its tab last showed: opening a file's diff draws from it instead of reading every repo again.
   const shownStates = new Map<string, RepoState[]>()
   const reuse = new Set<string>()
   // Per chat, its running shell commands and edits, and when its tab was last drawn for one.
@@ -414,6 +478,168 @@ export function createGitExtension(options: { now?: () => number } = {}): Extens
     writing.delete(chatId)
   }
 
+  const keyOf = (chatId: string, panel: string) => `${chatId}\n${panel}`
+
+  const readDiff = (host: ExtensionHost, state: RepoState, pick: Selected): Promise<Diff> =>
+    diffOf(host.run, state, pick.group, pick.file).catch((e) => ({
+      error: `Couldn’t read the diff: ${errorText(String(e?.message ?? e), state.target.path)}`,
+    }))
+
+  // What a panel shows: every repo's state (kept from its last draw after a click that only opens a file), the file open
+  // and its diff.
+  const panelState = async (host: ExtensionHost, chat: ChatDetail, panel: string) => {
+    const key = keyOf(chat.id, panel)
+    const targets = targetsOf(host, chat.id)
+    const kept = reuse.delete(key) ? shownStates.get(key) : undefined
+    const same = kept?.length === targets.length && kept.every((s, i) => s.target.path === targets[i]!.path)
+    const states = kept && same ? kept : await Promise.all(targets.map((t) => repoState(host.run, t, prFor(host.run, t.path))))
+    shownStates.set(key, states)
+    let pick = selected.get(key)
+    const picked = pick && states.find((s) => s.target.path === pick!.path)
+    // A file that left its group (committed, reverted, its checkout gone) closes.
+    if (pick && !picked?.[pick.group].some((f) => f.path === pick!.file)) {
+      selected.delete(key)
+      pick = undefined
+    }
+    const diff = picked && pick ? await readDiff(host, picked, pick) : undefined
+    if (pick && typeof diff === 'string') shownDiffs.set(key, { selected: pick, text: diff })
+    else shownDiffs.delete(key)
+    return { states, pick, picked: pick ? picked : undefined, diff }
+  }
+
+  // Comments live in the space's folder, so the space and its workers' tabs share them.
+  const storageOf = (host: ExtensionHost, chatId: string) => {
+    const space = host.space(chatId)
+    return space ? host.chatStorage(space.id) : undefined
+  }
+  // The comments on the repos this chat's panels show.
+  const commentsFor = (host: ExtensionHost, chatId: string, states: RepoState[]) => {
+    const storage = storageOf(host, chatId)
+    if (!storage) return []
+    const paths = new Set(states.map((s) => s.target.path))
+    return loadComments(storage).filter((c) => paths.has(c.path))
+  }
+  const sendButton = (count: number): ExtensionView[] =>
+    count
+      ? [
+          {
+            type: 'button',
+            label: `Send ${plural(count, 'comment')}`,
+            variant: 'primary',
+            action: { name: 'send' },
+            hint: 'Send every comment to the space’s agent in one message, asking it to apply them. It waits behind a running turn.',
+          },
+        ]
+      : []
+
+  // Who the comments are about, for the message: each repo's name and branch, and the worker whose worktree it is.
+  const reviewTargets = (host: ExtensionHost, chatId: string, states: RepoState[]): ReviewTarget[] => {
+    const workers = host.space(chatId)?.workerCheckouts ?? []
+    return states.map((s) => {
+      const worker = workers.find((w) => w.path === s.target.path)
+      const branch = s.detached ? undefined : s.branch
+      return { path: s.target.path, repo: basename(s.target.folder), ...(branch && { branch }), ...(worker && { worker: worker.name }) }
+    })
+  }
+
+  // Draws both panels of every chat in the space again: a comment shows in the tab and the pop-out, the space's and its
+  // workers'.
+  const redrawSpace = (host: ExtensionHost, chatId: string) => {
+    const space = host.space(chatId)
+    const ids = new Set([chatId, ...(space ? [space.id] : []), ...host.chats().filter((c) => space && c.parentId === space.id).map((c) => c.id)])
+    for (const id of ids) {
+      for (const panel of [PANEL, REVIEW]) reuse.add(keyOf(id, panel))
+      if (host.chat(id)) host.refresh(id)
+    }
+  }
+
+  const panelAction = async (action: ExtensionAction, chat: ChatDetail, { host, values }: ExtensionContext, panel: string) => {
+    const key = keyOf(chat.id, panel)
+    if (action.name === 'refresh') {
+      forget(host, chat.id)
+      if (cleansUp(values)) await sweep(host, chat)
+      // The other panel reads git again too, next time it draws.
+      host.refresh(chat.id)
+      return
+    }
+    if (action.name === 'popout') {
+      // The tab's Pop out: the pop-out opens on the file open in the tab, else on the first of the repo it was for.
+      const path = (action.value as { path?: unknown } | null)?.path
+      const tab = selected.get(keyOf(chat.id, PANEL))
+      const into = keyOf(chat.id, REVIEW)
+      if (tab && (path === undefined || tab.path === path)) selected.set(into, tab)
+      else if (typeof path === 'string') {
+        const state = shownStates.get(key)?.find((s) => s.target.path === path)
+        const group = state?.uncommitted.length ? 'uncommitted' : 'committed'
+        const file = state?.[group][0]
+        if (file) selected.set(into, { path, group, file: file.path })
+        else selected.delete(into)
+      }
+      reuse.add(key)
+      host.refresh(chat.id)
+      return
+    }
+    if (action.name === 'open') {
+      const value = action.value as { path?: unknown; group?: unknown; file?: unknown } | null
+      const { path, group, file } = value ?? {}
+      const known = group === 'uncommitted' || group === 'committed'
+      if (typeof path !== 'string' || typeof file !== 'string' || !known) return
+      const open = selected.get(key)
+      const same = open?.path === path && open.group === group && open.file === file
+      // In the pop-out a file stays open; the tab's second click folds its diff away.
+      if (same && panel === PANEL) selected.delete(key)
+      else selected.set(key, { path, group, file })
+      reuse.add(key)
+      return
+    }
+    const storage = storageOf(host, chat.id)
+    if (!storage) return
+    if (action.name === 'comment') {
+      const value = action.value as { id?: unknown; start?: unknown; end?: unknown; text?: unknown } | null
+      const text = typeof value?.text === 'string' ? value.text.trim() : ''
+      if (!text) return
+      const comments = loadComments(storage)
+      if (typeof value?.id === 'string') {
+        const found = comments.find((c) => c.id === value.id)
+        if (!found) return
+        found.text = text
+      } else {
+        const shown = shownDiffs.get(key)
+        if (!shown) throw new Error('That diff isn’t open any more')
+        const at = anchorOf(diffRows(shown.text), Number(value?.start), Number(value?.end))
+        if (!at) throw new Error('Those lines can’t take a comment')
+        const id = `c${host.now().getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+        comments.push({ id, ...shown.selected, ...at, text, at: host.now().toISOString() })
+      }
+      saveComments(storage, comments)
+      redrawSpace(host, chat.id)
+      return
+    }
+    if (action.name === 'uncomment') {
+      const comments = loadComments(storage)
+      const left = comments.filter((c) => c.id !== action.value)
+      if (left.length === comments.length) return
+      saveComments(storage, left)
+      redrawSpace(host, chat.id)
+      return
+    }
+    if (action.name === 'send') {
+      const space = host.space(chat.id)
+      if (!space) return
+      const states = shownStates.get(key) ?? []
+      const paths = new Set(states.map((s) => s.target.path))
+      const all = loadComments(storage)
+      const sending = all.filter((c) => paths.has(c.path))
+      if (!sending.length) return
+      // As the composer's Option+Enter: queued behind a running turn, else sent now. Workers' comments go to the space's
+      // agent too, since a worker takes no messages; the message says whose worktree they're about.
+      host.send(space.id, reviewMessage(sending, reviewTargets(host, chat.id, states)))
+      storage.append(SENT_FILE, `${JSON.stringify({ at: host.now().toISOString(), comments: sending })}\n`)
+      saveComments(storage, all.filter((c) => !paths.has(c.path)))
+      redrawSpace(host, chat.id)
+    }
+  }
+
   return {
     id: 'git',
     name: 'Git',
@@ -440,57 +666,97 @@ export function createGitExtension(options: { now?: () => number } = {}): Extens
         title: 'Changes',
         shown: (chat, { host }) => chat.keepsContext && targetsOf(host, chat.id).length > 0,
         async render(chat, { host }) {
-          const targets = targetsOf(host, chat.id)
-          const kept = reuse.delete(chat.id) ? shownStates.get(chat.id) : undefined
-          const same = kept?.length === targets.length && kept.every((s, i) => s.target.path === targets[i]!.path)
-          const states =
-            kept && same ? kept : await Promise.all(targets.map((t) => repoState(host.run, t, prFor(host.run, t.path))))
-          shownStates.set(chat.id, states)
-          let pick = selected.get(chat.id)
-          const picked = pick && states.find((s) => s.target.path === pick!.path)
-          // A file that left its group (committed, reverted, its checkout gone) closes.
-          if (pick && !picked?.[pick.group].some((f) => f.path === pick!.file)) {
-            selected.delete(chat.id)
-            pick = undefined
-          }
-          const diff: Diff | undefined =
-            picked && pick
-              ? await diffOf(host.run, picked, pick.group, pick.file).catch((e) => ({
-                  error: `Couldn’t read the diff: ${errorText(String(e?.message ?? e), picked.target.path)}`,
-                }))
-              : undefined
-          const refresh: ExtensionView = {
-            type: 'button',
-            label: 'Refresh',
-            variant: 'ghost',
-            action: { name: 'refresh' },
-            hint: 'Look at git and the pull requests again',
-          }
+          const { states, pick, picked, diff } = await panelState(host, chat, PANEL)
+          const comments = commentsFor(host, chat.id, states)
+          const top: ExtensionView[] = [
+            ...sendButton(comments.length),
+            {
+              type: 'button',
+              label: 'Pop out',
+              variant: 'ghost',
+              action: { name: 'popout' },
+              popup: REVIEW,
+              hint: 'Open the changes in a large view, to read the diffs and comment on them',
+            },
+            {
+              type: 'button',
+              label: 'Refresh',
+              variant: 'ghost',
+              action: { name: 'refresh' },
+              hint: 'Look at git and the pull requests again',
+            },
+          ]
           return {
             type: 'stack',
-            gap: 'loose',
+            gap: 'normal',
             children: [
-              { type: 'row', justify: 'end', children: [refresh] },
-              ...states.map((s) => repoView(s, pick, s === picked ? diff : undefined)),
+              { type: 'row', justify: 'end', children: top },
+              ...states.map((s) =>
+                repoView(s, pick, s === picked ? diff : undefined, { comments, popout: states.length > 1 }),
+              ),
             ],
           }
         },
-        async onAction(action, chat, { host, values }) {
-          if (action.name === 'refresh') {
-            forget(host, chat.id)
-            if (cleansUp(values)) await sweep(host, chat)
-            return
+        async onAction(action, chat, context) {
+          await panelAction(action, chat, context, PANEL)
+        },
+      },
+      {
+        id: REVIEW,
+        title: 'Changes',
+        placement: 'popup',
+        shown: (chat, { host }) => chat.keepsContext && targetsOf(host, chat.id).length > 0,
+        async render(chat, { host }) {
+          let { states, pick, picked, diff } = await panelState(host, chat, REVIEW)
+          // The pop-out always shows a file when there is one: the first of the repo it was opened for, else of any.
+          if (!pick) {
+            const first = states.flatMap((s) =>
+              (['uncommitted', 'committed'] as const).flatMap((group) =>
+                s[group].slice(0, 1).map((f) => ({ state: s, pick: { path: s.target.path, group, file: f.path } })),
+              ),
+            )[0]
+            if (first) {
+              pick = first.pick
+              picked = first.state
+              selected.set(keyOf(chat.id, REVIEW), pick)
+              diff = await readDiff(host, picked, pick)
+              if (typeof diff === 'string') shownDiffs.set(keyOf(chat.id, REVIEW), { selected: pick, text: diff })
+            }
           }
-          if (action.name !== 'open') return
-          const value = action.value as { path?: unknown; group?: unknown; file?: unknown } | null
-          const { path, group, file } = value ?? {}
-          const known = group === 'uncommitted' || group === 'committed'
-          if (typeof path !== 'string' || typeof file !== 'string' || !known) return
-          const open = selected.get(chat.id)
-          const same = open?.path === path && open.group === group && open.file === file
-          if (same) selected.delete(chat.id)
-          else selected.set(chat.id, { path, group, file })
-          reuse.add(chat.id)
+          const comments = commentsFor(host, chat.id, states)
+          const side: ExtensionView = {
+            type: 'stack',
+            gap: 'normal',
+            children: [
+              {
+                type: 'row',
+                children: [
+                  ...sendButton(comments.length),
+                  { type: 'button', label: 'Refresh', variant: 'ghost', action: { name: 'refresh' }, hint: 'Look at git and the pull requests again' },
+                ],
+              },
+              ...states.map((s) => repoView(s, pick, undefined, { comments })),
+            ],
+          }
+          const main: ExtensionView =
+            pick && picked
+              ? {
+                  type: 'stack',
+                  gap: 'tight',
+                  children: [
+                    { type: 'text', text: pick.file, mono: true, hint: `${picked.target.label ?? basename(picked.target.folder)} · ${pick.group}` },
+                    typeof diff === 'object'
+                      ? { type: 'text', text: diff.error, tone: 'error', small: true }
+                      : diff?.trim()
+                        ? diffView(pick, diff, comments, true)
+                        : { type: 'empty', text: 'No diff' },
+                  ],
+                }
+              : { type: 'empty', text: 'No changes' }
+          return { type: 'split', side, main }
+        },
+        async onAction(action, chat, context) {
+          await panelAction(action, chat, context, REVIEW)
         },
       },
     ],
@@ -534,10 +800,14 @@ export function createGitExtension(options: { now?: () => number } = {}): Extens
       if (cleansUp(values)) await sweep(host, chat)
     },
     onChatRemoved(chat) {
-      selected.delete(chat.id)
+      for (const panel of [PANEL, REVIEW]) {
+        const key = keyOf(chat.id, panel)
+        selected.delete(key)
+        shownStates.delete(key)
+        shownDiffs.delete(key)
+        reuse.delete(key)
+      }
       before.delete(chat.id)
-      shownStates.delete(chat.id)
-      reuse.delete(chat.id)
       stopLive(chat.id)
     },
     // The core removes a deleted space's checkouts; what's cached about them goes too.

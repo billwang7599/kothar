@@ -9,6 +9,7 @@ import { Chevron, CopyBlock, CopyButton, ErrorText, MOTION } from '../controls.t
 import { LinkedText, NoFileLinks } from '../file-links.tsx'
 import { Markdown } from '../markdown.tsx'
 import { ToolImages } from '../chat-image.tsx'
+import { rawArguments, toolLabel } from '../tool-labels.ts'
 import { UserText } from '../lists.tsx'
 import { useReveal, type RevealFrom } from '../smooth.ts'
 import { openReportCard, reportCardKey, ReportsOpen, useReportCardChoice } from '../steps.ts'
@@ -25,6 +26,10 @@ const INTERRUPTED = 'Interrupted'
 
 const TOOL_NAME = 'shrink-0 font-mono text-sm leading-[normal] font-semibold'
 const TOOL_INPUT = 'min-w-0 flex-1 truncate font-mono text-sm leading-[normal] text-muted'
+// A known Kothar tool: a plain label, what it was about, and its real name kept in view beside them.
+const TOOL_LABEL = 'shrink-0 text-sm leading-[normal] font-semibold'
+const TOOL_DETAIL = 'min-w-0 flex-1 truncate text-sm leading-[normal] text-muted'
+const TOOL_REAL_NAME = 'min-w-0 max-w-[45%] shrink truncate font-mono text-xs leading-[normal] text-faint'
 const TOOL_STATES: Record<string, string> = {
   waiting: 'text-amber',
   error: 'text-red',
@@ -52,6 +57,8 @@ type ItemProps = {
   select?: (chatId: string) => void
   // Opens a chat that still exists, for a worker's report.
   openChat?: (chatId: string) => (() => void) | undefined
+  // A chat's name from its id, for tool rows that name a chat (Sent message to …); the id when it's unknown.
+  chatName?: (chatId: string) => string
   revealOf?: RevealOf
   // Opens an extension's panel (a tab, a popup or a dock), for an extension's note, then sends it the note's action.
   openPanel?: (extension: string, panel: string, action?: ExtensionAction) => void
@@ -224,7 +231,7 @@ function UserItem({ item, chat, contextItems, connected, send, menu, actions, de
 }
 
 export function ItemView(props: ItemProps) {
-  const { item, chat, contextItems, connected, send, space, select, openChat, revealOf, openPanel } = props
+  const { item, chat, contextItems, connected, send, space, select, openChat, chatName, revealOf, openPanel } = props
   const promptProps = { chat, connected, send, space, select }
   const actions = (kind: 'user' | 'work' | 'talk', entry?: number, className?: string) =>
     props.messageActions?.length ? (
@@ -347,14 +354,27 @@ export function ItemView(props: ItemProps) {
         </Row>
       )
     case 'tool': {
+      const label = toolLabel(item.name, item.input, chatName)
       const row = (
         <Row
           summary={
             <>
-              <span className={TOOL_NAME}>{item.name}</span>
-              <span className={TOOL_INPUT}>
-                <LinkedText text={item.summary} inButton />
-              </span>
+              {label ? (
+                <>
+                  <span className={TOOL_LABEL}>{label.label}</span>
+                  <span className={TOOL_DETAIL}>{label.detail && <LinkedText text={label.detail} inButton />}</span>
+                  <span className={TOOL_REAL_NAME} title={item.name} data-testid="tool-real-name">
+                    {item.name}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className={TOOL_NAME}>{item.name}</span>
+                  <span className={TOOL_INPUT}>
+                    <LinkedText text={item.summary} inButton />
+                  </span>
+                </>
+              )}
               {item.permission && <Verdict permission={item.permission} />}
               {item.state === 'running' ? (
                 <Dots label="running" className="text-sm text-green" />
@@ -368,6 +388,13 @@ export function ItemView(props: ItemProps) {
             </>
           }
         >
+          {label && (
+            <CopyBlock label="Copy arguments" text={rawArguments(item.input, item.summary)}>
+              <pre className={`${BODY} border-t pl-26 text-muted`} data-testid="tool-arguments">
+                <LinkedText text={rawArguments(item.input, item.summary)} />
+              </pre>
+            </CopyBlock>
+          )}
           <CopyBlock label="Copy output" text={item.output}>
             <pre className={`${BODY} border-t pl-26`}>
               {(item.output && <LinkedText text={item.output} />) ||

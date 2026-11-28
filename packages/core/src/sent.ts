@@ -149,7 +149,7 @@ function howItRuns(input: Extract<SentInput, { kind: 'turn' }>, engine: string, 
     `Model: ${model ?? 'the engine’s default'}${thinking ? `, thinking ${thinking}` : ''}`,
     ...(account ? [`Account: ${account}`] : []),
     ...(role ? [`Model list: ${role.role}, picked by ${nameOf(role.by)}${role.used ? '' : ' (empty, so the chat’s own model ran)'}`] : []),
-    `Sandbox: ${sandboxed ? 'on' : 'off (edits anywhere)'}`,
+    `Sandbox: ${sandboxed ? 'on' : 'off (edits outside the work folder allowed)'}`,
     ...(readOnly ? [`Read only: yes, set by ${nameOf(readOnly.by)}${readOnly.reason ? `: ${readOnly.reason}` : ''}`] : []),
     ...(continued ? ['Continues the last turn (a prompt from Kothar, not a message of yours)'] : []),
   ].join('\n')

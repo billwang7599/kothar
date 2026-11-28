@@ -17,12 +17,16 @@ export type Settings = PermissionSwitches &
     workFolder?: string
     // The master switch for community extensions; off unless the user turned it on.
     communityExtensions?: boolean
+    // The Marketplace's switch: absent or true, the user can browse and install from it; false, it's closed.
+    marketplace?: boolean
     // The terminal Open in Terminal uses: 'auto' or absent for the system's, else one of MAC_TERMINALS by id.
     terminal?: string
     // What file links open with: absent for the system's default app, 'custom' for editorCommand, else an EDITORS id.
     editor?: string
     // The user's own command for files, with {file}, {line} and {col}.
     editorCommand?: string
+    // The largest attachment in bytes, 0 for no limit; absent, the default (shared.ts attachmentLimitOf).
+    attachmentLimit?: number
     // The user's edits of extensions' prompts, by extension and prompt id (prompts.ts).
     prompts?: Record<string, Record<string, { text: string; base: string }>>
     // Settings → Workers (workers.ts).

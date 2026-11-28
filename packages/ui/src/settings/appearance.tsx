@@ -1,159 +1,76 @@
-// The display preferences on the Appearance page, below the theme picker. They live in this window, not the garage.
-import { useState } from 'react'
-import { Button, CHAT_NOUN, GROUP, Hint, Select, Switch } from '../controls.tsx'
+// Settings → Appearance: the theme and how things show; where file paths show and the shortcuts are under Advanced.
+// These live in this window, not the garage.
+import { CHAT_NOUN, Select, Switch } from '../controls.tsx'
 import { LAUNCHER_PLACES, placeLaunchers, useLauncherPlace, type LauncherPlace } from '../launchers.ts'
 import { showPaths, usePathsShown } from '../paths.ts'
-import {
-  askNotificationLeave,
-  notificationsAllowed,
-  setNotificationPref,
-  useNotificationPrefs,
-  type NotifyKind,
-} from '../notifications.ts'
+import { ShortcutsPage } from '../shortcuts-page.tsx'
 import { showReportsByDefault, showStepsByDefault, useReportsDefault, useStepsDefault } from '../steps.ts'
 import { Appearance } from '../themes.tsx'
-import { SettingRow } from './rows.tsx'
-
-function ShownPaths() {
-  const paths = usePathsShown()
-  return (
-    <>
-      <div className="pt-24 pb-8 font-semibold">File paths</div>
-      <div className={GROUP}>
-        <SettingRow name="At the top of a space">
-          <Switch label="Show paths at the top of a space" checked={paths.header} onChange={(on) => showPaths('header', on)} />
-        </SettingRow>
-        <SettingRow name="In the Context panel">
-          <Switch label="Show paths in the Context panel" checked={paths.context} onChange={(on) => showPaths('context', on)} />
-        </SettingRow>
-      </div>
-    </>
-  )
-}
+import { Advanced, Section, SettingRow } from './rows.tsx'
+import { ANCHORS, settingAnchor } from './search.ts'
 
 const LAUNCHER_HINT =
   'Buttons that open extensions such as Notes and Artifacts. Top puts them under Home, Bottom above Settings. Hidden or not, each still opens from its tab in the right panel and its shortcut.'
 
-function Sidebar() {
+function Display() {
   const place = useLauncherPlace()
+  const steps = useStepsDefault()
+  const reports = useReportsDefault()
   return (
-    <>
-      <div className="pt-24 pb-8 font-semibold">Sidebar</div>
-      <div className={GROUP}>
-        <SettingRow
-          name={
-            <Hint text={LAUNCHER_HINT}>
-              <span className="self-start">Extension launchers</span>
-            </Hint>
-          }
-        >
-          <Select
-            label="Extension launchers"
-            value={place}
-            options={LAUNCHER_PLACES}
-            onChange={(picked) => placeLaunchers(picked as LauncherPlace)}
-          />
-        </SettingRow>
-      </div>
-    </>
+    <Section id={ANCHORS.display} title="Display">
+      <SettingRow id={settingAnchor('launchers')} name="Extension launchers" hint={LAUNCHER_HINT}>
+        <Select
+          label="Extension launchers"
+          value={place}
+          options={LAUNCHER_PLACES}
+          onChange={(picked) => placeLaunchers(picked as LauncherPlace)}
+        />
+      </SettingRow>
+      <SettingRow
+        id={settingAnchor('steps')}
+        name="Thinking and tool calls unfolded"
+        hint={`Instead of folding them into "N steps". Each ${CHAT_NOUN.one} can override this in its General tab.`}
+      >
+        <Switch label="Show thinking and tool calls unfolded" checked={steps} onChange={showStepsByDefault} />
+      </SettingRow>
+      <SettingRow
+        id={settingAnchor('reports')}
+        name="Worker reports unfolded"
+        hint={`Folded, a report shows one line until opened. Each ${CHAT_NOUN.one} can override this in its General tab.`}
+      >
+        <Switch label="Show worker reports unfolded" checked={reports} onChange={showReportsByDefault} />
+      </SettingRow>
+    </Section>
   )
 }
 
-function ShownSteps() {
-  const shown = useStepsDefault()
+function ShownPaths() {
+  const paths = usePathsShown()
   return (
-    <>
-      <div className="pt-24 pb-8 font-semibold">Thinking and tool calls</div>
-      <div className={GROUP}>
-        <SettingRow
-          name="Show unfolded"
-          description={`Instead of folding them into "N steps". Each ${CHAT_NOUN.one} can override this in its Context panel.`}
-        >
-          <Switch label="Show thinking and tool calls unfolded" checked={shown} onChange={showStepsByDefault} />
-        </SettingRow>
-      </div>
-    </>
+    <Section id={ANCHORS.paths} title="File paths">
+      <SettingRow id={settingAnchor('paths', 'header')} name="At the top of a space">
+        <Switch label="Show paths at the top of a space" checked={paths.header} onChange={(on) => showPaths('header', on)} />
+      </SettingRow>
+      <SettingRow id={settingAnchor('paths', 'context')} name="In the Context panel">
+        <Switch label="Show paths in the Context panel" checked={paths.context} onChange={(on) => showPaths('context', on)} />
+      </SettingRow>
+    </Section>
   )
 }
 
-function ShownReports() {
-  const shown = useReportsDefault()
-  return (
-    <>
-      <div className="pt-24 pb-8 font-semibold">Worker reports</div>
-      <div className={GROUP}>
-        <SettingRow
-          name="Show unfolded"
-          description={`Folded, a report shows one line until opened. Each ${CHAT_NOUN.one} can override this in its General tab.`}
-        >
-          <Switch label="Show worker reports unfolded" checked={shown} onChange={showReportsByDefault} />
-        </SettingRow>
-      </div>
-    </>
-  )
-}
-
-const NOTIFY_KINDS: { kind: NotifyKind; name: string; hint: string }[] = [
-  { kind: 'needsYou', name: 'Needs you', hint: 'A permission request, a question, or an extension waiting on you' },
-  { kind: 'finished', name: 'Finished', hint: `A ${CHAT_NOUN.one} or Home finished a turn. Workers report to their ${CHAT_NOUN.one} instead.` },
-  { kind: 'errors', name: 'Errors', hint: 'A turn ended with an error, a worker\'s too' },
-]
-
-const NOTIFY_HINT = `Only while you aren't looking at that ${CHAT_NOUN.one}. With Kothar in front, only what needs you or failed in another ${CHAT_NOUN.one} shows. Several at once show as one; clicking it opens the ${CHAT_NOUN.one}.`
-
-function Notifications() {
-  const prefs = useNotificationPrefs()
-  // In a browser tab (development), the browser asks before a page may notify.
-  const [allowed, setAllowed] = useState(notificationsAllowed)
-  const allow = async () => setAllowed((await askNotificationLeave()) === 'granted')
-  return (
-    <>
-      <div className="flex items-center gap-6 pt-24 pb-8 font-semibold">
-        <Hint text={NOTIFY_HINT}>
-          <span>Notifications</span>
-        </Hint>
-      </div>
-      <div className={GROUP}>
-        <SettingRow name="Show notifications">
-          {prefs.enabled && !allowed && (
-            <Button size="small" onClick={() => void allow()}>
-              Allow in this browser
-            </Button>
-          )}
-          <Switch label="Show notifications" checked={prefs.enabled} onChange={(on) => setNotificationPref('enabled', on)} />
-        </SettingRow>
-        {NOTIFY_KINDS.map(({ kind, name, hint }) => (
-          <SettingRow
-            key={kind}
-            name={
-              <Hint text={hint}>
-                <span className="self-start">{name}</span>
-              </Hint>
-            }
-          >
-            <Switch
-              label={`Notify: ${name}`}
-              checked={prefs[kind]}
-              disabled={!prefs.enabled}
-              onChange={(on) => setNotificationPref(kind, on)}
-            />
-          </SettingRow>
-        ))}
-      </div>
-    </>
-  )
-}
-
-// Everything under Settings → Appearance: the theme picker, then the display preferences above.
 export function AppearancePage({ openMarketplace }: { openMarketplace?: () => void }) {
   return (
     <>
-      <Appearance browse={openMarketplace} />
-      <Sidebar />
-      <ShownPaths />
-      <ShownSteps />
-      <ShownReports />
-      <Notifications />
+      <div id={ANCHORS.theme} className="flex scroll-mt-12 flex-col rounded-sm transition-[background-color,box-shadow]">
+        <Appearance browse={openMarketplace} />
+      </div>
+      <Display />
+      <Advanced page="appearance">
+        <ShownPaths />
+        <Section id={ANCHORS.shortcuts} title="Shortcuts" hint="Click an action’s keys, then press new ones." plain>
+          <ShortcutsPage />
+        </Section>
+      </Advanced>
     </>
   )
 }

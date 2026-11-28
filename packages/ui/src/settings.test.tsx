@@ -143,7 +143,9 @@ test('Settings → Workers: agents’ switch, the limit for every child, and the
     instructions: { id: 'instructions', label: 'When to start workers', where: 'instructions', default: 'Delegate.', text: 'Delegate.' },
   }
   const sent = renderSettings(workFolder, [], { page: 'workers', workers })
-  expect([...dialog().querySelectorAll('h2')].map((h) => h.textContent)).toContain('Workers')
+  // Workers is a section of Agents now; the old page's links land on it.
+  expect([...dialog().querySelectorAll('h2')].map((h) => h.textContent)).toContain('Agents')
+  expect(dialog().querySelector('section[aria-label="Workers"]')).not.toBeNull()
   expect(dialog().querySelector('#prompt-workers-instructions')).not.toBeNull()
   act(() => dialog().querySelector<HTMLButtonElement>('button[aria-label="Let agents start workers"]')!.click())
   const limit = dialog().querySelector<HTMLInputElement>('input[aria-label="Max running per chat"]')!
@@ -153,8 +155,21 @@ test('Settings → Workers: agents’ switch, the limit for every child, and the
     { type: 'workers.set', start: false },
     { type: 'workers.set', limit: 2 },
   ])
+  // No limit is an empty box saying so, not -1; clearing the box sends -1, and 0 (no worker could run) isn't taken.
+  type(limit, '')
+  act(() => limit.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  expect(sent.at(-1)).toEqual({ type: 'workers.set', limit: -1 })
+  renderSettings(workFolder, [], { page: 'workers', workers: { ...workers, limit: -1 } })
+  const unlimited = dialog().querySelector<HTMLInputElement>('input[aria-label="Max running per chat"]')!
+  expect(unlimited.value).toBe('')
+  expect(unlimited.placeholder).toBe('No limit')
+  const count = sent.length
+  type(unlimited, '0')
+  act(() => unlimited.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  expect(sent).toHaveLength(count)
+  expect(unlimited.value).toBe('')
   // Not an extension any more: it isn't on the extensions page.
-  expect([...dialog().querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('Workers')
+  expect([...dialog().querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('Agents')
 })
 
 test('Settings → Prompts edits Kothar’s own prompts, each where the Inspector’s Edit link scrolls to', () => {
@@ -170,7 +185,7 @@ test('Settings → Prompts edits Kothar’s own prompts, each where the Inspecto
   expect(sent).toEqual([{ type: 'corePrompt.set', id: 'combine', text: 'Mix them.' }])
 })
 
-test('Settings → Work folder sets the default of each permission every chat follows', () => {
+test('Settings → Permissions sets the default of each permission every chat follows', () => {
   expect(PERMISSION_SWITCHES).toContain('autoFetch')
   expect(PERMISSIONS.autoFetch.label).toBe('Fetch web pages without asking')
   expect(PERMISSIONS.autoNetworkCommands.label).toBe('Run network commands without asking')
@@ -181,38 +196,38 @@ test('Settings → Work folder sets the default of each permission every chat fo
   for (const name of PERMISSION_SWITCHES) {
     const toggle = () =>
       dialog().querySelector(`[aria-label="${PERMISSIONS[name].label}"]`) as HTMLButtonElement
-    const sent = renderSettings({ ...workFolder, path: '/garage/work' })
+    const sent = renderSettings({ ...workFolder, path: '/garage/work' }, [], { page: 'permissions' })
     expect(toggle().getAttribute('aria-checked')).toBe(String(PERMISSION_DEFAULTS[name]))
     act(() => toggle().click())
     expect(sent).toEqual([{ type: 'permission.setDefault', name, enabled: !PERMISSION_DEFAULTS[name] }])
-    renderSettings({ ...workFolder, path: '/garage/work', [name]: !PERMISSION_DEFAULTS[name] }, sent)
+    renderSettings({ ...workFolder, path: '/garage/work', [name]: !PERMISSION_DEFAULTS[name] }, sent, { page: 'permissions' })
     expect(toggle().getAttribute('aria-checked')).toBe(String(!PERMISSION_DEFAULTS[name]))
   }
 })
 
-test('Settings → Work folder folds the other permission defaults away while Allow all is on', () => {
+test('Settings → Permissions folds the other permission defaults away while Allow all is on', () => {
   const shown = () => PERMISSION_SWITCHES.filter((name) => dialog().querySelector(`[aria-label="${PERMISSIONS[name].label}"]`))
-  renderSettings({ ...workFolder, path: '/garage/work', allowAll: true })
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: true }, [], { page: 'permissions' })
   expect(shown()).toEqual(['allowAll'])
   expect(dialog().textContent).toContain('not used while Allow all is on')
   expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')).toBeNull()
-  renderSettings({ ...workFolder, path: '/garage/work', allowAll: false })
+  renderSettings({ ...workFolder, path: '/garage/work', allowAll: false }, [], { page: 'permissions' })
   expect(shown()).toEqual(PERMISSION_SWITCHES)
   expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')).not.toBeNull()
 })
 
-test('Settings → Work folder adds and removes the allowed SSH hosts every chat follows', () => {
-  const sent = renderSettings({ ...workFolder, path: '/garage/work' })
+test('Settings → Permissions adds and removes the allowed SSH hosts every chat follows', () => {
+  const sent = renderSettings({ ...workFolder, path: '/garage/work' }, [], { page: 'permissions' })
   expect(dialog().querySelector('[aria-label="Allowed SSH hosts"]')!.textContent).toContain('None.')
   type(dialog().querySelector('input[aria-label="SSH host"]') as HTMLInputElement, 'build.example.com')
   act(() => button('Add')!.click())
   expect(sent).toEqual([{ type: 'permission.setSshHosts', hosts: [{ host: 'build.example.com' }] }])
-  renderSettings({ ...workFolder, path: '/garage/work', sshHosts: [{ host: 'build.example.com' }] }, sent)
+  renderSettings({ ...workFolder, path: '/garage/work', sshHosts: [{ host: 'build.example.com' }] }, sent, { page: 'permissions' })
   act(() => (dialog().querySelector('button[aria-label="Remove build.example.com"]') as HTMLButtonElement).click())
   expect(sent.at(-1)).toEqual({ type: 'permission.setSshHosts', hosts: [] })
 })
 
-test('Settings → Work folder picks the terminal Open in Terminal uses, where there is a choice', () => {
+test('Settings → General picks the terminal Open in Terminal uses, where there is a choice', () => {
   const terminals = [
     { id: 'terminal', name: 'Terminal' },
     { id: 'ghostty', name: 'Ghostty' },
@@ -232,10 +247,34 @@ test('Settings → Work folder picks the terminal Open in Terminal uses, where t
   expect(select()!.textContent).toBe('Ghostty')
 })
 
+test('Settings → General sets the largest attachment, 200 MB by default, or no limit', () => {
+  const select = () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Largest attachment"]')!
+  const sent = renderSettings(workFolder)
+  expect(select().textContent).toBe('200 MB (default)')
+  act(() => select().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  const options = [...document.querySelectorAll('[role="option"]')]
+  expect(options.map((o) => o.textContent?.replace('✓', ''))).toEqual([
+    '25 MB',
+    '100 MB',
+    '200 MB (default)',
+    '500 MB',
+    '1 GB',
+    'No limit',
+  ])
+  const none = options.find((o) => o.textContent?.endsWith('No limit'))!
+  act(() => none.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  expect(sent).toEqual([{ type: 'attachmentLimit.set', bytes: 0 }])
+  renderSettings({ ...workFolder, attachmentLimit: 0 })
+  expect(select().textContent).toBe('No limit')
+  // A size saved by hand shows as it is.
+  renderSettings({ ...workFolder, attachmentLimit: 50_000_000 })
+  expect(select().textContent).toBe('50 MB')
+})
+
 test('Settings has no Instructions page: the global AGENTS.md is edited in the Context panel', () => {
   renderSettings(workFolder)
   const tabs = [...dialog().querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)
-  expect(tabs).toContain('Work folder')
+  expect(tabs).toContain('General')
   expect(tabs).not.toContain('Instructions')
 })
 
@@ -498,7 +537,7 @@ test('Settings → Models lists each role once across engines, each model with i
   // Kothar's own lists first, then each extension's, and none for a role no extension that's on declares.
   const roleNames = [...dialog().querySelectorAll('button[aria-label^="Add a "]')].map((b) => b.getAttribute('aria-label'))
   expect(roleNames).toEqual(['Add a Chat model', 'Add a Workers model', 'Add a Planning model', 'Add a Searching model'])
-  expect(dialog().textContent).toContain('Planning work. From Plan.')
+  expect(dialog().textContent).toContain('From Plan')
   expect(select('Remove Opus · Claude Code')!.disabled).toBe(true)
 
   open('Thinking for One · pi in Planning')
@@ -531,6 +570,44 @@ test("Settings' scrolling nav and page keep their scrollbars inset, the page's b
   expect(nav.classList).toContain('scroll-inset')
   expect(page.classList).toContain('scroll-inset')
   expect(page.className).toContain('[--scroll-top:48px]')
+})
+
+test('a number setting with an empty value shows an empty box with its placeholder; clearing the box saves that value', () => {
+  const cap = { key: 'cap', label: 'Workers per research', type: 'number', default: 0, min: 1, max: 20, integer: true, empty: { value: 0, placeholder: 'Depth default' } } satisfies ExtensionSetting
+  const withValue = (value: number): ExtensionInfo => ({ id: 'capped', name: 'Capped', description: '', enabled: true, settings: [cap], values: { cap: value } })
+  const box = () => dialog().querySelector('input[aria-label="Workers per research"]') as HTMLInputElement
+  const edit = (value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(box(), value)
+      box().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  const blur = () => act(() => box().dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+
+  const sent = renderExtensions([withValue(0)], 'extension:capped')
+  expect(box().value).toBe('')
+  expect(box().placeholder).toBe('Depth default')
+  blur()
+  expect(sent).toEqual([])
+
+  edit('8')
+  blur()
+  expect(sent).toEqual([{ type: 'extension.setValue', extensionId: 'capped', key: 'cap', value: 8 }])
+
+  renderExtensions([withValue(8)], 'extension:capped', sent)
+  expect(box().value).toBe('8')
+  edit('')
+  blur()
+  expect(sent.at(-1)).toEqual({ type: 'extension.setValue', extensionId: 'capped', key: 'cap', value: 0 })
+
+  // Out of range goes back to what's saved, and nothing is sent.
+  renderExtensions([withValue(8)], 'extension:capped', sent)
+  const count = sent.length
+  edit('40')
+  blur()
+  expect(sent).toHaveLength(count)
+  expect(box().value).toBe('8')
 })
 
 test('an extension with nothing to set gets no page; one with settings gets the header, its switch and what it does', () => {

@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { Button, GROUP, Hint } from './controls.tsx'
+import { settingAnchor } from './settings/search.ts'
 import {
   bindingOf,
   conflictsOf,
@@ -22,7 +23,7 @@ export function Keys({ binding, className = '' }: { binding: Binding | null; cla
 
 type Pending = { id: string; keys: Binding; problem: string; conflict?: string[] }
 
-/** Settings → Shortcuts: every action with its keys. Click a row's keys and press new ones to change them. */
+/** Settings → Appearance → Shortcuts: every action with its keys. Click a row's keys and press new ones to change them. */
 export function ShortcutsPage() {
   const keys = useBindings()
   const [recording, setRecording] = useState<string | null>(null)
@@ -62,7 +63,12 @@ export function ShortcutsPage() {
           const isRecording = recording === action.id
           const problem = pending?.id === action.id ? pending : undefined
           return (
-            <div key={action.id} className="flex flex-col gap-6 py-10 not-first:border-t" data-action={action.id}>
+            <div
+              key={action.id}
+              id={settingAnchor('shortcut', action.id)}
+              className="flex scroll-mt-12 flex-col gap-6 rounded-sm py-10 transition-[background-color,box-shadow] not-first:border-t"
+              data-action={action.id}
+            >
               <div className="flex items-center gap-12">
                 <span className="min-w-0 flex-1">{action.label}</span>
                 <Hint text={isRecording ? 'Press new keys. Esc cancels, Delete clears.' : 'Change keys'}>

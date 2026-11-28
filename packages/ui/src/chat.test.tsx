@@ -1748,6 +1748,40 @@ test('an undone message comes back to the composer once, before what was typed, 
   localStorage.clear()
 })
 
+test('waiting files show their sizes, their total, and inline warnings when large, and a big one sends by upload id', () => {
+  localStorage.clear()
+  const sent: ClientMessage[] = []
+  const restored = {
+    text: 'look at these',
+    attachments: [
+      { name: 'a.txt', mimeType: 'text/plain', base64: btoa('contents') },
+      { name: 'clip.mov', mimeType: 'video/quicktime', uploadId: 'f'.repeat(32), size: 140_000_000 },
+    ],
+    nonce: 7,
+  }
+  render({ restored }, (m) => sent.push(m))
+  const list = container.querySelector('[aria-label="Attachments"]')!
+  const sizes = [...list.querySelectorAll('[data-size]')].map((e) => [e.textContent, e.className.includes('text-amber')])
+  expect(sizes).toEqual([['8 B', false], ['140 MB', true]])
+  expect(container.querySelector('[data-total]')!.textContent).toBe('2 files · 140 MB')
+  const warnings = [...container.querySelectorAll('[role="status"]')].map((e) => e.textContent)
+  expect(warnings).toEqual([
+    'Large: clip.mov is 140 MB. An agent that reads it may use a lot of context.',
+    'Large: 140 MB in all. Slow to send, and costly in context if agents read it all.',
+  ])
+  expect(container.querySelector('[role="status"]')!.className).toContain('text-amber')
+
+  const area = container.querySelector('textarea')!
+  act(() => area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  expect(sent.find((m) => m.type === 'chat.send')).toMatchObject({
+    attachments: [
+      { name: 'a.txt', mimeType: 'text/plain', base64: btoa('contents') },
+      { name: 'clip.mov', mimeType: 'video/quicktime', uploadId: 'f'.repeat(32), size: 140_000_000 },
+    ],
+  })
+  localStorage.clear()
+})
+
 test('a forget card asks in its own words, lists what goes, and answers with Forget or Cancel', () => {
   const sent: ClientMessage[] = []
   const forget: Item = {

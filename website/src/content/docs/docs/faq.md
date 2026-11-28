@@ -16,7 +16,9 @@ only, so there every command asks before it runs.
 ## Is there a released build?
 
 Yes. Signed and notarized builds for macOS 13+ on Apple silicon are on
-[GitHub Releases](https://github.com/billwang7599/kothar/releases). Kothar is in early development and doesn't
+[GitHub Releases](https://github.com/billwang7599/kothar/releases), and
+[this link](https://github.com/billwang7599/kothar/releases/latest/download/Kothar-arm64.dmg) always downloads the
+newest one. Kothar is in early development and doesn't
 update itself yet, so download new versions from there. You can also
 [run it from source](/docs/getting-started/#run-from-source).
 

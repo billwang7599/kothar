@@ -42,6 +42,8 @@ export type PageProps = {
   pickFolder?: (title?: string) => Promise<string | null>
   // The master switch for community extensions, what waits for a restart, and how many chats a restart would stop.
   communityExtensions?: boolean
+  // The Marketplace's switch; absent, on.
+  marketplace?: boolean
   restart?: RestartState
   running?: number
   // Opens the Marketplace window over Settings, showing one kind first.

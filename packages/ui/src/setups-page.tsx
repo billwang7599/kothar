@@ -32,7 +32,7 @@ type Props = {
   saved?: { count: number; id?: string; error?: string }
 }
 
-/** Settings → Setups: every saved setup, each editable in place, plus a new one. */
+/** Settings → Agents → Setups: every saved setup, each editable in place, plus a new one. */
 export function SetupsPage({ setups, engines, extensions, connected, send, saved }: Props) {
   // The setup open for editing: its id, 'new' for a new one, or none.
   const [editing, setEditing] = useState<string>()
@@ -228,7 +228,7 @@ function SetupForm({ draft, taken, engines, extensions, connected, saving, refus
           <Select
             label="Model"
             value={modelValue}
-            hint="Model lists: whatever Settings → Models runs. An engine's default: its first model in your lists, else the engine's own default."
+            hint="Model lists: whatever Settings → Engines → Models runs. An engine's default: its first model in your lists, else the engine's own default."
             disabled={!connected}
             options={[
               { value: LISTS, label: 'Model lists' },

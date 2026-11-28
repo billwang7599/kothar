@@ -30,10 +30,12 @@ export const NO_COMMITS_RULES =
   "These git folders have no commits yet, so Kothar hasn't checked them out: use them as the folder modes below " +
   'say. Each is checked out in your work folder from the first message after its first commit:'
 
-export const IMAGE_RULES =
-  'To show the user an image, such as a chart, screenshot or render you made, write ![caption](</absolute/path.png>) ' +
-  'in your reply, with the path in angle brackets so spaces in it work: Kothar shows it in the chat. It must be a ' +
-  'file in your folders.'
+// Every chat's replies are read in Kothar, which turns these links into clickable files and pictures (markdown.tsx).
+export const FILE_RULES =
+  'When you create or save a file the user may want to open (a screenshot, render, document, report or export), ' +
+  'link it in your reply as [name](</absolute/path>), with the path in angle brackets so spaces in it work: Kothar ' +
+  'makes it a link that opens the file. Also show an image (png, jpg, gif, webp, svg) inline with ' +
+  '![caption](</absolute/path.png>). The file must be in your folders.'
 
 // own: a worker's own worktree (worker-checkouts.ts), not the space's.
 export type InstructionCheckout = { folder: string; path: string; branch: string; own?: boolean }
@@ -110,8 +112,9 @@ export const instructionSections = (parts: InstructionParts): InstructionSection
       ? [core('Git folders without commits', [NO_COMMITS_RULES, ...folders.flatMap((f) => (f.unborn ? [`- ${f.path}`] : []))].join('\n'))]
       : []),
     ...(folders.length ? [core('Folder modes', [FOLDER_RULES, ...folderLines(folders)].join('\n'))] : []),
-    // A session with Kothar's tools is a chat the user reads in Kothar, which shows images from its folders.
-    ...(toolbox ? [core('Showing images', IMAGE_RULES), { ...core('What you can use', toolbox), settings: corePromptLink('combine') }] : []),
+    // Every engine's replies are read in Kothar, which links files and shows images from the chat's folders.
+    core('Showing files', FILE_RULES),
+    ...(toolbox ? [{ ...core('What you can use', toolbox), settings: corePromptLink('combine') }] : []),
     ...extensions.map((text, i) => from(ids[i], 'Instructions', text)),
     ...(workers !== undefined
       ? [{ ...core('Workers: when to start workers', workers), settings: `${WORKERS_PROMPT.page}#prompt-${WORKERS_PROMPT.page}-${WORKERS_PROMPT.id}` }]

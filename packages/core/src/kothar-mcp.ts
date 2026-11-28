@@ -22,7 +22,7 @@ type Hub = {
   deliver(chatId: string, text: string): 'sent' | 'steered' | 'queued'
   // What the chat's Stop button does.
   stop(chatId: string): void
-  // The forget tool: asks the user, then removes the messages from the chat (message-edits.ts forget).
+  // The forget tool: asks the user (or Allow all approves it), then removes the messages from the chat (message-edits.ts forget).
   forget(chatId: string, ids: unknown): Promise<string>
   // review_worker: Keep, or Merge, Squash or Discard on the user's say (core.ts reviewWorkerFor).
   reviewWorker(chatId: string, workerId: string, action: 'merge' | 'squash' | 'discard' | 'keep'): Promise<string>
@@ -77,8 +77,8 @@ const TOOLS: Record<string, Tool> = {
     description:
       'Permanently remove messages from this chat and its memory, only when the user asks you to forget or remove ' +
       'something. ids are message ids from your memory: numbers, memory lines such as "120+8", or ranges such as ' +
-      '"120-127". A reply goes whole, with its tool calls. The user is shown each message and confirms first; the ' +
-      "turn that's running can't be forgotten. reason: a few words for yourself, never logged. Don't repeat what you " +
+      '"120-127". A reply goes whole, with its tool calls. The user is shown each message and confirms first, unless ' +
+      "Allow all is on for this chat, which approves it at once; the turn that's running can't be forgotten. reason: a few words for yourself, never logged. Don't repeat what you " +
       'forgot.',
     input: z.object({
       ids: z.array(z.union([z.number().int(), z.string()])).min(1),
@@ -138,8 +138,8 @@ const TOOLS: Record<string, Tool> = {
     description:
       "Act on a finished worker's changes, which wait on its own branch after its report: merge or squash them into " +
       "your space's branch, discard them (worktree and branch removed), or keep them for later. Merge, squash and " +
-      'discard ask the user first; a merge that conflicts is undone and reported, its branch left waiting. Give the ' +
-      "worker's id from its report.",
+      'discard ask the user first, unless Allow all is on for this chat, which approves them at once; a merge that ' +
+      "conflicts is undone and reported, its branch left waiting. Give the worker's id from its report.",
     input: z.object({ workerId: z.string(), action: z.enum(['merge', 'squash', 'discard', 'keep']) }),
     run({ hub, caller }: Context, { workerId, action }: { workerId: string; action: 'merge' | 'squash' | 'discard' | 'keep' }) {
       return hub.reviewWorker(caller.id, workerId, action)

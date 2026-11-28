@@ -146,7 +146,7 @@ function App() {
   }, [state.loaded, state.chats])
   const [nameRequest, setNameRequest] = useState<NameRequest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsPage, setSettingsPage] = useState<SettingsPage>('engines')
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>('general')
   const [changingWorkFolder, setChangingWorkFolder] = useState(false)
   const [workPath, setWorkPath] = useState(state.workFolder.path)
   if (state.workFolder.path !== workPath) {
@@ -159,19 +159,11 @@ function App() {
     if (page) setSettingsPage(page)
     setSettingsOpen(true)
   }, [])
-  // A kothar:settings/<page>#<anchor> link in an extension's view: the page, then its anchor scrolled into view once
-  // it's drawn.
+  // A kothar:settings/<page>#<anchor> link in an extension's view: the page, then its anchor shown once it's drawn
+  // (opening the page's Advanced if it's in there).
   const openSettingsLink = useCallback(
     (page: string, anchor?: string) => {
-      openSettings(page as SettingsPage)
-      if (!anchor) return
-      let tries = 30
-      const find = () => {
-        const target = document.getElementById(anchor)
-        if (target) return target.scrollIntoView({ block: 'start' })
-        if (--tries > 0) requestAnimationFrame(find)
-      }
-      requestAnimationFrame(find)
+      openSettings((anchor ? `${page}#${anchor}` : page) as SettingsPage)
     },
     [openSettings],
   )
@@ -245,7 +237,7 @@ function App() {
   const signedIn = activeAccount?.signedIn ?? engine?.signedIn
 
   const connected = state.connected
-  const { catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions } = state
+  const { catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions, marketplace: marketplaceOn } = state
   const market = useMemo(
     () => ({ catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions }),
     [catalog, themes, installed, marketFailures, extensions, localInstall, communityExtensions],
@@ -258,8 +250,13 @@ function App() {
     if (picked) send({ type: 'chat.create', name: folderName(picked), folders: [picked] })
   }, [connected, send])
   const [searching, setSearching] = useState(false)
-  const [marketplace, setMarketplace] = useState(false)
-  const openMarketplace = useCallback(() => setMarketplace(true), [])
+  const [marketplaceAsked, setMarketplace] = useState(false)
+  // While the Marketplace's switch is off it doesn't open: its shortcut and Browse buttons show its switch in Settings.
+  const marketplace = marketplaceAsked && marketplaceOn
+  const openMarketplace = useCallback(() => {
+    if (marketplaceOn) setMarketplace(true)
+    else openSettings('community-extensions#section-marketplace')
+  }, [marketplaceOn, openSettings])
   // Get started opens by itself once per window, as soon as there's a work folder, until it's done or closed.
   const [getStarted, setGetStarted] = useState(false)
   const [getStartedAsked, setGetStartedAsked] = useState(false)
@@ -305,7 +302,7 @@ function App() {
     newSpace: () => connected && setNameRequest({ kind: 'new' }),
     settings: () => openSettings(),
     search: () => setSearching((open) => !open),
-    marketplace: () => setMarketplace((open) => !open),
+    marketplace: () => (marketplace ? setMarketplace(false) : openMarketplace()),
     getStarted: openGetStarted,
     ...panelShortcuts({ covered: settingsOpen || marketplace || getStarted, chatOpen: !!selected, toggleSidebar, toggleContext }),
     ...(window.kothar && { newSpaceFromFolder: () => void newChatFromFolder() }),
@@ -417,6 +414,7 @@ function App() {
               openGetStarted={openGetStarted}
               market={market}
               communityExtensions={communityExtensions}
+              marketplace={marketplaceOn}
               restart={state.restart}
               running={running}
               openMarketplace={openMarketplace}
@@ -507,6 +505,8 @@ function App() {
             openSettings={openSettingsLink}
             newSpace={newSpace}
             openMarketplace={openMarketplace}
+            extensions={state.extensions}
+            marketplace={marketplaceOn}
           />
           <MarketplaceDialog
             open={marketplace}

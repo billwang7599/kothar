@@ -10,7 +10,7 @@ import type { MessagesRemoved } from '@kothar/extension-api'
 import type { Chat } from './chat.ts'
 import { rewriteLog } from './chat-store.ts'
 import { messageEntries, messagesOf } from './memory.ts'
-import type { Attachment, ChatEntry, CoreMessage, EngineEvent as CoreEvent, QueuedMessage, Upload } from './shared.ts'
+import { INLINE_ATTACHMENT_BYTES, type Attachment, type ChatEntry, type CoreMessage, type EngineEvent as CoreEvent, type QueuedMessage, type Upload } from './shared.ts'
 import { TOOL_IMAGES_DIR } from './tool-image-files.ts'
 
 type Entry = ChatEntry
@@ -174,12 +174,15 @@ export type MessageEditsDeps = {
   // The latest page of the chat's log, as the UI shows a chat (shownState).
   shownLog: (chat: Chat) => { from: number; entries: Entry[] }
   attachmentsDirOf: (chat: Chat) => string
+  /** Stages a file for the composer to send again (uploads.ts stage); for an undone message's big attachments. */
+  stageUpload: (path: string) => { id: string; size: number }
   // Tells the extensions that are on (onMessagesRemoved).
   removed: (chat: Chat, removed: Omit<MessagesRemoved, 'chat'>) => void
   // Queues a message as if the user had sent it (turn.ts enqueue): it runs at once on an idle chat.
   enqueue: (chat: Chat, message: Omit<QueuedMessage, 'id'>) => void
   checkActive: (chat: Chat) => void
-  // Asks the user alone, on a card in the chat's running turn (turn.ts, userOnly): no switch or rule answers it.
+  // Asks the user alone, on a card in the chat's running turn (turn.ts, userOnly): no rule or extension answers it, and
+  // of the switches only Allow all does.
   askUser: (chat: Chat, request: ForgetRequest, requestId: string) => Promise<{ allow: boolean }>
   // Logs a line in the chat (an extension.note with no extension).
   note: (chat: Chat, text: string) => void
@@ -240,7 +243,7 @@ export function openMessageEdits(deps: MessageEditsDeps) {
   return {
     /**
      * The forget tool: removes the messages the agent names by id (forgetIds) from its own chat, once the user says so
-     * on a card nothing else can answer. Resolves with what the agent is told.
+     * on a card nothing but Allow all can answer. Resolves with what the agent is told.
      */
     async forget(chat: Chat, rawIds: unknown): Promise<string> {
       const ids = forgetIds(rawIds)
@@ -296,12 +299,17 @@ export function openMessageEdits(deps: MessageEditsDeps) {
 
     /**
      * Removes the user's message at entry and everything after it, and gives back what it said and carried, for the
-     * composer. Its attachments are read before they're deleted; the composer sends them again as new uploads.
+     * composer. Its attachments are read before they're deleted; the composer sends them again as new uploads. Big
+     * ones are staged as uploads instead (uploads.ts), so they never ride the WebSocket as base64.
      */
     undoMessage(chat: Chat, raw: unknown): Extract<CoreMessage, { type: 'chat.undone' }> {
       const { entry, message } = ownMessage(chat, raw)
-      const attachments: Upload[] = (message.attachments ?? []).flatMap((a) => {
+      const attachments: Upload[] = (message.attachments ?? []).flatMap((a): Upload[] => {
         try {
+          if (a.size > INLINE_ATTACHMENT_BYTES) {
+            const { id, size } = deps.stageUpload(a.path)
+            return [{ name: a.name, mimeType: a.mimeType, uploadId: id, size }]
+          }
           return [{ name: a.name, mimeType: a.mimeType, base64: readFileSync(a.path).toString('base64') }]
         } catch {
           return []

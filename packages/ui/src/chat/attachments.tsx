@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { Dialog } from 'radix-ui'
-import { IMAGE_TYPES, type Attachment, type ClientMessage, type ContextItem, type Upload } from '@kothar/core/shared'
+import { IMAGE_TYPES, type Attachment, type ClientMessage, type ContextItem } from '@kothar/core/shared'
 import { attachmentUrl, coreUrl, readToken } from '../connection.ts'
 import { ImageLightbox } from '../chat-image.tsx'
 import { Button, Hint, MOTION } from '../controls.tsx'
@@ -21,7 +21,20 @@ const FILE_ACTION =
 const REVEAL =
   'pointer-events-none opacity-0 transition-opacity duration-150 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100 group-hover/file:pointer-events-auto group-hover/file:opacity-100'
 
-export type Pending = Upload & { id: string; size: number; preview?: string }
+/**
+ * A file waiting in the composer: its contents (base64) for a small one, or for a big one the id of its upload to
+ * the core (uploadId), with progress (0 to 1) while it's still streaming.
+ */
+export type Pending = {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  preview?: string
+  base64?: string
+  uploadId?: string
+  progress?: number
+}
 
 export function PaperclipIcon() {
   return (

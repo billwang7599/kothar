@@ -497,7 +497,7 @@ export function MarketplaceDialog({ open, close, market, connected, send, pickFo
                 {...MOTION.pop}
               >
                 <header className="flex shrink-0 flex-wrap items-center gap-x-12 gap-y-8 border-b py-10 pr-48 pl-16">
-                  <Dialog.Title className="text-[16px] font-semibold">Marketplace</Dialog.Title>
+                  <Dialog.Title className="display text-[16px] leading-[1.2]">Marketplace</Dialog.Title>
                   <input
                     type="search"
                     className="h-control min-w-160 flex-1 rounded border bg-panel px-8"
@@ -765,7 +765,7 @@ function Detail({ row, busy, market, connected, send, install }: DetailProps) {
   return (
     <article className="flex max-w-[64ch] flex-col gap-14" aria-label={row.name}>
       <div className="flex flex-col gap-4">
-        <h3 className="flex flex-wrap items-baseline gap-x-10 text-[18px] font-semibold">
+        <h3 className="flex flex-wrap items-baseline gap-x-10 text-[18px] font-bold [font-stretch:104%]">
           {row.name}
           <span className="text-sm font-normal text-faint">{row.kind === 'theme' ? 'Theme' : 'Extension'}</span>
         </h3>

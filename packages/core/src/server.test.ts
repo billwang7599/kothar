@@ -3,15 +3,17 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { createServer, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import type { Extension, SentTurn } from '@kothar/extension-api'
+import type { ActivityEvent, Extension, SentTurn } from '@kothar/extension-api'
 import { afterEach, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { createFakeAdapter } from './adapters/fake.ts'
@@ -62,7 +64,7 @@ async function start(port = 0, cliToken?: string) {
   })
   cleanups.push(() => server.close())
   const base = `ws://127.0.0.1:${server.port}`
-  return { base, url: `${base}/?token=${token}`, project }
+  return { base, url: `${base}/?token=${token}`, project, garage, core }
 }
 
 function connect(url: string, headers: { origin?: string }) {
@@ -296,6 +298,92 @@ it("serves a chat's attachments with the token, images and PDFs inline and anyth
   ]) {
     expect((await get(path)).status, path).toBe(404)
   }
+})
+
+it('takes a file streamed ahead, past the WebSocket message limit, from the window only, for a message to send', async () => {
+  const { base, url } = await start()
+  const http = base.replace('ws:', 'http:')
+  const post = (body: BodyInit, headers: Record<string, string> = { origin }, key = token) =>
+    fetch(`${http}/uploads?token=${key}`, { method: 'POST', body, headers })
+  const preflight = await fetch(`${http}/uploads`, { method: 'OPTIONS', headers: { origin } })
+  expect(preflight.status).toBe(204)
+  expect(preflight.headers.get('access-control-allow-origin')).toBe(origin)
+  expect(preflight.headers.get('access-control-allow-methods')).toContain('DELETE')
+  expect((await post('x', { origin: 'http://evil.test' })).status).toBe(403)
+  expect((await post('x', {})).status).toBe(403)
+  expect((await post('x', { origin }, 'wrong')).status).toBe(401)
+
+  // Over ws's 100 MiB message limit even before base64.
+  const size = 110 * 1024 * 1024
+  const response = await post(new Blob([new Uint8Array(size).fill(7)]))
+  expect(response.status).toBe(200)
+  expect(response.headers.get('access-control-allow-origin')).toBe(origin)
+  const staged = (await response.json()) as { id: string; size: number }
+  expect(staged).toEqual({ id: expect.stringMatching(/^[0-9a-f]{32}$/), size })
+
+  const dropped = (await (await post('bye')).json()) as { id: string }
+  const remove = await fetch(`${http}/uploads/${dropped.id}?token=${token}`, { method: 'DELETE', headers: { origin } })
+  expect(remove.status).toBe(204)
+
+  const { socket, messages } = connect(url, { origin })
+  await until(() => messages.some((m) => m.type === 'snapshot'))
+  socket.send(JSON.stringify({ type: 'engine.setEnabled', engine: 'fake', enabled: true }))
+  socket.send(JSON.stringify({ type: 'chat.create', name: 'Big' }))
+  await until(() => messages.some((m) => m.type === 'chat.added'))
+  const added = messages.find((m) => m.type === 'chat.added')
+  if (added?.type !== 'chat.added') throw new Error('no chat')
+  const send = (uploadId: string, name: string) =>
+    socket.send(JSON.stringify({ type: 'chat.send', chatId: added.chat.id, text: 'big', attachments: [{ name, mimeType: 'video/mp4', uploadId, size }] }))
+  send(dropped.id, 'gone.mp4')
+  await until(() => messages.some((m) => m.type === 'error'))
+  expect(messages.find((m) => m.type === 'error')).toMatchObject({ message: expect.stringContaining('gone.mp4 is no longer waiting') })
+  send(staged.id, 'clip.mp4')
+  await until(() =>
+    messages.some((m) => m.type === 'chat.entry' && m.entry.type === 'user.message' && m.entry.attachments?.[0]?.size === size),
+  )
+})
+
+// POSTs to /uploads by hand: with length, a Content-Length that says so (nothing need follow); body, chunks sent
+// chunked. The status and body the core answers with.
+function postUpload(http: string, { length, body = [] }: { length?: number; body?: Buffer[] }) {
+  return new Promise<{ status: number; text: string }>((resolve, reject) => {
+    const headers: Record<string, string | number> = { origin, 'content-type': 'application/octet-stream' }
+    if (length !== undefined) headers['content-length'] = length
+    const req = httpRequest(`${http}/uploads?token=${token}`, { method: 'POST', headers }, (response) => {
+      let text = ''
+      response.on('data', (chunk) => (text += chunk))
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, text }))
+    })
+    req.on('error', reject)
+    req.flushHeaders()
+    for (const chunk of body) req.write(chunk)
+    // A declared length that's never sent: the core must answer from the header alone.
+    if (length === undefined) req.end()
+  })
+}
+
+it('refuses a streamed file past the largest attachment in Settings, by its length or as it streams, keeping nothing', async () => {
+  const { base, garage, core } = await start()
+  const http = base.replace('ws:', 'http:')
+  const uploads = join(garage, 'uploads')
+  const staged = () => (existsSync(uploads) ? readdirSync(uploads) : [])
+
+  // The default, 200 MB: a bigger file is refused from its Content-Length, before a byte of it is read.
+  const declared = await postUpload(http, { length: 200_000_001 })
+  expect(declared.status).toBe(413)
+  expect(JSON.parse(declared.text).error).toBe('The file is 200 MB, bigger than the largest attachment, 200 MB (change it in Settings).')
+  expect(staged()).toEqual([])
+
+  // A lower limit: a body with no length is cut off once it passes it, and what was written is deleted.
+  core.handle({ type: 'attachmentLimit.set', bytes: 1000 }, () => {})
+  const streamed = await postUpload(http, { body: [Buffer.alloc(600), Buffer.alloc(600)] })
+  expect(streamed.status).toBe(413)
+  expect(JSON.parse(streamed.text).error).toContain('largest attachment, 1 KB')
+  expect(staged()).toEqual([])
+  // Under it, still taken.
+  const fits = await postUpload(http, { body: [Buffer.alloc(1000)] })
+  expect(fits.status).toBe(200)
+  expect(staged()).toHaveLength(1)
 })
 
 it("serves pictures from an extension's own folders with the token, and nothing else", async () => {
@@ -1096,5 +1184,86 @@ it("lets a lead review a worker's changes with review_worker, but merges only on
   const checkout = chatIn(core, spaceId).worktrees![repo]!.path
   expect(readFileSync(join(checkout, 'fix.txt'), 'utf8')).toBe('fixed\n')
   expect(chatIn(core, spaceId).workerBranches).toBeUndefined()
+  sessionOf(spaceId).end('Done')
+})
+
+// Allow all approves everything, so it also answers the cards that otherwise only the user can (forget, review_worker).
+async function startWatched() {
+  const events: ActivityEvent[] = []
+  const watcher: Extension = { id: 'watcher', name: 'Watcher', description: '', enabledByDefault: true, onActivity: (event) => void events.push(event) }
+  return { ...(await startHeld({ extensions: [mainExtension, watcher] })), events }
+}
+
+it("asks the user before a forget while Allow all is off, and lets Allow all approve it, logged and noted", async () => {
+  const { core, send, sessionOf, tool, events } = await startWatched()
+  core.handle({ type: 'chat.create', name: 'Notes' }, () => {})
+  const id = core.chats().find((c) => c.name === 'Notes')!.id
+  const cards = () => chatIn(core, id).entries.filter((e) => e.type === 'permission.requested' && e.name === 'Forget 1 message')
+  const resolved = (requestId: string) => chatIn(core, id).entries.find((e) => e.type === 'permission.resolved' && e.requestId === requestId)
+
+  send(id, 'the secret is 42')
+  await waitUntil(() => !!sessionOf(id))
+  sessionOf(id).end('Noted')
+  await waitUntil(() => chatIn(core, id).status === 'idle')
+
+  // Off: the card waits for the user, and Cancel keeps the message.
+  send(id, 'forget the secret')
+  await waitUntil(() => sessionOf(id).prompt !== undefined && chatIn(core, id).status === 'running')
+  const bearer = sessionOf(id).options.kotharMcp!.token
+  const asking = tool(bearer, 'forget', { ids: [0] })
+  await waitUntil(() => cards().length === 1)
+  const card = cards()[0]!
+  if (card.type !== 'permission.requested') throw new Error('no card')
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(resolved(card.requestId)).toBeUndefined()
+  expect(chatIn(core, id).status).toBe('waiting')
+  core.handle({ type: 'permission.respond', chatId: id, requestId: card.requestId, allow: false }, () => {})
+  expect((await asking).text).toBe('The user kept these messages.')
+  expect(events.find((e) => e.kind === 'permission' && e.detail?.startsWith('Forget 1 message'))).toMatchObject({ decision: 'denied', rule: 'You' })
+
+  // On: approved at once with Allow all's rule, in the Activity, with the usual note in the chat.
+  core.handle({ type: 'chat.setPermission', chatId: id, name: 'allowAll', enabled: true }, () => {})
+  const forgot = await tool(bearer, 'forget', { ids: [0] })
+  expect(forgot.text).toMatch(/^Forgot 1 message\./)
+  const auto = cards()[1]!
+  if (auto.type !== 'permission.requested') throw new Error('no card')
+  expect(resolved(auto.requestId)).toMatchObject({ allow: true, auto: true })
+  expect(events.findLast((e) => e.kind === 'permission' && e.detail?.startsWith('Forget 1 message'))).toMatchObject({ decision: 'allowed', rule: 'Switch: Allow all' })
+  expect(chatIn(core, id).entries.some((e) => e.type === 'extension.note' && /forgotten/.test(e.text))).toBe(true)
+  expect(chatIn(core, id).entries.some((e) => e.type === 'user.message' && e.text === 'the secret is 42')).toBe(false)
+  sessionOf(id).end('Done')
+})
+
+it("lets Allow all approve a lead's review_worker merge without a card to answer", async () => {
+  const { core, garage, json, tool, send, sessionOf, events } = await startWatched()
+  workersOn(core, -1)
+  const repo = join(garage, 'repo')
+  mkdirSync(repo, { recursive: true })
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8' }).trim()
+  git('init', '-q', '-b', 'main')
+  writeFileSync(join(repo, 'README.md'), 'hi\n')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'first')
+  core.handle({ type: 'chat.create', name: 'App', folders: [repo] }, () => {})
+  const spaceId = core.chats().find((c) => c.name === 'App')!.id
+  core.handle({ type: 'chat.setPermission', chatId: spaceId, name: 'allowAll', enabled: true }, () => {})
+
+  send(spaceId, 'Fix it')
+  await waitUntil(() => !!sessionOf(spaceId))
+  const token = sessionOf(spaceId).options.kotharMcp!.token
+  const { chatId } = await json(token, 'spawn_worker', { task: 'Fix the bug' })
+  await waitUntil(() => !!sessionOf(chatId))
+  writeFileSync(join(sessionOf(chatId).options.cwd, 'fix.txt'), 'fixed\n')
+  sessionOf(chatId).end('Fixed')
+  await waitUntil(() => chatIn(core, spaceId).workerBranches?.[chatId]?.state === 'review')
+
+  expect((await tool(token, 'review_worker', { workerId: chatId, action: 'merge' })).text).toMatch(/^Merged worker "Fix the bug"'s changes/)
+  const card = chatIn(core, spaceId).entries.findLast((e) => e.type === 'permission.requested')!
+  if (card.type !== 'permission.requested') throw new Error('no card')
+  expect(card.name).toBe(`Merge worker "Fix the bug"'s changes`)
+  expect(chatIn(core, spaceId).entries.find((e) => e.type === 'permission.resolved' && e.requestId === card.requestId)).toMatchObject({ allow: true, auto: true })
+  expect(events.find((e) => e.kind === 'permission' && e.detail?.startsWith('Merge worker'))).toMatchObject({ decision: 'allowed', rule: 'Switch: Allow all' })
+  expect(chatIn(core, spaceId).entries.some((e) => e.type === 'extension.note' && e.text.startsWith('Merged worker'))).toBe(true)
   sessionOf(spaceId).end('Done')
 })

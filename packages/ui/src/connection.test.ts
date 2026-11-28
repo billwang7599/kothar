@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { attachmentUrl, coreUrl, readToken } from './connection.ts'
+import { attachmentUrl, coreUrl, readToken, uploadUrl } from './connection.ts'
 
 const page = { protocol: 'http:', host: '127.0.0.1:5000' }
 
@@ -44,4 +44,9 @@ test("an attachment's URL is the core's HTTP address with the token, one escaped
   expect(attachmentUrl('wss://example.test/?token=t', 'ab12', '/x/a.pdf')).toBe(
     'https://example.test/chats/ab12/attachments/a.pdf?token=t',
   )
+})
+
+test("the upload URL is the core's HTTP address with the token, and an upload's id to delete it", () => {
+  expect(uploadUrl('ws://127.0.0.1:4317/?token=t')).toBe('http://127.0.0.1:4317/uploads?token=t')
+  expect(uploadUrl('wss://example.test/?token=t', 'ab'.repeat(16))).toBe(`https://example.test/uploads/${'ab'.repeat(16)}?token=t`)
 })

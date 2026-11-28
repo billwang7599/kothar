@@ -442,6 +442,8 @@ export type WorkFolder = PermissionSwitches & {
   editor?: string
   editorCommand?: string
   editors?: { id: string; name: string }[]
+  // The largest attachment in bytes, 0 for no limit; absent, DEFAULT_ATTACHMENT_LIMIT (attachmentLimitOf).
+  attachmentLimit?: number
 }
 
 // Layers nearest first: a chat, the chats above it, then the work folder's defaults.
@@ -580,6 +582,7 @@ export function settingProblem(setting: ExtensionSetting, value: unknown) {
   if (setting.type === 'boolean') return typeof value === 'boolean' ? undefined : 'must be on or off'
   if (setting.type === 'text') return typeof value === 'string' ? undefined : 'must be text'
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'must be a number'
+  if (setting.empty && value === setting.empty.value) return undefined
   if (setting.integer && !Number.isInteger(value)) return 'must be a whole number'
   if (setting.min !== undefined && value < setting.min) return `must be at least ${setting.min}`
   if (setting.max !== undefined && value > setting.max) return `must be at most ${setting.max}`
@@ -630,14 +633,47 @@ export const looksBinary = (bytes: Uint8Array) => bytes.subarray(0, BINARY_SNIFF
 
 export type NewChat = { name: string; engine?: string; folders?: string[]; files?: string[] }
 
-export const MAX_ATTACHMENT_BYTES = 20_000_000
-// Base64 grows by a third, which keeps 75 MB of files under the WebSocket's 100 MiB message limit.
-export const MAX_ATTACHMENTS_TOTAL_BYTES = 75_000_000
+// Under the largest attachment (attachmentLimitOf), past these sizes the composer warns that a file, or a message's
+// files together, are large: slow to send and costly in context if an agent reads them. Pictures past LARGE_ATTACHMENT_BYTES go to the
+// agent by path only, not as image input (turn.ts imagesFor).
+export const LARGE_ATTACHMENT_BYTES = 20_000_000
+export const LARGE_ATTACHMENTS_TOTAL_BYTES = 75_000_000
+// Past this, the composer asks before attaching a file at all (possible only with the limit past it, or none).
+export const HUGE_ATTACHMENT_BYTES = 500_000_000
+// Files up to this size ride the message itself as base64, while a message's inline files stay under
+// INLINE_ATTACHMENTS_TOTAL_BYTES (base64 grows by a third; the WebSocket takes 100 MiB a message). Bigger ones are
+// streamed to the core first (POST /uploads, uploads.ts) and the message names them by uploadId.
+export const INLINE_ATTACHMENT_BYTES = 10_000_000
+export const INLINE_ATTACHMENTS_TOTAL_BYTES = 50_000_000
+// The largest file the user lets a message carry (Settings → Work folder → Largest attachment), checked when a file is
+// attached, streamed (POST /uploads) and sent. Saved in settings.json as bytes, 0 for no limit; absent, the default.
+export const DEFAULT_ATTACHMENT_LIMIT = 200_000_000
+export const ATTACHMENT_LIMITS = [25_000_000, 100_000_000, 200_000_000, 500_000_000, 1_000_000_000, 0]
+/** The largest attachment allowed, in bytes, or undefined for no limit. */
+export const attachmentLimitOf = (settings: { attachmentLimit?: number }) => {
+  const bytes = settings.attachmentLimit ?? DEFAULT_ATTACHMENT_LIMIT
+  return bytes > 0 ? bytes : undefined
+}
+/** Why a file is refused for its size, or undefined if it fits under limit (undefined: no limit). */
+export const tooBigReason = (name: string, size: number, limit: number | undefined) =>
+  limit !== undefined && size > limit
+    ? `${name} is ${formatBytes(size)}. The largest attachment is ${formatBytes(limit)} (change it in Settings).`
+    : undefined
+
+/** A size in bytes as people read it: 512 B, 4.2 KB, 13 MB, 1.5 GB (powers of 1000). */
+export function formatBytes(bytes: number) {
+  if (bytes < 1000) return `${bytes} B`
+  const [value, unit] =
+    bytes < 1_000_000 ? [bytes / 1000, 'KB'] : bytes < 1_000_000_000 ? [bytes / 1_000_000, 'MB'] : [bytes / 1_000_000_000, 'GB']
+  return `${value < 10 ? Number(value.toFixed(1)) : Math.round(value)} ${unit}`
+}
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 
 export type { Attachment } from '@kothar/extension-api'
 
-export type Upload = { name: string; mimeType: string; base64: string }
+// A file sent with a message: its contents inline (base64), or the id of a file already streamed to the core
+// (uploadId, uploads.ts) with its size.
+export type Upload = { name: string; mimeType: string; base64: string } | { name: string; mimeType: string; uploadId: string; size: number }
 
 // A worker's final reply to its lead: which worker, and why its turn ended early, if it did. from: an extension's
 // report of its own background work instead (ExtensionHost.report), by the extension's id, which chatId is then too.
@@ -826,6 +862,8 @@ export type ClientMessage =
   // The master switch for community extensions (off by default): while it's off, none loads, whatever its own switch
   // says.
   | { type: 'communityExtensions.setEnabled'; enabled: boolean }
+  // The Marketplace's switch (on unless the user turned it off): while it's off, it can't be browsed or installed from.
+  | { type: 'marketplace.setEnabled'; enabled: boolean }
   // Stops every chat as quitting does, then starts Kothar again, so community extension changes apply.
   | { type: 'app.restart' }
   | { type: 'models.setList'; role: ModelRole; models: ModelRow[] }
@@ -871,6 +909,8 @@ export type ClientMessage =
   | { type: 'file.open'; chatId: string; path: string; line?: number; col?: number; in?: 'editor' | 'app' | 'terminal' }
   // 'system' for the system's default app, 'custom' for command, or one of WorkFolder.editors by id.
   | { type: 'editor.set'; editor: string; command?: string }
+  // Settings → Work folder → Largest attachment: bytes, 0 for no limit.
+  | { type: 'attachmentLimit.set'; bytes: number }
 
 // One message matching a search. snippet is one line around the match, which sits at match.start; nth counts the
 // earlier messages in the same chat that match too.
@@ -908,6 +948,8 @@ export type CoreMessage =
       themes: ThemeFile[]
       installed: InstalledItem[]
       communityExtensions: boolean
+      // The Marketplace's switch; absent from an older core, which has none (on).
+      marketplace?: boolean
       restart: RestartState
     }
   | { type: 'engine.updated'; engine: EngineInfo }
@@ -956,6 +998,7 @@ export type CoreMessage =
   | { type: 'extension.updated'; extension: ExtensionInfo }
   | { type: 'extension.removed'; extensionId: string }
   | { type: 'communityExtensions.updated'; enabled: boolean }
+  | { type: 'marketplace.updated'; enabled: boolean }
   | { type: 'restart.updated'; restart: RestartState }
   | { type: 'models.updated'; lists: ModelLists }
   | { type: 'setups.updated'; setups: Setup[] }

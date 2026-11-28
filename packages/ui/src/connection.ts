@@ -26,6 +26,57 @@ export function attachmentUrl(socketUrl: string, chatId: string, path: string) {
   return url.href
 }
 
+/** Where files are streamed ahead of their message (core uploads.ts): POST to it, or DELETE with the upload's id. */
+export function uploadUrl(socketUrl: string, id?: string) {
+  const url = new URL(socketUrl)
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
+  url.pathname = id ? `/uploads/${encodeURIComponent(id)}` : '/uploads'
+  return url.href
+}
+
+export type FileUpload = { done: Promise<{ id: string; size: number }>; abort: () => void }
+
+/** The core turned a file away and said why (413: past the largest attachment in Settings). */
+export class UploadRefused extends Error {}
+
+/**
+ * Streams a file to this window's core (POST /uploads), reporting progress (0 to 1). The browser reads the file from
+ * disk as it goes, so a big one is never held in memory. abort stops it; done then rejects.
+ */
+export function uploadFile(file: Blob, onProgress: (fraction: number) => void): FileUpload {
+  const request = new XMLHttpRequest()
+  const done = new Promise<{ id: string; size: number }>((resolve, reject) => {
+    request.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total)
+    request.onload = () => {
+      if (request.status === 413) {
+        let reason: unknown
+        try {
+          reason = JSON.parse(request.responseText).error
+        } catch {}
+        return reject(new UploadRefused(typeof reason === 'string' ? reason : 'Too big to attach'))
+      }
+      if (request.status !== 200) return reject(new Error(`Upload failed (${request.status})`))
+      try {
+        resolve(JSON.parse(request.responseText))
+      } catch (error) {
+        reject(error)
+      }
+    }
+    request.onerror = () => reject(new Error('Upload failed'))
+    request.onabort = () => reject(new Error('Upload stopped'))
+  })
+  request.open('POST', uploadUrl(coreUrl(import.meta.env, location, readToken('', sessionStorage))))
+  request.setRequestHeader('content-type', 'application/octet-stream')
+  request.send(file)
+  return { done, abort: () => request.abort() }
+}
+
+/** Tells the core a streamed file won't be sent after all, so it's deleted now rather than swept a day later. */
+export function dropUpload(id: string) {
+  const url = uploadUrl(coreUrl(import.meta.env, location, readToken('', sessionStorage)), id)
+  void fetch(url, { method: 'DELETE' }).catch(() => {})
+}
+
 /** Where a picture a chat's reply shows is served (core.chatImage); the core finds the path in the chat's places. */
 export function chatImageUrl(socketUrl: string, chatId: string, path: string) {
   const url = new URL(socketUrl)

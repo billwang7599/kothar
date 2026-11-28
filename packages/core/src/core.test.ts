@@ -16,10 +16,12 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type { LimitReached, Extension, ExtensionChat, ExtensionHost, ExtensionSession } from '@kothar/extension-api'
+import { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeAdapter, FAKE_DEFAULTS, FAKE_MODELS, FAKE_THINKING, type FakeStep } from './adapters/fake.ts'
 import { sandboxingMachine } from './adapters/test-machine.ts'
 import { BROWSER_LAUNCH_RULES, CHECKOUT_RULES, FOLDER_RULES, NO_COMMITS_RULES, openCore, WRITE_RULES, type Core } from './core.ts'
+import { FILE_RULES } from './instructions.ts'
 import { LOCK_FILE } from './garage-lock.ts'
 import { CUT_OFF_BY_RESTART } from './chat-lifecycle.ts'
 import { QUEUE_FILE } from './queue-store.ts'
@@ -32,8 +34,9 @@ import {
   ASK_FIRST_COMMANDS,
   bySpaceOrder,
   isUnread,
-  MAX_ATTACHMENT_BYTES,
-  MAX_ATTACHMENTS_TOTAL_BYTES,
+  DEFAULT_ATTACHMENT_LIMIT,
+  LARGE_ATTACHMENT_BYTES,
+  LARGE_ATTACHMENTS_TOTAL_BYTES,
   GLOBAL_CONTEXT,
   type AccountChoice,
   type Adapter,
@@ -46,6 +49,7 @@ import {
   type Machine,
   type SessionOptions,
   type ThinkingLevel,
+  type Upload,
 } from './shared.ts'
 import { cantPs, cantSandbox, cantWriteTmp, needs } from './test-env.ts'
 import { until as waitUntil } from './test-wait.ts'
@@ -188,7 +192,7 @@ const until = (check: () => boolean) => waitUntil(check, { tries: 200 })
 const withoutRules = (instructions = '') =>
   instructions
     .split('\n\n')
-    .filter((part) => !part.startsWith(WRITE_RULES) && !part.startsWith(FOLDER_RULES))
+    .filter((part) => !part.startsWith(WRITE_RULES) && !part.startsWith(FOLDER_RULES) && part !== FILE_RULES)
     .join('\n\n')
 const chatOf = (core: Core, id: string) => core.chats().find((c) => c.id === id)
 const statusOf = (core: Core, id: string) => core.chats().find((p) => p.id === id)?.status
@@ -926,11 +930,11 @@ describe('work folder', () => {
     expect(core.workFolder().canSandbox).toBe(false)
     core.handle({ type: 'engine.setEnabled', engine: 'fake', enabled: true }, () => {})
     const send = () => core.handle({ type: 'chat.send', chatId: 'main', text: 'hi' }, () => {})
-    expect(send).toThrow(/can't sandbox engines.*Edits anywhere/)
+    expect(send).toThrow(/can't sandbox engines.*Allow edits outside the work folder, asking first/)
     expect(entriesOf(core, 'main')).toEqual([])
     core.handle({ type: 'permission.setDefault', name: 'editAnywhere', enabled: true }, () => {})
     core.handle({ type: 'chat.setPermission', chatId: 'main', name: 'editAnywhere', enabled: false }, () => {})
-    expect(send).toThrow(/can't sandbox engines.*Edits anywhere/)
+    expect(send).toThrow(/can't sandbox engines.*Allow edits outside the work folder, asking first/)
     core.handle({ type: 'chat.setPermission', chatId: 'main', name: 'editAnywhere', enabled: true }, () => {})
     send()
     await until(() => statusOf(core, 'main') === 'idle')
@@ -2770,17 +2774,90 @@ describe('attachments', () => {
     expect(existsSync(join(attachmentsDir(t, 'main'), 'a.txt'))).toBe(true)
   })
 
-  it('refuses a file over the size cap, or files over the total for one message, saving nothing', () => {
+  it('takes files past the old size caps, inline or streamed ahead, moving a streamed file into place', async () => {
     const t = setup(textScript)
-    const huge = upload('huge.bin', 'application/octet-stream', Buffer.alloc(MAX_ATTACHMENT_BYTES + 1))
-    const send = (attachments: ReturnType<typeof upload>[]) =>
-      t.handle({ type: 'chat.send', chatId: 'main', text: 'hi', attachments })
-    expect(() => send([upload('ok.txt', 'text/plain', 'ok'), huge])).toThrow(`huge.bin is larger than`)
-    const big = upload('big.bin', 'application/octet-stream', Buffer.alloc(MAX_ATTACHMENT_BYTES))
-    const count = Math.floor(MAX_ATTACHMENTS_TOTAL_BYTES / MAX_ATTACHMENT_BYTES) + 1
-    expect(() => send(Array(count).fill(big))).toThrow('at most')
+    const big = upload('big.bin', 'application/octet-stream', Buffer.alloc(LARGE_ATTACHMENT_BYTES + 1, 1))
+    const streamed = await t.core.receiveUpload(Readable.from([Buffer.alloc(LARGE_ATTACHMENTS_TOTAL_BYTES + 1, 2)]))
+    expect(streamed.size).toBe(LARGE_ATTACHMENTS_TOTAL_BYTES + 1)
+    const staged = join(t.garage, 'uploads', streamed.id)
+    expect(existsSync(staged)).toBe(true)
+    t.handle({
+      type: 'chat.send',
+      chatId: 'main',
+      text: 'hi',
+      attachments: [big, { name: 'huge.bin', mimeType: '', uploadId: streamed.id, size: streamed.size }],
+    })
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    const dir = attachmentsDir(t, 'main')
+    expect(sentAttachments(t.core, 'main')[0]).toEqual([
+      { name: 'big.bin', path: join(dir, 'big.bin'), mimeType: 'application/octet-stream', size: LARGE_ATTACHMENT_BYTES + 1 },
+      { name: 'huge.bin', path: join(dir, 'huge.bin'), mimeType: 'application/octet-stream', size: LARGE_ATTACHMENTS_TOTAL_BYTES + 1 },
+    ])
+    expect(statSync(join(dir, 'huge.bin')).size).toBe(LARGE_ATTACHMENTS_TOTAL_BYTES + 1)
+    expect(existsSync(staged)).toBe(false)
+  })
+
+  it('refuses a streamed file that is no longer waiting, saving nothing, and drops one on request', async () => {
+    const t = setup(textScript)
+    const gone = { name: 'gone.bin', mimeType: 'application/octet-stream', uploadId: 'f'.repeat(32), size: 1 }
+    const send = (attachments: Upload[]) => t.handle({ type: 'chat.send', chatId: 'main', text: 'hi', attachments })
+    expect(() => send([upload('ok.txt', 'text/plain', 'ok'), gone])).toThrow('gone.bin is no longer waiting to be sent')
+    expect(() => send([{ ...gone, uploadId: '../../etc/passwd' }])).toThrow('no longer waiting')
+    expect(existsSync(attachmentsDir(t, 'main'))).toBe(false)
+    const dropped = await t.core.receiveUpload(Readable.from([Buffer.from('x')]))
+    t.core.dropUpload(dropped.id)
+    expect(() => send([{ ...gone, uploadId: dropped.id }])).toThrow('no longer waiting')
+    expect(t.calls).toEqual([])
+  })
+
+  it('refuses files past the largest attachment in Settings when sent, saving nothing; a change applies at once', async () => {
+    const t = setup(textScript)
+    const send = (attachments: Upload[]) => t.handle({ type: 'chat.send', chatId: 'main', text: 'hi', attachments })
+    // The default, 200 MB, refuses a bigger streamed file from its length alone.
+    await expect(t.core.receiveUpload(Readable.from([Buffer.from('x')]), DEFAULT_ATTACHMENT_LIMIT + 1)).rejects.toThrow(
+      'bigger than the largest attachment, 200 MB',
+    )
+    expect(t.core.workFolder().attachmentLimit).toBeUndefined()
+
+    // Staged under one limit, sent under a lower one: refused by name, inline or streamed, and nothing saved.
+    const staged = await t.core.receiveUpload(Readable.from([Buffer.alloc(2000)]))
+    t.handle({ type: 'attachmentLimit.set', bytes: 1000 })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).attachmentLimit).toBe(1000)
+    expect(t.messages.findLast((m) => m.type === 'workFolder.updated')).toMatchObject({ workFolder: { attachmentLimit: 1000 } })
+    expect(() => send([upload('ok.txt', 'text/plain', 'ok'), upload('big.bin', '', Buffer.alloc(1001))])).toThrow(
+      'big.bin is 1 KB. The largest attachment is 1 KB (change it in Settings).',
+    )
+    expect(() => send([{ name: 'clip.mov', mimeType: 'video/mp4', uploadId: staged.id, size: 2000 }])).toThrow('clip.mov is 2 KB')
+    await expect(t.core.receiveUpload(Readable.from([Buffer.alloc(600), Buffer.alloc(600)]))).rejects.toThrow('largest attachment, 1 KB')
     expect(existsSync(attachmentsDir(t, 'main'))).toBe(false)
     expect(t.calls).toEqual([])
+
+    // No limit: the same file goes, and a big stream is taken.
+    t.handle({ type: 'attachmentLimit.set', bytes: 0 })
+    send([{ name: 'clip.mov', mimeType: 'video/mp4', uploadId: staged.id, size: 2000 }])
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    expect(sentAttachments(t.core, 'main')[0]).toMatchObject([{ name: 'clip.mov', size: 2000 }])
+    const huge = await t.core.receiveUpload(Readable.from([Buffer.alloc(1_000_000)]), DEFAULT_ATTACHMENT_LIMIT * 10)
+    expect(huge.size).toBe(1_000_000)
+
+    // Back to the default: settings.json leaves it out again. A bad value is refused.
+    t.handle({ type: 'attachmentLimit.set', bytes: DEFAULT_ATTACHMENT_LIMIT })
+    expect(JSON.parse(readFileSync(join(t.garage, 'settings.json'), 'utf8')).attachmentLimit).toBeUndefined()
+    expect(() => t.handle({ type: 'attachmentLimit.set', bytes: -1 })).toThrow('whole number of bytes')
+  })
+
+  it('names a picture too big for image input by path only, still running the turn', async () => {
+    const t = setup(textScript)
+    const huge = await t.core.receiveUpload(Readable.from([Buffer.alloc(LARGE_ATTACHMENT_BYTES + 1)]))
+    t.handle({
+      type: 'chat.send',
+      chatId: 'main',
+      text: 'look',
+      attachments: [upload('shot.png', 'image/png', PNG), { name: 'huge.png', mimeType: 'image/png', uploadId: huge.id, size: huge.size }],
+    })
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    expect(t.calls[0]?.prompt).toContain(`- ${attachmentsDir(t, 'main')}/huge.png (image/png)`)
+    expect(t.calls[0]?.images).toEqual([{ mimeType: 'image/png', base64: PNG.toString('base64') }])
   })
 
   it('lists every file by path in the prompt and sends every supported image as image input', async () => {
@@ -3007,7 +3084,7 @@ describe('history', () => {
     expect(prompt.length).toBeLessThan(WINDOW_MAX_CHARS + 500)
     expect(prompt).not.toMatch(/^\d+\+\d+\|/m)
     expect(prompt.endsWith('New message from the user:\n\nnext')).toBe(true)
-    expect(t.calls[0]?.options.instructions).toBe([MAIN.instructions, rulesOf(t, 'home')].join('\n\n'))
+    expect(t.calls[0]?.options.instructions).toBe([MAIN.instructions, rulesOf(t, 'home'), FILE_RULES].join('\n\n'))
     expect(readFileSync(join(garage, 'chats', 'main', 'summaries.jsonl'), 'utf8')).toBe(
       '{"id":0,"n":1,"text":"old","at":"x"}\n',
     )
@@ -3037,7 +3114,7 @@ describe('history', () => {
     await until(() => statusOf(t.core, 'main') === 'idle')
     expect(t.calls[1]?.prompt).toBe('This is the conversation so far:\n\nVIEW OF 2\n\nNew message from the user:\n\ntwo')
     expect(t.calls[1]?.options.instructions).toBe(
-      [MAIN.instructions, rulesOf(t, 'home'), 'READ THE VIEW (false)'].join('\n\n'),
+      [MAIN.instructions, rulesOf(t, 'home'), FILE_RULES, 'READ THE VIEW (false)'].join('\n\n'),
     )
     expect(seen.at(-1)).toEqual({ chat: 'main', count: 2, tools: false })
 

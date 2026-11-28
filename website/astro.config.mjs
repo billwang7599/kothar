@@ -9,15 +9,25 @@ export default defineConfig({
   // Static files only: no SSR adapter, nothing Cloudflare-specific.
   output: 'static',
   trailingSlash: 'ignore',
+  // No dev toolbar over the pages while working on them.
+  devToolbar: { enabled: false },
   integrations: [
     starlight({
       title: 'Kothar',
       description: 'A desktop app for running coding agents.',
-      logo: { src: './src/assets/logo.svg', alt: 'Kothar' },
       favicon: '/favicon.svg',
+      head: [
+        { tag: 'link', attrs: { rel: 'icon', href: '/favicon.png', type: 'image/png', sizes: '64x64' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
+      ],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/billwang7599/kothar' }],
       editLink: { baseUrl: 'https://github.com/billwang7599/kothar/edit/main/website/' },
-      customCss: ['@fontsource-variable/inter', './src/styles/theme.css'],
+      customCss: [
+        '@fontsource-variable/archivo/wdth.css',
+        '@fontsource/ibm-plex-mono/400.css',
+        '@fontsource/ibm-plex-mono/600.css',
+        './src/styles/theme.css',
+      ],
       // The same tabs, GitHub link and Download pill as the Overview and Features pages.
       components: {
         Header: './src/components/StarlightHeader.astro',

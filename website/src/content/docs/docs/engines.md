@@ -47,9 +47,9 @@ listed model the engine offers.
 
 ## Engine tools
 
-**Settings → Engines** also lists each engine's built-in tools, with a switch for each. Tools Kothar has its own version
-of (subagents, background shells, skills, plan modes) and tools that act out of Kothar's sight (schedules,
-notifications, publishing) start off. Commands, edits, reads and searches stay on.
+**Settings → Engines** also lists each engine's built-in tools, with a switch for each. Tools in the **Replaced by
+Kothar** group, which Kothar has its own version of (subagents, background shells, skills, plan modes), and tools in
+**Outside Kothar**, which act out of its sight (schedules, notifications, publishing), start off. Commands, edits, reads and searches stay on.
 
 The **Engine tools** master switch, and one per engine, turn every built-in tool off, so the agent has only Kothar's
 tools. Your per-tool choices come back when you turn it on again.

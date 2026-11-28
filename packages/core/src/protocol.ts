@@ -127,6 +127,8 @@ export type ProtocolDeps = {
   settingsViewChanged: (extension: Extension) => void
   settingsViewAction: (extension: Extension, action: ExtensionAction) => Promise<void>
   setCommunityExtensions: (enabled: boolean) => void
+  marketplaceOn: () => boolean
+  setMarketplace: (enabled: boolean) => void
 
   // Marketplace
   marketplace: Pick<Marketplace, 'listing' | 'themes' | 'install' | 'installLocal' | 'uninstall'>
@@ -140,6 +142,7 @@ export type ProtocolDeps = {
   terminalFor: (chat: Chat, path: unknown) => Promise<void>
   fileLinks: ReturnType<typeof openFileLinks>
   setEditor: (editor: unknown, command?: unknown) => void
+  setAttachmentLimit: (bytes: unknown) => void
 }
 
 type Handlers = {
@@ -327,6 +330,7 @@ export function openProtocol(deps: ProtocolDeps) {
     'permission.setSshHosts': (message) => deps.setSshHostsDefault(message.hosts),
     'terminal.set': (message) => deps.setTerminal(message.terminal),
     'editor.set': (message) => deps.setEditor(message.editor, message.command),
+    'attachmentLimit.set': (message) => deps.setAttachmentLimit(message.bytes),
     'memory.set': (message) => deps.setMemory(optionalText(message.engine), optionalText(message.model)),
     'workers.set': (message) => deps.workers.set({ start: message.start, limit: message.limit, ownCheckouts: message.ownCheckouts }),
     'workers.prompt.set': (message) => deps.workers.setInstructions(typeof message.text === 'string' ? message.text : undefined),
@@ -373,6 +377,7 @@ export function openProtocol(deps: ProtocolDeps) {
       deps.settingsViewAction(deps.extensionFor(String(message.extensionId)), message.action),
     'extension.cancelInstall': (message) => deps.cancelInstall(deps.extensionFor(String(message.extensionId))),
     'communityExtensions.setEnabled': (message) => deps.setCommunityExtensions(message.enabled === true),
+    'marketplace.setEnabled': (message) => deps.setMarketplace(message.enabled === true),
 
     // Accounts
     'account.login': (message) =>
@@ -397,15 +402,19 @@ export function openProtocol(deps: ProtocolDeps) {
       accounts.remove(String(message.engine), String(message.accountId), reply),
 
     // Marketplace
-    'marketplace.list': (_message, reply) =>
-      void marketplace.listing().then(
+    // While the Marketplace is off it can't be browsed or installed from; uninstalling still works.
+    'marketplace.list': (_message, reply) => {
+      if (!deps.marketplaceOn()) return reply({ type: 'marketplace.catalog', error: MARKETPLACE_OFF })
+      return void marketplace.listing().then(
         (entries) => reply({ type: 'marketplace.catalog', entries }),
         (error) => reply({ type: 'marketplace.catalog', error: messageOf(error) }),
-      ),
+      )
+    },
     'themes.get': (_message, reply) => reply({ type: 'themes.updated', themes: marketplace.themes() }),
     'market.install': (message, reply) => {
       const { kind } = message
       const id = String(message.id)
+      if (!deps.marketplaceOn()) return reply({ type: 'market.installFailed', kind, id, error: MARKETPLACE_OFF })
       if (kind === 'extension' && deps.builtInIds.has(id)) {
         return reply({ type: 'market.installFailed', kind, id, error: `A built-in extension is already called "${id}"` })
       }
@@ -419,6 +428,7 @@ export function openProtocol(deps: ProtocolDeps) {
     },
     'market.installLocal': (message, reply) => {
       const path = String(message.path ?? '')
+      if (!deps.marketplaceOn()) return reply({ type: 'market.localFailed', path, error: MARKETPLACE_OFF })
       let result: ReturnType<typeof marketplace.installLocal>
       try {
         // A broken manifest is the marketplace's to explain.
@@ -492,3 +502,6 @@ const addable = (section: unknown) => {
   }
   return section
 }
+
+// What the Marketplace's handlers answer while its switch is off.
+const MARKETPLACE_OFF = 'The Marketplace is off. Turn it on in Settings → Community hub or in Get started.'

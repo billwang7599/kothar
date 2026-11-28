@@ -151,6 +151,11 @@ export function openPanels(deps: PanelDeps) {
     if (view.type === 'stack' || view.type === 'row' || view.type === 'card') {
       return { ...view, children: view.children.map((child) => withControls(extension, chat, child)) }
     }
+    if (view.type === 'section') {
+      const children = view.children.map((child) => withControls(extension, chat, child))
+      const buttons = view.buttons?.map((child) => withControls(extension, chat, child))
+      return { ...view, children, ...(buttons && { buttons }) }
+    }
     if (view.type === 'split') {
       return { ...view, side: withControls(extension, chat, view.side), main: withControls(extension, chat, view.main) }
     }

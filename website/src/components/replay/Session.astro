@@ -1,0 +1,83 @@
+---
+// One scripted session, rendered as plain HTML in its final state. Steps past the first `first` are marked
+// data-later: when JS runs and motion is welcome, the page hides them before its first paint, so a still frame shows
+// the session's start (the request and its first tool call), never an empty card. replay.ts then plays the rest once
+// when the card scrolls into view and stops on the final frame. Without JS, or with reduced motion, the final frame
+// shows from the start. Styles: replay.css.
+import './replay.css'
+import type { Line } from './sessions'
+
+interface Props {
+  lines: Line[]
+  /** How many steps the first frame shows. */
+  first?: number
+  /** Delay before this card starts, in ms, so the cards don't move in lockstep. */
+  offset?: number
+}
+const { lines, first = 2, offset = 0 } = Astro.props
+
+const parts = (s: string) => s.split('`').map((t, i) => ({ code: i % 2 === 1, t }))
+const seq = (l: Line) => {
+  if (l.k === 'tool') return `running:0 done:${l.ms ?? 900}`
+  if (l.k === 'ask') return 'waiting:0 pressed:2000 done:450'
+  return 'on:0'
+}
+---
+
+<div class="ses" data-replay data-offset={offset}>
+  <div class="ses-in">
+    {
+      lines.map((l, i) => (
+        <div class:list={['step', `k-${l.k}`]} data-step data-seq={seq(l)} data-later={i >= first ? '' : undefined}>
+          {l.k === 'user' && <p class="u">{l.text}</p>}
+          {l.k === 'task' && <p class="task">{l.text}</p>}
+          {l.k === 'text' && (
+            <p class="txt" data-stream>
+              {parts(l.text).map((p) => (p.code ? <code>{p.t}</code> : p.t))}
+            </p>
+          )}
+          {(l.k === 'tool' || l.k === 'ask') && (
+            <div class="tool">
+              <div class="row">
+                <b>{l.name}</b>
+                <span class="arg">{l.arg}</span>
+                <span class="st">
+                  <span class="s-run">running</span>
+                  <span class="s-wait">waiting</span>
+                  <span class="s-done">{l.k === 'ask' ? 'allowed' : 'done'}</span>
+                </span>
+              </div>
+              {l.k === 'tool' && l.out && <div class="out">{l.out}</div>}
+              {l.k === 'ask' && (
+                <div class="ask">
+                  <span>
+                    Allow <b>{l.name}</b>?
+                  </span>
+                  <span class="btns">
+                    <span class="approve">Approve</span>
+                    <span class="deny">Deny</span>
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          {l.k === 'worker' && (
+            <div class="wk">
+              <div class="wk-h">
+                <span>Worker reported</span>
+                <b>{l.title}</b>
+              </div>
+              <div class="wk-a">
+                <span class="stat">{l.stat}</span>
+                <span class="m">Merge</span>
+                <span>Squash</span>
+                <span>Keep</span>
+                <span>Discard</span>
+              </div>
+            </div>
+          )}
+        </div>
+      ))
+    }
+  </div>
+</div>

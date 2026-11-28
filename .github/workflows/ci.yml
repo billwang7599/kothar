@@ -16,7 +16,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-  # The website (website/, deployed by Cloudflare Pages) is its own npm project. Builds only when website/ changed;
+  # The website (website/, deployed by Cloudflare Workers Builds) is its own npm project. Builds only when website/ changed;
   # the build fails on a broken internal link (starlight-links-validator).
   website:
     runs-on: ubuntu-latest

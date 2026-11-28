@@ -159,7 +159,7 @@ describe('reduce', () => {
     expect(items(state)).toEqual([
       { kind: 'user', text: 'hi', entry: 0 },
       { kind: 'text', text: 'hello', entry: 2 },
-      { kind: 'tool', toolId: 't1', name: 'Bash', summary: 'ls', state: 'done', output: 'README.md' },
+      { kind: 'tool', toolId: 't1', name: 'Bash', summary: 'ls', input: { command: 'ls' }, state: 'done', output: 'README.md' },
       { kind: 'error', text: 'boom' },
     ])
   })
@@ -403,6 +403,7 @@ describe('reduce', () => {
         toolId: 't1',
         name: 'Bash',
         summary: 'ls',
+        input: {},
         state: 'waiting',
         output: '',
         permission: {
@@ -458,7 +459,7 @@ describe('reduce', () => {
     expect(items(state, 'a')).toEqual([])
     expect(items(state, 'b')).toEqual([
       { kind: 'user', text: 'hi', entry: 0 },
-      { kind: 'tool', toolId: 't1', name: 'Edit', summary: '/x', state: 'error', output: 'no such file' },
+      { kind: 'tool', toolId: 't1', name: 'Edit', summary: '/x', input: { file_path: '/x' }, state: 'error', output: 'no such file' },
     ])
   })
 

@@ -1,8 +1,9 @@
 # Kothar website
 
 The landing page (`/`) and the user docs (`/docs/`), built with [Astro](https://astro.build) and
-[Starlight](https://starlight.astro.build) as plain static files. No server code, analytics or trackers, and nothing
-loads from another site: the Inter font is bundled.
+[Starlight](https://starlight.astro.build) as plain static files. No server code, analytics or trackers, and the Archivo
+and IBM Plex Mono fonts are bundled. The only request to another site is the browser asking GitHub's public API for
+the star count on the Star on GitHub buttons; if it fails, the buttons just show no count.
 
 This folder is its own npm project. It isn't one of the repo's workspaces, so the root `npm ci`, typecheck, lint and
 tests don't touch it.
@@ -20,29 +21,28 @@ npm run build     # static site in dist/; fails on a broken internal link
 npm run preview   # serve dist/
 ```
 
-- Landing page: `src/pages/index.astro`. Screenshot slots are marked `PLACEHOLDER` in comments and on the page.
+- Pages: `src/pages/index.astro` (Overview) and `src/pages/features.astro` (Features).
 - Docs: `src/content/docs/docs/*.md`, one page per file. Add a new page to `sidebar` in `astro.config.mjs`.
-- Colours: `src/styles/theme.css` (docs) and the top of `index.astro` (landing), both from Kothar's Default theme
-  (`packages/ui/src/themes.tsx`).
+- Design: the look, tokens, motion and copy rules are in [DESIGN.md](DESIGN.md). Read it before changing a page.
+- Styles: `src/styles/site.css` for Overview and Features, `src/styles/theme.css` for the docs.
 - Write only what's true on `main`. Words: Kothar, space, chat, worker, extension, engine.
 
-## Cloudflare Pages
+## Deploying (Cloudflare Workers)
 
-Create a Pages project connected to `billwang7599/kothar` with these settings:
+The site is the Cloudflare Worker `kothar`, built by **Workers Builds** from `billwang7599/kothar` on every push. Its
+build settings (Workers & Pages → kothar → Settings → Build):
 
 | Setting | Value |
 |---|---|
-| Framework preset | Astro |
-| Production branch | `main` |
 | Root directory | `website` |
-| Build command | `npm ci && npm run build` |
-| Build output directory | `dist` |
-| Environment variable | `NODE_VERSION` = `24` |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Production branch | `main` |
 
-No adapter or Functions are needed: the output is static. `site` in `astro.config.mjs` is `https://kothar.sh`;
-canonical links and the sitemap use it, so change it if the domain ever changes.
+The root directory matters: the repo root has no `build` script and needs Node 26, so a build from there fails.
+`wrangler deploy` finds the Astro build in `dist/` and serves it as static assets; no adapter or server code is needed.
+Pull requests run the same build as a check (Workers Builds).
 
-Then, in the Pages project, open **Custom domains** and add `kothar.sh` (and `www.kothar.sh` if wanted). With the
-domain's nameservers on Cloudflare, Pages creates the DNS records itself.
-
-To skip builds when only the app changed, set **Build watch paths** to include `website/*`.
+Domains: `kothar.sh` and `www.kothar.sh` are custom domains under Workers & Pages → kothar → Domains & Routes, with the
+DNS on Cloudflare. `site` in `astro.config.mjs` is `https://kothar.sh`; canonical links and the sitemap use it, so
+change it if the domain ever changes.

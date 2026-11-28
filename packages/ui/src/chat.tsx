@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { draftOf, saveDraft } from './drafts.ts'
 import { AnimatePresence, m, useReducedMotion } from 'motion/react'
 import {
+  attachmentLimitOf,
   levelsOf,
   type ThinkingLevel,
   type ChatStatus,
@@ -43,7 +44,7 @@ import { ArchivedNote, EngineNote, QueuedMessages, Waits, WorkerBar, WorkerReque
 import { ChatHeader } from './chat/header.tsx'
 import { usageFor } from './usage.tsx'
 import { useRevealNumbers } from './chat/reveal-numbers.ts'
-import { useAttachments, useFileDrop } from './chat/use-attachments.ts'
+import { uploadOf, useAttachments, useFileDrop } from './chat/use-attachments.ts'
 import { Composer } from './chat/composer.tsx'
 import { Dots, Row } from './chat/parts.tsx'
 import { ItemView, StreamingText } from './chat/transcript-items.tsx'
@@ -128,7 +129,7 @@ const entryOf = (item: Item) => ('entry' in item && item.entry !== undefined ? [
 
 export function Chat(props: ChatProps) {
   const { chat, folder, engines, accounts, connected, send, openSettings, workFolder } = props
-  const { pending, attach, unattach, restore } = useAttachments(props.notify)
+  const { pending, attach, unattach, sent, restore } = useAttachments(props.notify, attachmentLimitOf(workFolder))
   // An undone message comes back to the composer: its text before anything already typed, its files with the others.
   // The composer reads its text from the draft as it mounts, so it mounts again.
   const restored = chat.restored
@@ -300,12 +301,17 @@ export function Chat(props: ChatProps) {
   const { dragging, dropHandlers } = useFileDrop(canAttach, attach)
   const submit = (text: string, steer = false) => {
     if (!canAttach || (text.trim() === '' && !pending.length)) return false
-    const attachments = pending.map(({ name, mimeType, base64 }) => ({ name, mimeType, base64 }))
+    const still = pending.find((p) => !uploadOf(p))
+    if (still) {
+      props.notify(`${still.name} is still uploading. Send once it's done.`)
+      return false
+    }
+    const attachments = pending.flatMap((p) => uploadOf(p) ?? [])
     const steering = steer && steers
     send({ type: 'chat.send', chatId: chat.id, text, ...(attachments.length && { attachments }), ...(steering && { steer: true }) })
     following.current = true
     toBottom()
-    unattach(pending)
+    sent(pending)
     return true
   }
   const interrupt = async () => {
@@ -346,6 +352,7 @@ export function Chat(props: ChatProps) {
     detailViews: props.detailViews,
     noteViews: props.extensionUi?.chatId === chat.id ? props.extensionUi.noteViews : undefined,
     ...(viewOnly && space !== chat && { space, select: props.select }),
+    chatName: (chatId: string) => props.chats.find((c) => c.id === chatId)?.name ?? chatId,
     openChat: (chatId: string) => {
       const select = props.select
       return select && props.chats.some((c) => c.id === chatId) ? () => select(chatId) : undefined

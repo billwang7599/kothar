@@ -35,8 +35,8 @@ chat's tab is for that chat only.
 
 | Switch | On means |
 |---|---|
-| **Allow all** | No sandbox, and every request is approved without asking, logins and keys included. Only Read only folders stay read only. |
-| **Allow edits outside the work folder** | No sandbox. Edits outside the work folder ask you first, instead of being denied. |
+| **Allow all** | No sandbox, and every request is approved without asking, logins and keys included. So are an agent's merges and discards of a worker's changes and its `forget`. Only Read only folders stay read only. |
+| **Allow edits outside the work folder, asking first** | No sandbox. Edits outside the work folder ask you first, instead of being denied. |
 | **Run commands without asking** | Shell commands run without asking, while the chat is sandboxed. |
 | **Run network commands without asking** | Commands that publish or reach the network (such as `git push`, `curl`, `ssh`) run without asking too. |
 | **Read anywhere without asking** | Reads outside the work folder, and commands that only read, run without asking. Logins and keys still ask. |

@@ -7,7 +7,8 @@ import type { ExtensionSetting } from '@kothar/extension-api'
 import { Button, ErrorText, GROUP, MOTION, Select, Switch, useReturnFocus } from '../controls.tsx'
 import { UsesList } from '../marketplace.tsx'
 import { ExtensionViewer } from '../extension-view.tsx'
-import { linked, SettingRow } from './rows.tsx'
+import { Advanced, linked, SettingRow } from './rows.tsx'
+import { settingAnchor } from './search.ts'
 import type { Page, PageProps } from './types.ts'
 
 export function ExtensionsPage({ extensions: all, connected, send }: PageProps) {
@@ -26,10 +27,11 @@ export function ExtensionsPage({ extensions: all, connected, send }: PageProps) 
     setSetupShown(false)
   }
   return (
-    <div className={GROUP}>
+    <div id="section-built-in-extensions" className={`${GROUP} scroll-mt-12`}>
       {extensions.map((m) => (
         <SettingRow
           key={m.id}
+          id={settingAnchor('extension', m.id)}
           name={m.name}
           description={
             <>
@@ -114,7 +116,7 @@ function ExtensionSetupDialog({ open, extension, connected, send, close }: Setup
                 {...MOTION.pop}
               >
                 <div className="flex flex-col gap-4">
-                  <AlertDialog.Title className="text-[16px] font-semibold">{setupTitle(extension)}</AlertDialog.Title>
+                  <AlertDialog.Title className="display text-[16px] leading-[1.2]">{setupTitle(extension)}</AlertDialog.Title>
                   {extension.setup?.description && <p className="text-sm text-muted">{linked(extension.setup.description)}</p>}
                 </div>
                 <SetupStatus extension={extension} />
@@ -205,8 +207,10 @@ function ExtensionPage({ extension, connected, send }: SetupProps) {
   const shownOff = !!extension.settingsView && !community
   const uses = community?.uses ?? extension.uses
   return (
+    <>
     <div className={GROUP}>
       <SettingRow
+        id={settingAnchor('extension-page', extension.id)}
         name={extension.name}
         description={
           <>
@@ -235,6 +239,7 @@ function ExtensionPage({ extension, connected, send }: SetupProps) {
       {enabled && extension.settings.map((setting) => (
         <ExtensionSettingRow
           key={setting.key}
+          id={settingAnchor('extension', extension.id, setting.key)}
           setting={setting}
           value={extension.values[setting.key]}
           disabled={!connected || extension.blockedSettings?.[setting.key] !== undefined}
@@ -243,11 +248,16 @@ function ExtensionPage({ extension, connected, send }: SetupProps) {
         />
       ))}
       {extension.settingsView && <ExtensionSettingsView extension={extension} connected={connected} send={send} />}
-      {extension.prompts?.length ? <PromptsSection extension={extension} connected={connected} send={send} /> : null}
       {!enabled && !shownOff && (
         <p className="py-12 text-sm text-faint">Turn {extension.name} on to change its settings.</p>
       )}
     </div>
+    {extension.prompts?.length ? (
+      <Advanced page={`extension:${extension.id}`}>
+        <PromptsSection extension={extension} connected={connected} send={send} />
+      </Advanced>
+    ) : null}
+    </>
   )
 }
 
@@ -262,7 +272,7 @@ const WHERE: Record<PromptInfo['where'], string> = {
 // change, with Reset to default. Each has an id (prompt-<extension>-<prompt>) that the Inspector's Edit links scroll to.
 function PromptsSection({ extension, connected, send }: SetupProps) {
   return (
-    <section aria-label="Prompts" className="flex flex-col py-12 not-first:border-t">
+    <section aria-label="Prompts" className="flex flex-col">
       <h3 className="text-[13px] font-semibold">Prompts</h3>
       <p className="pb-4 text-sm text-muted">
         What {extension.name} tells agents. Your edits are sent instead of the defaults; the Inspector shows each where
@@ -339,6 +349,8 @@ export function PromptRow({ prompt, anchor, disabled, save }: { prompt: PromptIn
 }
 
 type ExtensionSettingProps = {
+  /** The row's anchor, for search. */
+  id?: string
   setting: ExtensionSetting
   value: string | number | boolean | undefined
   disabled: boolean
@@ -346,6 +358,8 @@ type ExtensionSettingProps = {
   blocked?: string
   save: (value: string | number | boolean) => void
 }
+
+const HAS_LINK = /https:\/\//
 
 // Why an extension, or one of its settings, can't be used now, such as "Needs the Browser extension".
 function BlockedLine({ text }: { text: string }) {
@@ -356,20 +370,27 @@ function BlockedLine({ text }: { text: string }) {
   )
 }
 
-export function ExtensionSettingRow({ setting, value, disabled, blocked, save }: ExtensionSettingProps) {
-  const [draft, setDraft] = useState(String(value))
+// A number setting's box: empty when the value is the one an empty box stands for (ExtensionSetting's empty).
+const shown = (setting: ExtensionSetting, value: ExtensionSettingProps['value']) =>
+  setting.type === 'number' && setting.empty && value === setting.empty.value ? '' : String(value)
+
+export function ExtensionSettingRow({ id, setting, value, disabled, blocked, save }: ExtensionSettingProps) {
+  const [draft, setDraft] = useState(shown(setting, value))
   const [was, setWas] = useState(value)
   if (value !== was) {
     setWas(value)
-    setDraft(String(value))
+    setDraft(shown(setting, value))
   }
   const row = (control: ReactNode, below?: ReactNode) => (
     <SettingRow
+      id={id}
       name={setting.label}
+      // An explanation shows on hover; one with a link stays in the row, so the link can be clicked.
+      hint={setting.description && !HAS_LINK.test(setting.description) ? setting.description : undefined}
       description={
-        (setting.description || blocked) && (
+        ((setting.description && HAS_LINK.test(setting.description)) || blocked) && (
           <>
-            {setting.description && linked(setting.description)}
+            {setting.description && HAS_LINK.test(setting.description) && linked(setting.description)}
             {blocked && <BlockedLine text={blocked} />}
           </>
         )
@@ -424,15 +445,16 @@ export function ExtensionSettingRow({ setting, value, disabled, blocked, save }:
     )
   }
   const commit = () => {
-    const next = Number(draft)
-    if (draft.trim() && !settingProblem(setting, next) && next !== value) save(next)
-    else setDraft(String(value))
+    const next = draft.trim() ? Number(draft) : setting.empty?.value
+    if (next !== undefined && !settingProblem(setting, next) && next !== value) save(next)
+    else setDraft(shown(setting, value))
   }
   return row(
     <input
-      className="w-72"
+      className={setting.empty ? 'w-120' : 'w-72'}
       aria-label={setting.label}
       type="number"
+      placeholder={setting.empty?.placeholder}
       min={setting.min}
       max={setting.max}
       step={setting.integer ? 1 : 'any'}

@@ -1,64 +1,118 @@
-/* The Wiki (Starlight), matched to the Overview and Features pages: a neutral palette, the blue accent, the system
-   font and a frosted header. Dark is Starlight's default; light overrides it. */
+/* The Wiki (Starlight) in the homepage's specimen look: paper and ink, the muted blue, Archivo and IBM Plex Mono.
+   Light is paper; dark is ink, with the muted blue as its accent. Starlight's default is dark, so :root holds dark
+   and [data-theme='light'] overrides it. Tokens and their hex values: website/DESIGN.md. */
 :root {
-  --sl-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter Variable', system-ui, sans-serif;
-  --sl-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --sl-nav-height: 52px;
+  --sl-font: 'Archivo Variable', system-ui, sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --sl-nav-height: 56px;
 
-  --sl-color-accent-low: #15233f;
-  --sl-color-accent: #5b8def;
-  --sl-color-accent-high: #c9dafb;
-  --sl-color-white: #f5f5f7;
-  --sl-color-gray-1: #e8e8ed;
-  --sl-color-gray-2: #c7c7cc;
-  --sl-color-gray-3: #a1a1a6;
-  --sl-color-gray-4: #6e6e73;
-  --sl-color-gray-5: #2c2c2e;
-  --sl-color-gray-6: #161618;
-  --sl-color-black: #0a0a0b;
-  --kothar-nav: rgb(10 10 11 / 0.66);
+  /* Dark: ink */
+  --sl-color-accent-low: #1d2a45;
+  --sl-color-accent: #8a9dc4;
+  --sl-color-accent-high: #d3dbec;
+  --sl-color-white: #edece6;
+  --sl-color-gray-1: #dcdbd5;
+  --sl-color-gray-2: #c9c8c2;
+  --sl-color-gray-3: #a9a8a2;
+  --sl-color-gray-4: #7b7d84;
+  --sl-color-gray-5: #2c2f38;
+  --sl-color-gray-6: #181b22;
+  --sl-color-black: #0e1016;
+  --kothar-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :root[data-theme='light'] {
-  --sl-color-accent-low: #dbe6fb;
+  /* Light: paper */
+  --sl-color-accent-low: #d3dbec;
   --sl-color-accent: #2563d9;
   --sl-color-accent-high: #163d87;
-  --sl-color-white: #1d1d1f;
-  --sl-color-gray-1: #2c2c2e;
-  --sl-color-gray-2: #48484a;
-  --sl-color-gray-3: #6e6e73;
-  --sl-color-gray-4: #86868b;
-  --sl-color-gray-5: #d2d2d7;
-  --sl-color-gray-6: #f2f2f5;
-  --sl-color-gray-7: #f7f7f9;
-  --sl-color-black: #fbfbfd;
-  --kothar-nav: rgb(251 251 253 / 0.72);
+  --sl-color-white: #0e1016;
+  --sl-color-gray-1: #1d2029;
+  --sl-color-gray-2: #2b2f39;
+  --sl-color-gray-3: #4a4f5c;
+  --sl-color-gray-4: #6b6f78;
+  --sl-color-gray-5: #cfcdc4;
+  --sl-color-gray-6: #e2e0d8;
+  --sl-color-gray-7: #f7f6f2;
+  --sl-color-black: #edece6;
+  --sl-color-bg-nav: #edece6;
 }
 
-/* Frosted header, as on the other pages. */
-header.header {
-  background-color: var(--kothar-nav);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid var(--sl-color-hairline);
+/* No rubber-band, nothing sideways, and in-page jumps glide (the browser's own smooth scroll) unless motion is off. */
+html,
+body {
+  overscroll-behavior: none;
+  overflow-x: clip;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 body {
   -webkit-font-smoothing: antialiased;
-  letter-spacing: -0.006em;
 }
 
-.sl-markdown-content :is(h1, h2, h3) {
-  letter-spacing: -0.02em;
+/* Header: flat, with a hairline, like the marketing pages' nav once scrolled. */
+header.header {
+  background-color: var(--sl-color-black);
+  border-bottom: 1px solid var(--sl-color-gray-5);
 }
 
-/* Site title as on the other pages: a small mark and the name in the text colour. */
-header.header .site-title {
-  font-size: 16px;
-  color: var(--sl-color-white);
-  gap: 8px;
+/* Headings: Archivo, heavy and slightly wide; the page title in capitals like the homepage's. */
+.sl-markdown-content :is(h1, h2, h3, h4) {
+  font-weight: 800;
+  font-stretch: 104%;
+  letter-spacing: -0.01em;
 }
-header.header .site-title img {
-  height: 22px;
-  width: auto;
+main h1#_top {
+  font-weight: 900;
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+/* Sidebar group labels and the table of contents' title: mono capitals, like the homepage's [labels]. */
+.sidebar-content summary .group-label .large,
+starlight-toc h2,
+mobile-starlight-toc .toggle {
+  font-family: var(--sl-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+
+/* Links and controls ease into their hover state. */
+.sl-markdown-content a,
+.sidebar-content a,
+starlight-toc a,
+.pagination-links a {
+  transition:
+    color 200ms var(--kothar-ease),
+    background-color 200ms var(--kothar-ease),
+    border-color 200ms var(--kothar-ease),
+    text-decoration-thickness 200ms var(--kothar-ease);
+}
+.sl-markdown-content a:hover {
+  text-decoration-thickness: 2px;
+}
+/* Square corners, like the homepage's buttons and frames. */
+.pagination-links a,
+.sl-markdown-content :is(pre, .expressive-code .frame, aside, img) {
+  border-radius: 0;
+}
+:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+  }
 }

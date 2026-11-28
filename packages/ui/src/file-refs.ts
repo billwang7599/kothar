@@ -70,3 +70,25 @@ export function splitByRefs(text: string): (string | FileRef)[] {
   if (at < text.length) parts.push(text.slice(at))
   return parts
 }
+
+/** The file a link points at (`[report](</abs/path>)`, ~/…, file://… or a relative path), or null for a web
+ * address, an anchor or anything else. The parser %-encodes the destination, so it's decoded here. */
+export function localLinkOf(href: string): Omit<FileRef, 'start' | 'end'> | null {
+  let raw = href.trim()
+  if (!raw || raw.startsWith('#') || raw.startsWith('?') || raw.startsWith('//')) return null
+  if (/^file:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw)
+      if (url.host) return null
+      raw = url.pathname
+    } catch {
+      return null
+    }
+  } else if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return null
+  try {
+    raw = decodeURIComponent(raw)
+  } catch {
+    // Kept as written.
+  }
+  return codeRef(raw)
+}

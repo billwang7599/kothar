@@ -91,7 +91,7 @@ prices, so treat them as a guide. Codex reports no cost.
 3. Try it in Kothar with **Install from folder…** in the Marketplace window (**Browse…** in **Settings → Community
    hub**).
 4. To publish, follow the
-   [author guide](https://github.com/billwang7599/kothar-marketplace#submit-a-theme-or-extension).
+   [author guide](https://github.com/billwang7599/kothar-marketplace#submit-a-theme-or-mod).
 
 The manifest lists what the extension uses, such as `panels`, `commands`, `settings`, `tools`, `events`, `readChats`,
 `run` or `sendMessages`. Kothar shows that list before install and refuses to start an extension that does more.

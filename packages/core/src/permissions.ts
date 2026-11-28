@@ -50,7 +50,7 @@ export const verdictOf = (request: PermissionRequest, context: PermissionContext
 // The switches as the Context panel names them.
 const SWITCH_NAMES: Record<PermissionSwitch, string> = {
   allowAll: 'Allow all',
-  editAnywhere: 'Edits anywhere',
+  editAnywhere: 'Allow edits outside the work folder, asking first',
   autoRead: 'Read anywhere without asking',
   autoFetch: 'Fetch web pages without asking',
   autoRunCommands: 'Run commands without asking',

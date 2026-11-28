@@ -35,7 +35,8 @@ A worker can also read its lead's memory, as it was when the worker started.
 ## Forget something
 
 Ask an agent to forget something, such as "forget the CS343 thing". Its `forget` tool shows a card listing each
-message it would remove. Click **Forget** or **Cancel**.
+message it would remove. Click **Forget** or **Cancel**. With **Allow all** on for the chat, the card is approved
+without asking.
 
 Forget removes those messages for good: from the log on disk, their attachments and the chat's memory. Only the chat's
 own finished turns can go. A line such as "2 messages forgotten" marks the gap.

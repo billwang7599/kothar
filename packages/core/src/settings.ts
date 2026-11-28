@@ -1,10 +1,11 @@
 // Kothar's own settings in settings.json: which engines are on, the model for summaries, the work folder, the
-// terminal and the editor files open with, and the default permission switches. Extensions' own settings aren't here.
+// terminal and the editor files open with, the largest attachment, and the default permission switches. Extensions'
+// own settings aren't here.
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { Settings } from './chat-store.ts'
 import type { openModels } from './models.ts'
-import { PERMISSION_SWITCHES, type Adapter, type CoreMessage, type EngineInfo, type PermissionSwitch, type WorkFolder } from './shared.ts'
+import { DEFAULT_ATTACHMENT_LIMIT, PERMISSION_SWITCHES, type Adapter, type CoreMessage, type EngineInfo, type PermissionSwitch, type WorkFolder } from './shared.ts'
 import { AUTOMATIC, MAC_TERMINALS } from './terminal.ts'
 import { CUSTOM_EDITOR, EDITORS, installedEditors, splitCommand, SYSTEM_EDITOR } from './editors.ts'
 import { within } from './util.ts'
@@ -48,6 +49,7 @@ export function openAppSettings(deps: SettingsDeps) {
       PERMISSION_SWITCHES.flatMap((name) => (settings[name] === undefined ? [] : [[name, settings[name]]])),
     ),
     ...(settings.sshHosts?.length && { sshHosts: settings.sshHosts }),
+    ...(settings.attachmentLimit !== undefined && { attachmentLimit: settings.attachmentLimit }),
   })
   const setEngineEnabled = (engine: string, enabled: boolean) => {
     checkEngine(engine)
@@ -133,7 +135,28 @@ export function openAppSettings(deps: SettingsDeps) {
     broadcast({ type: 'workFolder.updated', workFolder: workFolder() })
   }
 
-  return { workFolder, setWorkFolder, setEngineEnabled, setMemory, setPermissionDefault, setSshHostsDefault, setTerminal, setEditor }
+  // The largest attachment: any whole number of bytes, 0 for no limit; the default isn't saved.
+  const setAttachmentLimit = (rawBytes: unknown) => {
+    if (typeof rawBytes !== 'number' || !Number.isSafeInteger(rawBytes) || rawBytes < 0) {
+      throw new Error('The largest attachment must be a whole number of bytes, or 0 for no limit')
+    }
+    if (rawBytes === DEFAULT_ATTACHMENT_LIMIT) delete settings.attachmentLimit
+    else settings.attachmentLimit = rawBytes
+    saveSettings()
+    broadcast({ type: 'workFolder.updated', workFolder: workFolder() })
+  }
+
+  return {
+    workFolder,
+    setWorkFolder,
+    setEngineEnabled,
+    setMemory,
+    setPermissionDefault,
+    setSshHostsDefault,
+    setTerminal,
+    setEditor,
+    setAttachmentLimit,
+  }
 }
 
 export const checkSwitch = (name: unknown) => {

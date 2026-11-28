@@ -26,16 +26,18 @@ import { instructionSections, type InstructionParts, type InstructionSection } f
 import { scrubForgetCall } from './message-edits.ts'
 import { continuationParts, messageEntries, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
 import type { openModels } from './models.ts'
+import type { Uploads } from './uploads.ts'
 import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, trustableSshHost, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
 import { runningChildren } from './workers.ts'
 import { saveQueue } from './queue-store.ts'
 import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
 import {
+  allowsAll,
   editsAnywhere,
   IMAGE_TYPES,
-  MAX_ATTACHMENT_BYTES,
-  MAX_ATTACHMENTS_TOTAL_BYTES,
+  LARGE_ATTACHMENT_BYTES,
+  tooBigReason,
   type Adapter,
   type Answers,
   type Attachment,
@@ -50,7 +52,6 @@ import {
   type QueuedMessage,
   type Session,
   type SessionOptions,
-  type Upload,
   type SshHost,
   type Usage,
 } from './shared.ts'
@@ -113,6 +114,10 @@ export type TurnDeps = {
   workDirOf: (chat: Chat) => string
   sandboxIn: (dir: string) => Sandbox | undefined
   attachmentsDirOf: (chat: Chat) => string
+  /** Files the window streamed ahead of their message (uploads.ts). */
+  uploads: Pick<Uploads, 'sizeOf' | 'take'>
+  /** The largest attachment in Settings, in bytes; undefined for no limit. */
+  attachmentLimit: () => number | undefined
   // chat: the chat the turn is for; a worker with its own checkouts gets its own worktree (worker-checkouts.ts).
   checkoutOf: (space: Chat, folder: string, workDir: string, sandboxed: boolean, chat: Chat) => Promise<Checkout>
   // A worker with its own checkouts is reporting: its changes as lines for the lead, if it made any. Undefined (not a
@@ -541,7 +546,7 @@ export function openTurns(deps: TurnDeps) {
   const sshHostsAsked = new Map<string, SshHost>()
   // Permission requests an extension raised (host.requestPermission), by id: answered here, not by the engine.
   const extensionAsks = new Map<string, { chat: Chat; resolve: (verdict: RuledVerdict) => void }>()
-  // Requests only the user may answer (AskOptions.userOnly), by id, until they're raised.
+  // Requests only the user (or Allow all) may answer (AskOptions.userOnly), by id, until they're raised.
   const userOnly = new Set<string>()
   // Each chat's live session events, for an extension's request to go through as an engine's does.
   const liveEvents = new WeakMap<Chat, ReturnType<typeof sessionEvents>>()
@@ -752,7 +757,7 @@ export function openTurns(deps: TurnDeps) {
     const adapter = adapterFor(roleRun?.engine ?? chat.info.engine)!
     const editAnywhere = editsAnywhere(...switchesOf(chat))
     if (!machine.canSandbox && !editAnywhere && UNSANDBOXED_NEEDS_EDIT_ANYWHERE) {
-      throw new Error("Kothar can't sandbox engines on this system yet. Turn on Edits anywhere in this chat's Context panel, or as the default in Settings → Work folder, to run it unsandboxed.")
+      throw new Error("Kothar can't sandbox engines on this system yet. Turn on Allow edits outside the work folder, asking first, in this chat's General tab, or as the default in Settings → Permissions, to run it unsandboxed.")
     }
     return { run, adapter, editAnywhere, roleUsed: roleRun !== undefined }
   }
@@ -974,8 +979,12 @@ export function openTurns(deps: TurnDeps) {
         recordPermission(chat, event, verdict.allow, verdict.rule, verdict.message)
         respondTo(ref.session, requestId, verdict)
       }
-      // Asked of the user alone (forget): no rule, switch or extension answers it.
-      if (userOnly.delete(requestId)) return settle(undefined)
+      // Asked of the user alone (forget, review_worker): no rule or extension answers it. Allow all does, since it
+      // approves everything; in a read-only turn the card still asks.
+      if (userOnly.delete(requestId)) {
+        const { switches, readOnly } = permissionsOf()
+        return settle(!readOnly && allowsAll(...switches) ? { allow: true, rule: ALLOW_ALL_RULE } : undefined)
+      }
       const own = decide(event, permissionsOf())
       // The core's denials stand, and so does Allow all; otherwise an extension's policy goes first.
       if (own?.allow === false || own?.rule === ALLOW_ALL_RULE) return settle(own)
@@ -992,7 +1001,8 @@ export function openTurns(deps: TurnDeps) {
     // An extension's request (host.requestPermission), raised in this session as if the engine had: the core's rules,
     // extensions' policies, else the user's card, and the Activity record. changes: what it does may change something,
     // so a read-only turn refuses it.
-    // ask.userOnly: only the user answers it, read-only turn or not (forget); requestId: the caller's own id for it.
+    // ask.userOnly: only the user answers it, or Allow all outside a read-only turn (forget, review_worker); a read-only
+    // turn doesn't refuse it. requestId: the caller's own id for it.
     const ask = (request: Omit<PermissionRequest, 'type' | 'requestId'>, changes: boolean, options: AskOptions = {}) =>
       new Promise<RuledVerdict>((resolve) => {
         const requestId = options.requestId ?? `x-${randomBytes(6).toString('hex')}`
@@ -1010,10 +1020,12 @@ export function openTurns(deps: TurnDeps) {
     return { ref, emit, ask }
   }
 
+  // Pictures past LARGE_ATTACHMENT_BYTES aren't read in: no engine's API takes one that big, and the prompt names every
+  // file by path anyway (memory.ts withAttachments), so the agent can still open it with its own tools.
   const imagesFor = (adapter: Adapter, attachments: Attachment[]) =>
     adapter.imageInput
       ? attachments
-          .filter((a) => IMAGE_TYPES.includes(a.mimeType))
+          .filter((a) => IMAGE_TYPES.includes(a.mimeType) && a.size <= LARGE_ATTACHMENT_BYTES)
           .map((a) => ({ mimeType: a.mimeType, base64: readFileSync(a.path).toString('base64') }))
       : []
 
@@ -1124,33 +1136,42 @@ export function openTurns(deps: TurnDeps) {
       const parentId = chat.info.parentId
       deps.activity?.emit(parentId, () => ({
         kind: 'worker',
-        title: `${chat.info.name} waits to start: this chat already runs as many workers as Settings → Workers allows`,
+        title: `${chat.info.name} waits to start: this chat already runs as many workers as Settings → Agents → Workers allows`,
       }))
     }
   }
 
   const sendMessage = (chat: Chat, rawText: unknown, uploads: unknown, steering = false) => {
     if (uploads !== undefined && !Array.isArray(uploads)) throw new Error('Attachments must be a list')
-    const files = (uploads ?? []).map((upload: Partial<Upload>) => {
-      const { name, mimeType, base64 } = upload ?? {}
-      if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof base64 !== 'string') {
+    // Checked in full before anything is saved, each file against the largest attachment in Settings. A file streamed
+    // ahead (uploadId) is moved into place, never read.
+    const files = (uploads ?? []).map((upload: Record<string, unknown> | undefined) => {
+      const { name, mimeType, base64, uploadId } = upload ?? {}
+      if (typeof name !== 'string' || typeof mimeType !== 'string' || (typeof base64 !== 'string' && typeof uploadId !== 'string')) {
         throw new Error('Each attachment needs a name, a type and its contents')
       }
-      const bytes = Buffer.from(base64, 'base64')
-      if (bytes.length > MAX_ATTACHMENT_BYTES) {
-        throw new Error(`${name} is larger than ${MAX_ATTACHMENT_BYTES / 1_000_000} MB, the most one attachment can be`)
+      const type = mimeType || 'application/octet-stream'
+      const limit = deps.attachmentLimit()
+      const checkSize = (size: number) => {
+        const tooBig = tooBigReason(name, size, limit)
+        if (tooBig) throw new Error(tooBig)
       }
-      return { name, mimeType: mimeType || 'application/octet-stream', bytes }
+      if (typeof base64 === 'string') {
+        const bytes = Buffer.from(base64, 'base64')
+        checkSize(bytes.length)
+        return { name, mimeType: type, size: bytes.length, save: (path: string) => writeFileSync(path, bytes, { flag: 'wx' }) }
+      }
+      const size = deps.uploads.sizeOf(uploadId)
+      if (size === undefined) throw new Error(`${name} is no longer waiting to be sent. Attach it again`)
+      checkSize(size)
+      return { name, mimeType: type, size, save: (path: string) => deps.uploads.take(uploadId, path) }
     })
-    if (files.reduce((total, file) => total + file.bytes.length, 0) > MAX_ATTACHMENTS_TOTAL_BYTES) {
-      throw new Error(`One message can carry at most ${MAX_ATTACHMENTS_TOTAL_BYTES / 1_000_000} MB of attachments`)
-    }
     const text = typeof rawText === 'string' && rawText.trim() ? rawText : ''
     if (!text && !files.length) throw new Error('Message is empty')
 
     const dir = attachmentsDirOf(chat)
     if (files.length) mkdirSync(dir, { recursive: true })
-    const attachments = files.map(({ name, mimeType, bytes }): Attachment => {
+    const attachments = files.map(({ name, mimeType, size, save }): Attachment => {
       // oxlint-disable-next-line no-control-regex -- strips control characters from file names on purpose
       const clean = basename(name).replace(/[\x00-\x1f\x7f\\]/g, '').replace(/^[.\s]+/, '').trim() || 'attachment'
       const dot = clean.lastIndexOf('.')
@@ -1158,8 +1179,8 @@ export function openTurns(deps: TurnDeps) {
       for (let copy = 1; ; copy++) {
         const path = join(dir, copy === 1 ? clean : `${stem}-${copy}${extension}`)
         try {
-          writeFileSync(path, bytes, { flag: 'wx' })
-          return { name, path, mimeType, size: bytes.length }
+          save(path)
+          return { name, path, mimeType, size }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
         }

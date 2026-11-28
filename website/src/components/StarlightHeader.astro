@@ -1,17 +1,15 @@
 ---
-// The Wiki's header: the same tabs, GitHub link and Download pill as the Overview and Features pages, plus
-// Starlight's search and theme menu. The frosted look comes from theme.css.
+// The Wiki's header, matched to the Overview and Features nav (Nav.astro): the (K) mark, mono capital tabs, GitHub
+// and an ink Download button, plus Starlight's search and theme menu. Colours come from theme.css.
 import Search from 'virtual:starlight/components/Search'
-import SiteTitle from 'virtual:starlight/components/SiteTitle'
 import ThemeSelect from 'virtual:starlight/components/ThemeSelect'
-import { githubMark } from '../lib/icons'
 import { latestRelease, REPO } from '../lib/release'
 
-const release = await latestRelease()
+const release = latestRelease()
 ---
 
 <div class="kh">
-  <div class="title"><SiteTitle /></div>
+  <a class="mark" href="/" aria-label="Kothar overview">(K)</a>
   <nav class="tabs" aria-label="Site">
     <a href="/">Overview</a>
     <a href="/features/">Features</a>
@@ -20,8 +18,8 @@ const release = await latestRelease()
   <div class="search print:hidden"><Search /></div>
   <div class="end print:hidden">
     <span class="theme"><ThemeSelect /></span>
-    <a class="icon" href={REPO} aria-label="Kothar on GitHub" set:html={githubMark} />
-    <a class="pill" href={release.href} data-download>Download</a>
+    <a class="tab" href={REPO}>GitHub</a>
+    <a class="dl" href={release.href} data-download>Download</a>
   </div>
 </div>
 
@@ -32,25 +30,40 @@ const release = await latestRelease()
     gap: 28px;
     height: 100%;
   }
-  .title {
-    min-width: 0;
-    overflow: clip;
-    padding: 0.25rem;
-    margin: -0.25rem;
+  .mark {
+    flex: none;
+    color: var(--sl-color-white);
+    font: 900 22px/1 var(--sl-font);
+    font-stretch: 125%;
+    letter-spacing: -0.02em;
+    text-decoration: none;
+    transition: opacity 200ms var(--kothar-ease);
+  }
+  .mark:hover {
+    opacity: 0.7;
   }
   .tabs {
     display: none;
     gap: 24px;
-    font-size: 14px;
   }
-  .tabs a {
+  .tabs a,
+  .tab {
     color: var(--sl-color-gray-3);
+    font: 600 12px/1 var(--sl-font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     text-decoration: none;
-    transition: color 0.2s ease;
+    background: linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat;
+    padding-bottom: 2px;
+    transition:
+      color 200ms var(--kothar-ease),
+      background-size 200ms var(--kothar-ease);
   }
   .tabs a:hover,
-  .tabs a[aria-current='page'] {
+  .tabs a[aria-current='page'],
+  .tab:hover {
     color: var(--sl-color-white);
+    background-size: 100% 1px;
   }
   .search {
     display: flex;
@@ -59,36 +72,32 @@ const release = await latestRelease()
   .end {
     display: none;
     align-items: center;
-    gap: 14px;
+    gap: 16px;
   }
-  .icon {
-    display: inline-flex;
-    padding: 4px;
-    color: var(--sl-color-gray-3);
-    transition: color 0.2s ease;
-  }
-  .icon:hover {
-    color: var(--sl-color-white);
-  }
-  .icon :global(svg) {
-    width: 18px;
-    height: 18px;
-  }
-  .pill {
+  .dl {
     display: inline-flex;
     align-items: center;
-    height: 28px;
-    padding: 0 14px;
-    border-radius: 999px;
-    background: var(--sl-color-accent);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 500;
+    height: 30px;
+    padding: 0 12px;
+    background: var(--sl-color-white);
+    color: var(--sl-color-black);
+    font: 600 12px/1 var(--sl-font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     text-decoration: none;
     white-space: nowrap;
+    transition:
+      transform 200ms var(--kothar-ease),
+      box-shadow 200ms var(--kothar-ease);
   }
-  .pill:hover {
-    filter: brightness(1.08);
+  .dl:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 0 #8a9dc4;
+  }
+  .dl:active {
+    transform: scale(0.97);
+    box-shadow: none;
+    transition-duration: 150ms;
   }
   @media (min-width: 50rem) {
     .tabs,

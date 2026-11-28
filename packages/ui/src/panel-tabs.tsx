@@ -9,7 +9,8 @@ import { Button, MOTION } from './controls.tsx'
  */
 export type TabEntry = { id: string; label: string }
 
-const TAB_CLASS = 'shrink-0 rounded px-8 py-4 font-semibold whitespace-nowrap'
+// Mono capitals, as in the website's nav; the open tab is underlined in the accent.
+const TAB_CLASS = 'shrink-0 rounded px-8 py-4 label-k whitespace-nowrap'
 // Matches the row's gap-2.
 const GAP_PX = 2
 
@@ -70,7 +71,7 @@ export function PanelTabs({ tabs, active, choose }: PanelTabsProps) {
                 type="button"
                 role="tab"
                 aria-selected={t.id === active}
-                className={`${TAB_CLASS} text-muted transition-[background-color,color] hover:bg-hover hover:text-text aria-selected:bg-hover aria-selected:text-text`}
+                className={`${TAB_CLASS} text-muted decoration-accent decoration-2 underline-offset-[7px] transition-[background-color,color] hover:text-text aria-selected:text-text aria-selected:underline`}
                 onClick={() => choose(t.id)}
               >
                 {t.label}

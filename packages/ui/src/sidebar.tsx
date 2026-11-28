@@ -20,7 +20,13 @@ const DOTS: Record<ChatStatus, string> = {
 }
 /** A folded row shows the busiest status among the workers it hides. */
 const BUSIEST: ChatStatus[] = ['waiting', 'stopping', 'running', 'idle']
+// Each level puts a worker's dot under its parent's name; deeper levels stop there, so a long chain of workers never
+// pushes the row sideways.
 const INDENTS = ['pl-8', 'pl-22', 'pl-36', 'pl-50']
+// Selected rows are filled; hovered ones get a lighter wash, so the open chat stays distinct under the pointer.
+// The open chat: a raised row with the accent down its left edge, like the website's selected Wiki page.
+const ROW_SELECTED = 'bg-raised text-text shadow-[inset_2px_0_0_var(--accent)]'
+const ROW_HOVER = 'hover:bg-raised/50 has-data-[state=open]:bg-raised/50 has-data-[state=open]:text-text'
 // A row's ⋯: shown on hover, on keyboard focus and while its menu is open. Its place is always kept (never display:
 // none), so nothing in the row moves when the pointer comes in: the workers chevron beside it stays put under the click.
 const ROW_ACTION =
@@ -31,6 +37,27 @@ const ROW_ACTION =
 const LABEL_ACTION =
   'pointer-events-none opacity-0 group-hover/label:pointer-events-auto group-hover/label:opacity-100 ' +
   'focus-visible:pointer-events-auto focus-visible:opacity-100'
+// Below a 240 px sidebar (its list's content is then under 216 px) an engine's name squeezes the chat's, so it shrinks
+// to a two-letter mark. Measured at 180 to 320 px sidebars: narrower, "claude-code" fit only as "clau…" while a nested
+// worker's name dropped under 70 px. In px, not rem: the app's root font is 13px. Tailwind needs the classes in full.
+const ENGINE_LABEL_WIDE = 'hidden @min-[216px]:inline'
+const ENGINE_MARK_WIDE = '@min-[216px]:hidden'
+// While labels show, every row keeps the same room at its end for the fold chevron and the ⋯, whether it has them or
+// not, so every engine label ends at one right edge. The fold's room fits the chevron and a one-digit count of folded
+// workers; ten or more widens that row alone, by a digit. Narrower, the room goes to names.
+const FOLD_SLOT_WIDE = '@min-[216px]:min-w-[33px]'
+const MENU_SLOT_WIDE = 'hidden @min-[216px]:block w-[26px] shrink-0'
+// Two letters an engine is known by in a narrow sidebar; any other engine gets its own name's initials.
+const ENGINE_MARKS: Record<string, string> = { 'claude-code': 'CC', codex: 'CX', opencode: 'OC', pi: 'PI' }
+
+/** An engine's two-letter mark: "CC" for claude-code, the initials of a two-word id, else its first two letters. */
+export function engineMark(engine: string) {
+  if (ENGINE_MARKS[engine]) return ENGINE_MARKS[engine]
+  const words = engine.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  const mark = words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? engine).slice(0, 2)
+  return mark.toUpperCase()
+}
+
 // After a keyboard move, the row is focused again for this long, while the core's updates reorder the list.
 const REFOCUS_MS = 1000
 // A folded group's spaces pop out beside it on hover. The delays let the pointer cross from the row into the popup
@@ -127,6 +154,9 @@ type RowProps = {
   // Bold: a space or Home whose own lead finished a turn the user hasn't seen.
   unread: boolean
   showEngine: boolean
+  // In the sidebar list, the engine label gives way to a two-letter mark when the sidebar is narrow. The group popup
+  // sizes itself to its rows, so there the label always shows in full.
+  narrowable?: boolean
   select: () => void
   menu?: MenuItem[]
   fold?: { folded: boolean; hidden: ChatView[]; toggle: () => void }
@@ -136,24 +166,20 @@ type RowProps = {
 }
 
 function ChatRow(props: RowProps) {
-  const { row, animate, title, selected, status: own, unread, showEngine, select, menu, fold, reorder, inGroup } = props
+  const { row, animate, title, selected, status: own, unread, showEngine, narrowable = true, select, menu, fold, reorder, inGroup } = props
   const { chat } = row
   const depth = row.depth + (inGroup ? 1 : 0)
   const status = fold?.folded ? BUSIEST.find((s) => [own, ...fold.hidden.map((c) => c.status)].includes(s))! : own
-  const highlight = selected
-    ? 'bg-raised text-text'
-    : unread
-    ? 'text-text hover:bg-raised has-data-[state=open]:bg-raised'
-    : 'text-muted hover:bg-raised hover:text-text has-data-[state=open]:bg-raised has-data-[state=open]:text-text'
+  const highlight = selected ? ROW_SELECTED : unread ? `text-text ${ROW_HOVER}` : `text-muted hover:text-text ${ROW_HOVER}`
   return (
     <m.div
-      className={`group/row relative flex shrink-0 items-center rounded transition-colors ${highlight} ${reorder?.dragging ? 'opacity-50' : ''}`}
+      className={`group/row relative flex min-w-0 shrink-0 items-center rounded transition-colors ${highlight} ${reorder?.dragging ? 'opacity-50' : ''}`}
       {...MOTION.collapse}
       initial={animate && MOTION.collapse.initial}
     >
       <button
         className={`flex h-control min-w-0 flex-1 items-center gap-8 pr-8 text-left whitespace-nowrap ${INDENTS[Math.min(depth, INDENTS.length - 1)]}`}
-        title={title}
+        title={`${title} · ${chat.engine}${chat.worker ? ' (worker)' : ''}`}
         onClick={select}
         data-chat-id={chat.id}
         draggable={reorder && row.depth === 0 ? true : undefined}
@@ -165,30 +191,52 @@ function ChatRow(props: RowProps) {
       >
         <span className={`size-7 shrink-0 rounded-full ${DOTS[status]}`} data-status={status} />
         {chat.extension === 'home' && <HouseIcon />}
-        <span className={`min-w-0 flex-1 truncate ${unread ? 'font-semibold' : ''}`} data-unread={unread || undefined}>
+        {/* The name takes what the engine label (at most a third of the row) or mark leaves, and keeps a few letters. */}
+        <span
+          className={`min-w-[2.5em] flex-1 truncate ${unread ? 'font-semibold' : ''}`}
+          data-unread={unread || undefined}
+        >
           {chat.name}
         </span>
-        {chat.worker && <span className="rounded border px-5 text-xs text-muted">worker</span>}
         {/* Always shown: the ⋯ has its own place, so nothing needs to make room for it on hover. */}
-        {showEngine && <span className="shrink-0 text-xs text-faint">{chat.engine}</span>}
-      </button>
-      {fold && (
-        <Hint text={fold.folded ? 'Show workers' : 'Hide workers'}>
-          <Button
-            variant="ghost"
-            size="none"
-            className="group mr-2 flex h-22 items-center gap-4 px-4 text-xs text-faint"
-            aria-label={fold.folded ? 'Show workers' : 'Hide workers'}
-            aria-expanded={!fold.folded}
-            data-open={fold.folded ? undefined : ''}
-            onClick={fold.toggle}
+        {showEngine && (
+          <span
+            className={`max-w-[33%] min-w-0 truncate text-xs text-faint ${narrowable ? ENGINE_LABEL_WIDE : ''}`}
+            data-engine
           >
-            {fold.folded && <span className="tabular-nums">{fold.hidden.length}</span>}
-            <Chevron />
-          </Button>
-        </Hint>
-      )}
-      {menu && <RowMenu label={chat.name} items={menu} />}
+            {chat.engine}
+          </span>
+        )}
+        {/* A narrow sidebar's engine mark: muted letters at the row's end, apart from the round status dot at its start. */}
+        {showEngine && narrowable && (
+          <span
+            aria-hidden
+            className={`shrink-0 font-mono text-[10px] leading-none tracking-wide text-faint ${ENGINE_MARK_WIDE}`}
+            data-engine-mark
+          >
+            {engineMark(chat.engine)}
+          </span>
+        )}
+      </button>
+      <span className={`flex shrink-0 justify-end ${narrowable ? FOLD_SLOT_WIDE : ''}`}>
+        {fold && (
+          <Hint text={fold.folded ? 'Show workers' : 'Hide workers'}>
+            <Button
+              variant="ghost"
+              size="none"
+              className="group mr-2 flex h-22 items-center gap-4 px-4 text-xs text-faint"
+              aria-label={fold.folded ? 'Show workers' : 'Hide workers'}
+              aria-expanded={!fold.folded}
+              data-open={fold.folded ? undefined : ''}
+              onClick={fold.toggle}
+            >
+              {fold.folded && <span className="tabular-nums">{fold.hidden.length}</span>}
+              <Chevron />
+            </Button>
+          </Hint>
+        )}
+      </span>
+      {menu ? <RowMenu label={chat.name} items={menu} /> : narrowable && <span aria-hidden className={MENU_SLOT_WIDE} />}
       {reorder?.drop && (
         <span
           aria-hidden
@@ -454,7 +502,8 @@ export function ChatNav({
         selected={chat.id === selectedId}
         status={asksBelow ? 'waiting' : chat.status}
         unread={showsUnread(chat, looking && chat.id === selectedId)}
-        showEngine={mixedEngines}
+        // A worker usually runs on its parent's engine, so only a different one is worth a label.
+        showEngine={mixedEngines && chats.find((c) => c.id === chat.parentId)?.engine !== chat.engine}
         select={() => select(chat.id)}
         menu={chat.extension || chat.worker ? undefined : chatMenu(chat)}
         fold={below.length ? { folded: isFolded, hidden: below, toggle: () => foldChat(chat.id, !isFolded) } : undefined}
@@ -602,7 +651,7 @@ export function ChatNav({
   const overUngrouped = !!drag?.over && 'into' in drag.over && drag.over.into === ''
 
   return (
-    <nav className="flex flex-1 scroll-inset flex-col gap-1 overflow-y-auto pt-10 pr-0 pb-8 pl-8">
+    <nav className="@container flex min-w-0 flex-1 scroll-inset flex-col gap-1 overflow-x-hidden overflow-y-auto pt-10 pr-0 pb-8 pl-8">
       <AnimatePresence>{tree.active.slice(0, split).filter(shown).map(row)}</AnimatePresence>
       {launchers.length > 0 && (
         <div role="group" aria-label="Extensions" className="flex flex-col gap-1">
@@ -753,7 +802,7 @@ function GroupRow(props: GroupRowProps) {
     >
       <HoverCard.Trigger asChild>
         <m.div
-          className={`group/row relative flex shrink-0 items-center rounded text-muted transition-colors hover:bg-raised hover:text-text has-data-[state=open]:bg-raised ${dragging ? 'opacity-50' : ''} ${into ? 'bg-accent/15 text-text ring-1 ring-accent' : ''}`}
+          className={`group/row relative flex min-w-0 shrink-0 items-center rounded text-muted transition-colors hover:text-text ${ROW_HOVER} ${dragging ? 'opacity-50' : ''} ${into ? 'bg-accent/15 text-text ring-1 ring-accent' : ''}`}
           {...MOTION.collapse}
           initial={animate && MOTION.collapse.initial}
         >
@@ -777,7 +826,7 @@ function GroupRow(props: GroupRowProps) {
               {group.name}
             </span>
             {collapsed && (
-              <span className="text-xs text-faint tabular-nums" data-count>
+              <span className="shrink-0 text-xs text-faint tabular-nums" data-count>
                 {count}
               </span>
             )}
@@ -837,6 +886,7 @@ function GroupRow(props: GroupRowProps) {
                     status={space.status}
                     unread={space.unread}
                     showEngine={peek.showEngine}
+                    narrowable={false}
                     select={() => {
                       setPeeking(false)
                       peek.select(space.chat.id)
@@ -950,7 +1000,7 @@ export function NameDialog({ request, connected, send, close }: NameDialogProps)
                 {...MOTION.pop}
                 onSubmit={submit}
               >
-                <Dialog.Title className="text-[16px] font-semibold">
+                <Dialog.Title className="display text-[16px] leading-[1.2]">
                   {isNew ? `New ${CHAT_NOUN.one}` : `Rename ${CHAT_NOUN.one}`}
                 </Dialog.Title>
                 <label className="flex flex-col gap-4">
@@ -981,7 +1031,7 @@ export function NameDialog({ request, connected, send, close }: NameDialogProps)
 // As tall as a chat row, its label under the chat names: an empty slot where a row's dot sits (pl-7 plus the
 // button's 1px border makes the rows' pl-8), like the New space row.
 const LAUNCHER_ROW = 'flex h-control w-full shrink-0 items-center gap-8 pr-8 pl-7 text-left text-muted hover:text-text'
-const FOOTER_ROW = 'flex h-control w-full items-center gap-8 px-8'
+const FOOTER_ROW = 'flex h-control w-full min-w-0 items-center gap-8 px-8 text-left'
 
 /** A launcher an extension panel asks for (ExtensionPanel.launcher): a row in the left sidebar that opens the panel. */
 export type Launcher = { key: string; label: string; keys?: Binding | null; open: () => void }
@@ -991,8 +1041,9 @@ function LauncherRows({ launchers, top = false }: { launchers: Launcher[]; top?:
   return launchers.map((launcher) => {
     const row = (
       <Button variant="ghost" size="none" className={top ? LAUNCHER_ROW : FOOTER_ROW} onClick={launcher.open}>
-        {top && <span aria-hidden="true" className="w-7 shrink-0" />}
-        {launcher.label}
+        {/* An empty slot where a row's dot sits, so every label in the sidebar starts on one line. */}
+        <span aria-hidden="true" className="w-7 shrink-0" />
+        <span className="min-w-0 truncate">{launcher.label}</span>
       </Button>
     )
     return launcher.keys ? (
@@ -1016,7 +1067,9 @@ export function SidebarFooter({ settingsKeys, openSettings, launchers = [] }: Fo
       <LauncherRows launchers={launchers} />
       <Hint text={settingsKeys && <Keys binding={settingsKeys} />} side="right">
         <Button variant="ghost" size="none" className={FOOTER_ROW} onClick={openSettings}>
-          <span aria-hidden="true">⚙</span>
+          <span aria-hidden="true" className="flex w-7 shrink-0 justify-center">
+            ⚙
+          </span>
           Settings
         </Button>
       </Hint>
