@@ -16,6 +16,7 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type { LimitReached, Extension, ExtensionChat, ExtensionHost, ExtensionSession } from '@kothar/extension-api'
+import { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createFakeAdapter, FAKE_DEFAULTS, FAKE_MODELS, FAKE_THINKING, type FakeStep } from './adapters/fake.ts'
 import { sandboxingMachine } from './adapters/test-machine.ts'
@@ -32,8 +33,8 @@ import {
   ASK_FIRST_COMMANDS,
   bySpaceOrder,
   isUnread,
-  MAX_ATTACHMENT_BYTES,
-  MAX_ATTACHMENTS_TOTAL_BYTES,
+  LARGE_ATTACHMENT_BYTES,
+  LARGE_ATTACHMENTS_TOTAL_BYTES,
   GLOBAL_CONTEXT,
   type AccountChoice,
   type Adapter,
@@ -46,6 +47,7 @@ import {
   type Machine,
   type SessionOptions,
   type ThinkingLevel,
+  type Upload,
 } from './shared.ts'
 import { cantPs, cantSandbox, cantWriteTmp, needs } from './test-env.ts'
 import { until as waitUntil } from './test-wait.ts'
@@ -2770,17 +2772,54 @@ describe('attachments', () => {
     expect(existsSync(join(attachmentsDir(t, 'main'), 'a.txt'))).toBe(true)
   })
 
-  it('refuses a file over the size cap, or files over the total for one message, saving nothing', () => {
+  it('takes files past the old size caps, inline or streamed ahead, moving a streamed file into place', async () => {
     const t = setup(textScript)
-    const huge = upload('huge.bin', 'application/octet-stream', Buffer.alloc(MAX_ATTACHMENT_BYTES + 1))
-    const send = (attachments: ReturnType<typeof upload>[]) =>
-      t.handle({ type: 'chat.send', chatId: 'main', text: 'hi', attachments })
-    expect(() => send([upload('ok.txt', 'text/plain', 'ok'), huge])).toThrow(`huge.bin is larger than`)
-    const big = upload('big.bin', 'application/octet-stream', Buffer.alloc(MAX_ATTACHMENT_BYTES))
-    const count = Math.floor(MAX_ATTACHMENTS_TOTAL_BYTES / MAX_ATTACHMENT_BYTES) + 1
-    expect(() => send(Array(count).fill(big))).toThrow('at most')
+    const big = upload('big.bin', 'application/octet-stream', Buffer.alloc(LARGE_ATTACHMENT_BYTES + 1, 1))
+    const streamed = await t.core.receiveUpload(Readable.from([Buffer.alloc(LARGE_ATTACHMENTS_TOTAL_BYTES + 1, 2)]))
+    expect(streamed.size).toBe(LARGE_ATTACHMENTS_TOTAL_BYTES + 1)
+    const staged = join(t.garage, 'uploads', streamed.id)
+    expect(existsSync(staged)).toBe(true)
+    t.handle({
+      type: 'chat.send',
+      chatId: 'main',
+      text: 'hi',
+      attachments: [big, { name: 'huge.bin', mimeType: '', uploadId: streamed.id, size: streamed.size }],
+    })
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    const dir = attachmentsDir(t, 'main')
+    expect(sentAttachments(t.core, 'main')[0]).toEqual([
+      { name: 'big.bin', path: join(dir, 'big.bin'), mimeType: 'application/octet-stream', size: LARGE_ATTACHMENT_BYTES + 1 },
+      { name: 'huge.bin', path: join(dir, 'huge.bin'), mimeType: 'application/octet-stream', size: LARGE_ATTACHMENTS_TOTAL_BYTES + 1 },
+    ])
+    expect(statSync(join(dir, 'huge.bin')).size).toBe(LARGE_ATTACHMENTS_TOTAL_BYTES + 1)
+    expect(existsSync(staged)).toBe(false)
+  })
+
+  it('refuses a streamed file that is no longer waiting, saving nothing, and drops one on request', async () => {
+    const t = setup(textScript)
+    const gone = { name: 'gone.bin', mimeType: 'application/octet-stream', uploadId: 'f'.repeat(32), size: 1 }
+    const send = (attachments: Upload[]) => t.handle({ type: 'chat.send', chatId: 'main', text: 'hi', attachments })
+    expect(() => send([upload('ok.txt', 'text/plain', 'ok'), gone])).toThrow('gone.bin is no longer waiting to be sent')
+    expect(() => send([{ ...gone, uploadId: '../../etc/passwd' }])).toThrow('no longer waiting')
     expect(existsSync(attachmentsDir(t, 'main'))).toBe(false)
+    const dropped = await t.core.receiveUpload(Readable.from([Buffer.from('x')]))
+    t.core.dropUpload(dropped.id)
+    expect(() => send([{ ...gone, uploadId: dropped.id }])).toThrow('no longer waiting')
     expect(t.calls).toEqual([])
+  })
+
+  it('names a picture too big for image input by path only, still running the turn', async () => {
+    const t = setup(textScript)
+    const huge = await t.core.receiveUpload(Readable.from([Buffer.alloc(LARGE_ATTACHMENT_BYTES + 1)]))
+    t.handle({
+      type: 'chat.send',
+      chatId: 'main',
+      text: 'look',
+      attachments: [upload('shot.png', 'image/png', PNG), { name: 'huge.png', mimeType: 'image/png', uploadId: huge.id, size: huge.size }],
+    })
+    await until(() => statusOf(t.core, 'main') === 'idle')
+    expect(t.calls[0]?.prompt).toContain(`- ${attachmentsDir(t, 'main')}/huge.png (image/png)`)
+    expect(t.calls[0]?.images).toEqual([{ mimeType: 'image/png', base64: PNG.toString('base64') }])
   })
 
   it('lists every file by path in the prompt and sends every supported image as image input', async () => {

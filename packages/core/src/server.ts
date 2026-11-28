@@ -27,6 +27,8 @@ const CHAT_IMAGE_PATH = /^\/chats\/([^/]+)\/image$/
 // Why a chat's image wasn't served, as the status the window reads (file-links.ts ChatImageRefusal).
 const REFUSED_STATUS = { 'not-found': 404, 'not-image': 415, 'too-big': 413 } as const
 const EXTENSION_FILE_PATH = /^\/extensions\/([a-z0-9-]+)\/files$/
+// Files streamed ahead of their message (uploads.ts): POST /uploads, DELETE /uploads/<id>.
+const UPLOADS_PATH = /^\/uploads(?:\/([0-9a-f]{32}))?$/
 
 export async function startServer(options: {
   core: Core
@@ -50,10 +52,33 @@ export async function startServer(options: {
     createReadStream(file).pipe(response)
   }
   let serveMcp: ReturnType<Core['serveMcp']> | undefined
-  const http = createServer((request, response) => {
+  // No time limit on a whole request (Node's default is 5 minutes), so a file of many GB can stream in (POST /uploads).
+  // It's a loopback server that checks Origin and token.
+  const http = createServer({ requestTimeout: 0 }, (request, response) => {
     const url = new URL(request.url ?? '/', 'http://core')
     if (serveMcp && url.pathname === '/mcp') {
       return void serveMcp(request, response).catch(() => response.headersSent || response.writeHead(500).end())
+    }
+    const upload = url.pathname.match(UPLOADS_PATH)
+    if (upload) {
+      const cors = {
+        'access-control-allow-origin': uiOrigin,
+        'access-control-allow-methods': 'POST, DELETE',
+        'access-control-allow-headers': 'content-type',
+      }
+      if (request.method === 'OPTIONS') return response.writeHead(204, cors).end()
+      // Only the window sends files: its Origin and its token.
+      if (request.headers.origin !== uiOrigin) return response.writeHead(403).end()
+      if (!sameToken(url.searchParams.get('token') ?? '', token)) return response.writeHead(401, cors).end()
+      if (request.method === 'DELETE' && upload[1]) {
+        core.dropUpload(upload[1])
+        return response.writeHead(204, cors).end()
+      }
+      if (request.method !== 'POST' || upload[1]) return response.writeHead(405, cors).end()
+      return void core.receiveUpload(request).then(
+        (staged) => response.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(staged)),
+        () => response.headersSent || response.writeHead(500, cors).end(),
+      )
     }
     const attachment = url.pathname.match(ATTACHMENT_PATH)
     if (attachment) {

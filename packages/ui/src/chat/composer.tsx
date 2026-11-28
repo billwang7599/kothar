@@ -5,7 +5,9 @@ import { Button, Hint, Select } from '../controls.tsx'
 import { draftOf, flushDrafts, saveDraft, saveDraftSoon } from '../drafts.ts'
 import { applyEdit, continueList, indentList } from '../lists.tsx'
 import { modelKey, type ChatView, type modelMenu } from '../state.ts'
-import { FILE_CHIP, FileLabel, PaperclipIcon, type Pending } from './attachments.tsx'
+import { FILE_CHIP, PaperclipIcon, type Pending } from './attachments.tsx'
+import { attachmentNotes, isLarge } from './use-attachments.ts'
+import { formatBytes } from '../format.ts'
 import { ModePicker } from './mode-picker.tsx'
 import { withQuote } from './quote.tsx'
 import { takeComposerFocus } from '../composer-focus.ts'
@@ -109,35 +111,7 @@ export function Composer(props: ComposerProps) {
       data-composer
       className={`@container mx-auto max-w-column rounded-lg border transition-[border-color,box-shadow] has-[textarea:focus]:border-accent ${canSend || canQueue ? 'bg-panel shadow-raised has-[textarea:focus]:shadow-floating' : 'bg-bg'}`}
     >
-      {pending.length > 0 && (
-        <ul className="flex flex-wrap gap-6 px-8 pt-8" aria-label="Attachments">
-          {pending.map((p) => (
-            <li key={p.id} className="relative min-w-0">
-              {p.preview ? (
-                <img
-                  src={p.preview}
-                  alt={p.name}
-                  title={p.name}
-                  className="block size-48 rounded-lg border object-cover shadow-raised"
-                />
-              ) : (
-                <div className={`${FILE_CHIP} h-48 bg-bg pr-20 shadow-raised`} title={p.name}>
-                  <FileLabel name={p.name} size={p.size} />
-                </div>
-              )}
-              <Hint text="Remove">
-                <button
-                  className="absolute -top-4 -right-4 grid size-18 place-items-center rounded-full border bg-raised text-[12px] leading-none text-muted shadow-raised hover:text-text"
-                  aria-label={`Remove ${p.name}`}
-                  onClick={() => unattach([p])}
-                >
-                  ×
-                </button>
-              </Hint>
-            </li>
-          ))}
-        </ul>
-      )}
+      {pending.length > 0 && <PendingFiles pending={pending} unattach={unattach} />}
       <div className="relative">
         {working && (
           <span
@@ -287,6 +261,65 @@ export function Composer(props: ComposerProps) {
           )}
         </span>
       </div>
+    </div>
+  )
+}
+
+/** A waiting file's size, or how far its upload has got; amber once it's large. */
+function sizeText(p: Pending) {
+  return p.progress === undefined ? formatBytes(p.size) : `Uploading ${Math.floor(p.progress * 100)}% of ${formatBytes(p.size)}`
+}
+
+/** The files waiting to be sent: each with its size, their total when there are several, and warnings for large ones. */
+function PendingFiles({ pending, unattach }: { pending: Pending[]; unattach: (removed: Pending[]) => void }) {
+  const { total, warnings } = attachmentNotes(pending)
+  return (
+    <div className="flex flex-col gap-6 px-8 pt-8">
+      <ul className="flex flex-wrap gap-6" aria-label="Attachments">
+        {pending.map((p) => (
+          <li key={p.id} className="relative min-w-0">
+            {p.preview ? (
+              <div className="relative size-48" title={p.name}>
+                <img src={p.preview} alt={p.name} className="block size-48 rounded-lg border object-cover shadow-raised" />
+                <span
+                  className={`absolute inset-x-2 bottom-2 truncate rounded bg-backdrop px-3 text-center text-[10px] leading-[1.4] ${isLarge(p) ? 'text-amber' : 'text-white'}`}
+                  data-size
+                >
+                  {p.progress === undefined ? formatBytes(p.size) : `${Math.floor(p.progress * 100)}%`}
+                </span>
+              </div>
+            ) : (
+              <div className={`${FILE_CHIP} h-48 bg-bg pr-20 shadow-raised`} title={p.name}>
+                <span className="flex min-w-0 flex-col leading-[1.35]">
+                  <span className="truncate text-ui">{p.name}</span>
+                  <span className={`truncate text-sm ${isLarge(p) ? 'text-amber' : 'text-faint'}`} data-size>
+                    {sizeText(p)}
+                  </span>
+                </span>
+              </div>
+            )}
+            <Hint text="Remove">
+              <button
+                className="absolute -top-4 -right-4 grid size-18 place-items-center rounded-full border bg-raised text-[12px] leading-none text-muted shadow-raised hover:text-text"
+                aria-label={`Remove ${p.name}`}
+                onClick={() => unattach([p])}
+              >
+                ×
+              </button>
+            </Hint>
+          </li>
+        ))}
+      </ul>
+      {pending.length > 1 && (
+        <p className="text-sm text-faint" data-total>
+          {pending.length} files · {formatBytes(total)}
+        </p>
+      )}
+      {warnings.map((warning) => (
+        <p key={warning} className="text-sm text-amber" role="status">
+          {warning}
+        </p>
+      ))}
     </div>
   )
 }

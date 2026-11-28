@@ -298,6 +298,49 @@ it("serves a chat's attachments with the token, images and PDFs inline and anyth
   }
 })
 
+it('takes a file streamed ahead, past the WebSocket message limit, from the window only, for a message to send', async () => {
+  const { base, url } = await start()
+  const http = base.replace('ws:', 'http:')
+  const post = (body: BodyInit, headers: Record<string, string> = { origin }, key = token) =>
+    fetch(`${http}/uploads?token=${key}`, { method: 'POST', body, headers })
+  const preflight = await fetch(`${http}/uploads`, { method: 'OPTIONS', headers: { origin } })
+  expect(preflight.status).toBe(204)
+  expect(preflight.headers.get('access-control-allow-origin')).toBe(origin)
+  expect(preflight.headers.get('access-control-allow-methods')).toContain('DELETE')
+  expect((await post('x', { origin: 'http://evil.test' })).status).toBe(403)
+  expect((await post('x', {})).status).toBe(403)
+  expect((await post('x', { origin }, 'wrong')).status).toBe(401)
+
+  // Over ws's 100 MiB message limit even before base64.
+  const size = 110 * 1024 * 1024
+  const response = await post(new Blob([new Uint8Array(size).fill(7)]))
+  expect(response.status).toBe(200)
+  expect(response.headers.get('access-control-allow-origin')).toBe(origin)
+  const staged = (await response.json()) as { id: string; size: number }
+  expect(staged).toEqual({ id: expect.stringMatching(/^[0-9a-f]{32}$/), size })
+
+  const dropped = (await (await post('bye')).json()) as { id: string }
+  const remove = await fetch(`${http}/uploads/${dropped.id}?token=${token}`, { method: 'DELETE', headers: { origin } })
+  expect(remove.status).toBe(204)
+
+  const { socket, messages } = connect(url, { origin })
+  await until(() => messages.some((m) => m.type === 'snapshot'))
+  socket.send(JSON.stringify({ type: 'engine.setEnabled', engine: 'fake', enabled: true }))
+  socket.send(JSON.stringify({ type: 'chat.create', name: 'Big' }))
+  await until(() => messages.some((m) => m.type === 'chat.added'))
+  const added = messages.find((m) => m.type === 'chat.added')
+  if (added?.type !== 'chat.added') throw new Error('no chat')
+  const send = (uploadId: string, name: string) =>
+    socket.send(JSON.stringify({ type: 'chat.send', chatId: added.chat.id, text: 'big', attachments: [{ name, mimeType: 'video/mp4', uploadId, size }] }))
+  send(dropped.id, 'gone.mp4')
+  await until(() => messages.some((m) => m.type === 'error'))
+  expect(messages.find((m) => m.type === 'error')).toMatchObject({ message: expect.stringContaining('gone.mp4 is no longer waiting') })
+  send(staged.id, 'clip.mp4')
+  await until(() =>
+    messages.some((m) => m.type === 'chat.entry' && m.entry.type === 'user.message' && m.entry.attachments?.[0]?.size === size),
+  )
+})
+
 it("serves pictures from an extension's own folders with the token, and nothing else", async () => {
   const garage = mkdtempSync(join(tmpdir(), 'kothar-test-'))
   const pictures: Extension = { id: 'pictures', name: 'Pictures', description: '', enabledByDefault: true }

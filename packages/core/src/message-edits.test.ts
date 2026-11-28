@@ -9,7 +9,7 @@ import { openCore } from './core.ts'
 import { messagesOf } from './memory.ts'
 import { entriesFrom, entriesToDelete, forgetIds, planForget, scrubForgetCall } from './message-edits.ts'
 import { messageEntries } from './memory.ts'
-import type { Adapter, ChatEntry, ClientMessage, CoreMessage } from './shared.ts'
+import { INLINE_ATTACHMENT_BYTES, type Adapter, type ChatEntry, type ClientMessage, type CoreMessage } from './shared.ts'
 import { until } from './test-wait.ts'
 
 const cleanups: (() => void | Promise<void>)[] = []
@@ -301,6 +301,24 @@ describe('editing a message', () => {
 })
 
 describe('undoing a message', () => {
+  it('gives a big attachment back staged as an upload, not as base64, for the composer to send again', async () => {
+    const garage = tempGarage()
+    const t = open(garage)
+    cleanups.push(() => t.core.close(true))
+    const bytes = Buffer.alloc(INLINE_ATTACHMENT_BYTES + 1, 3)
+    await t.send('big one', [{ name: 'big.bin', mimeType: 'application/octet-stream', base64: bytes.toString('base64') }])
+    const entry = t.entryOf(userAt('big one'))
+
+    t.handle({ type: 'chat.undoMessage', chatId: t.chatId, entry })
+
+    const undone = t.replies.at(-1) as Extract<CoreMessage, { type: 'chat.undone' }>
+    expect(undone.attachments).toEqual([
+      { name: 'big.bin', mimeType: 'application/octet-stream', uploadId: expect.stringMatching(/^[0-9a-f]{32}$/), size: bytes.length },
+    ])
+    const [staged] = undone.attachments
+    expect(readFileSync(join(garage, 'uploads', (staged as { uploadId: string }).uploadId)).equals(bytes)).toBe(true)
+  })
+
   it('removes it and everything after it, and gives its text and attachments back for the composer', async () => {
     const t = open(tempGarage())
     cleanups.push(() => t.core.close(true))

@@ -26,6 +26,7 @@ import { instructionSections, type InstructionParts, type InstructionSection } f
 import { scrubForgetCall } from './message-edits.ts'
 import { continuationParts, messageEntries, messagesOf, seededParts, withAttachments, type PromptPart, type Report } from './memory.ts'
 import type { openModels } from './models.ts'
+import type { Uploads } from './uploads.ts'
 import { ALLOW_ALL_RULE, decide, READ_ONLY_REASON, trustableSshHost, type RuledVerdict, type verdictOf } from './permissions.ts'
 import type { Activity } from './activity.ts'
 import { runningChildren } from './workers.ts'
@@ -34,8 +35,7 @@ import { isLive, modeKey, pickedModes, withToggle } from './composer-toggles.ts'
 import {
   editsAnywhere,
   IMAGE_TYPES,
-  MAX_ATTACHMENT_BYTES,
-  MAX_ATTACHMENTS_TOTAL_BYTES,
+  LARGE_ATTACHMENT_BYTES,
   type Adapter,
   type Answers,
   type Attachment,
@@ -50,7 +50,6 @@ import {
   type QueuedMessage,
   type Session,
   type SessionOptions,
-  type Upload,
   type SshHost,
   type Usage,
 } from './shared.ts'
@@ -113,6 +112,8 @@ export type TurnDeps = {
   workDirOf: (chat: Chat) => string
   sandboxIn: (dir: string) => Sandbox | undefined
   attachmentsDirOf: (chat: Chat) => string
+  /** Files the window streamed ahead of their message (uploads.ts). */
+  uploads: Pick<Uploads, 'sizeOf' | 'take'>
   // chat: the chat the turn is for; a worker with its own checkouts gets its own worktree (worker-checkouts.ts).
   checkoutOf: (space: Chat, folder: string, workDir: string, sandboxed: boolean, chat: Chat) => Promise<Checkout>
   // A worker with its own checkouts is reporting: its changes as lines for the lead, if it made any. Undefined (not a
@@ -1010,10 +1011,12 @@ export function openTurns(deps: TurnDeps) {
     return { ref, emit, ask }
   }
 
+  // Pictures past LARGE_ATTACHMENT_BYTES aren't read in: no engine's API takes one that big, and the prompt names every
+  // file by path anyway (memory.ts withAttachments), so the agent can still open it with its own tools.
   const imagesFor = (adapter: Adapter, attachments: Attachment[]) =>
     adapter.imageInput
       ? attachments
-          .filter((a) => IMAGE_TYPES.includes(a.mimeType))
+          .filter((a) => IMAGE_TYPES.includes(a.mimeType) && a.size <= LARGE_ATTACHMENT_BYTES)
           .map((a) => ({ mimeType: a.mimeType, base64: readFileSync(a.path).toString('base64') }))
       : []
 
@@ -1131,26 +1134,27 @@ export function openTurns(deps: TurnDeps) {
 
   const sendMessage = (chat: Chat, rawText: unknown, uploads: unknown, steering = false) => {
     if (uploads !== undefined && !Array.isArray(uploads)) throw new Error('Attachments must be a list')
-    const files = (uploads ?? []).map((upload: Partial<Upload>) => {
-      const { name, mimeType, base64 } = upload ?? {}
-      if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof base64 !== 'string') {
+    // Checked in full before anything is saved. A file streamed ahead (uploadId) is moved into place, never read.
+    const files = (uploads ?? []).map((upload: Record<string, unknown> | undefined) => {
+      const { name, mimeType, base64, uploadId } = upload ?? {}
+      if (typeof name !== 'string' || typeof mimeType !== 'string' || (typeof base64 !== 'string' && typeof uploadId !== 'string')) {
         throw new Error('Each attachment needs a name, a type and its contents')
       }
-      const bytes = Buffer.from(base64, 'base64')
-      if (bytes.length > MAX_ATTACHMENT_BYTES) {
-        throw new Error(`${name} is larger than ${MAX_ATTACHMENT_BYTES / 1_000_000} MB, the most one attachment can be`)
+      const type = mimeType || 'application/octet-stream'
+      if (typeof base64 === 'string') {
+        const bytes = Buffer.from(base64, 'base64')
+        return { name, mimeType: type, size: bytes.length, save: (path: string) => writeFileSync(path, bytes, { flag: 'wx' }) }
       }
-      return { name, mimeType: mimeType || 'application/octet-stream', bytes }
+      const size = deps.uploads.sizeOf(uploadId)
+      if (size === undefined) throw new Error(`${name} is no longer waiting to be sent. Attach it again`)
+      return { name, mimeType: type, size, save: (path: string) => deps.uploads.take(uploadId, path) }
     })
-    if (files.reduce((total, file) => total + file.bytes.length, 0) > MAX_ATTACHMENTS_TOTAL_BYTES) {
-      throw new Error(`One message can carry at most ${MAX_ATTACHMENTS_TOTAL_BYTES / 1_000_000} MB of attachments`)
-    }
     const text = typeof rawText === 'string' && rawText.trim() ? rawText : ''
     if (!text && !files.length) throw new Error('Message is empty')
 
     const dir = attachmentsDirOf(chat)
     if (files.length) mkdirSync(dir, { recursive: true })
-    const attachments = files.map(({ name, mimeType, bytes }): Attachment => {
+    const attachments = files.map(({ name, mimeType, size, save }): Attachment => {
       // oxlint-disable-next-line no-control-regex -- strips control characters from file names on purpose
       const clean = basename(name).replace(/[\x00-\x1f\x7f\\]/g, '').replace(/^[.\s]+/, '').trim() || 'attachment'
       const dot = clean.lastIndexOf('.')
@@ -1158,8 +1162,8 @@ export function openTurns(deps: TurnDeps) {
       for (let copy = 1; ; copy++) {
         const path = join(dir, copy === 1 ? clean : `${stem}-${copy}${extension}`)
         try {
-          writeFileSync(path, bytes, { flag: 'wx' })
-          return { name, path, mimeType, size: bytes.length }
+          save(path)
+          return { name, path, mimeType, size }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
         }

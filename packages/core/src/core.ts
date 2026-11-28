@@ -76,6 +76,7 @@ import { messageOf } from './util.ts'
 import { openTurns, UNSANDBOXED_NEEDS_EDIT_ANYWHERE } from './turn.ts'
 import { addUsage, appendUsage, carryUsage, cleanUsage, sumTotals, totalsOf as usageTotalsOf, USAGE_FILE, usedText } from './usage.ts'
 import { openMessageEdits } from './message-edits.ts'
+import { openUploads } from './uploads.ts'
 import { openAcpAgents } from './acp-agents.ts'
 
 // Kept here too, for code that imports them from the core.
@@ -154,6 +155,8 @@ function assembleCore(options: {
   mkdirSync(options.garage, { recursive: true })
   // Context paths are saved resolved, so attachment paths must be too for a pin to match its file.
   const garage = realpathSync(options.garage)
+  const uploads = openUploads(garage, now)
+  uploads.sweep()
   // Kept in place: the ACP agents the user adds join and leave it (acp-agents.ts), and every module holds this list.
   const adapters = [...options.adapters]
   const adapterFor = (engine: string) => adapters.find((adapter) => adapter.id === engine)
@@ -822,6 +825,7 @@ function assembleCore(options: {
     workDirOf: (chat) => workDirOf(chat),
     sandboxIn,
     attachmentsDirOf: (chat) => attachmentsDirOf(chat),
+    uploads,
     checkoutOf: (space, folder, workDir, sandboxed, chat) => checkoutOf(space, folder, workDir, sandboxed, chat),
     workerChanges: (chat) => workerChanges(chat),
     copyOf: (space, folder, workDir) =>
@@ -1321,6 +1325,7 @@ function assembleCore(options: {
     broadcast,
     shownLog: (chat) => pageOf(chat.entries),
     attachmentsDirOf,
+    stageUpload: uploads.stage,
     removed: (chat, removed) => {
       const detail = detailOf(chat)
       callExtensions('onMessagesRemoved', (extension, context) => extension.onMessagesRemoved!({ chat: detail, ...removed }, context))
@@ -1460,6 +1465,10 @@ function assembleCore(options: {
     accounts: accounts.list,
     refreshAccounts: accounts.refresh,
     onMessage: (listener: (message: CoreMessage) => void) => listeners.push(listener),
+    /** A file the window streams ahead of its message (server.ts POST /uploads). */
+    receiveUpload: uploads.receive,
+    /** A streamed file the window no longer means to send. */
+    dropUpload: uploads.drop,
     attachment(chatId: string, file: string) {
       const chat = chats.get(chatId)
       if (!chat) return undefined

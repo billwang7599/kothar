@@ -630,14 +630,25 @@ export const looksBinary = (bytes: Uint8Array) => bytes.subarray(0, BINARY_SNIFF
 
 export type NewChat = { name: string; engine?: string; folders?: string[]; files?: string[] }
 
-export const MAX_ATTACHMENT_BYTES = 20_000_000
-// Base64 grows by a third, which keeps 75 MB of files under the WebSocket's 100 MiB message limit.
-export const MAX_ATTACHMENTS_TOTAL_BYTES = 75_000_000
+// Attachments have no size cap. Past these sizes the composer warns that a file, or a message's files together, are
+// large: slow to send and costly in context if an agent reads them. Pictures past LARGE_ATTACHMENT_BYTES go to the
+// agent by path only, not as image input (turn.ts imagesFor).
+export const LARGE_ATTACHMENT_BYTES = 20_000_000
+export const LARGE_ATTACHMENTS_TOTAL_BYTES = 75_000_000
+// Past this, the composer asks before attaching a file at all.
+export const HUGE_ATTACHMENT_BYTES = 500_000_000
+// Files up to this size ride the message itself as base64, while a message's inline files stay under
+// INLINE_ATTACHMENTS_TOTAL_BYTES (base64 grows by a third; the WebSocket takes 100 MiB a message). Bigger ones are
+// streamed to the core first (POST /uploads, uploads.ts) and the message names them by uploadId.
+export const INLINE_ATTACHMENT_BYTES = 10_000_000
+export const INLINE_ATTACHMENTS_TOTAL_BYTES = 50_000_000
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 
 export type { Attachment } from '@kothar/extension-api'
 
-export type Upload = { name: string; mimeType: string; base64: string }
+// A file sent with a message: its contents inline (base64), or the id of a file already streamed to the core
+// (uploadId, uploads.ts) with its size.
+export type Upload = { name: string; mimeType: string; base64: string } | { name: string; mimeType: string; uploadId: string; size: number }
 
 // A worker's final reply to its lead: which worker, and why its turn ended early, if it did. from: an extension's
 // report of its own background work instead (ExtensionHost.report), by the extension's id, which chatId is then too.
