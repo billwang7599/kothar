@@ -36,6 +36,22 @@ const ROW_ACTION =
 const LABEL_ACTION =
   'pointer-events-none opacity-0 group-hover/label:pointer-events-auto group-hover/label:opacity-100 ' +
   'focus-visible:pointer-events-auto focus-visible:opacity-100'
+// Below a 240 px sidebar (its list's content is then under 216 px) an engine's name squeezes the chat's, so it shrinks
+// to a two-letter mark. Measured at 180 to 320 px sidebars: narrower, "claude-code" fit only as "clau…" while a nested
+// worker's name dropped under 70 px. In px, not rem: the app's root font is 13px. Tailwind needs the classes in full.
+const ENGINE_LABEL_WIDE = 'hidden @min-[216px]:inline'
+const ENGINE_MARK_WIDE = '@min-[216px]:hidden'
+// Two letters an engine is known by in a narrow sidebar; any other engine gets its own name's initials.
+const ENGINE_MARKS: Record<string, string> = { 'claude-code': 'CC', codex: 'CX', opencode: 'OC', pi: 'PI' }
+
+/** An engine's two-letter mark: "CC" for claude-code, the initials of a two-word id, else its first two letters. */
+export function engineMark(engine: string) {
+  if (ENGINE_MARKS[engine]) return ENGINE_MARKS[engine]
+  const words = engine.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  const mark = words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? engine).slice(0, 2)
+  return mark.toUpperCase()
+}
+
 // After a keyboard move, the row is focused again for this long, while the core's updates reorder the list.
 const REFOCUS_MS = 1000
 // A folded group's spaces pop out beside it on hover. The delays let the pointer cross from the row into the popup
@@ -132,6 +148,9 @@ type RowProps = {
   // Bold: a space or Home whose own lead finished a turn the user hasn't seen.
   unread: boolean
   showEngine: boolean
+  // In the sidebar list, the engine label gives way to a two-letter mark when the sidebar is narrow. The group popup
+  // sizes itself to its rows, so there the label always shows in full.
+  narrowable?: boolean
   select: () => void
   menu?: MenuItem[]
   fold?: { folded: boolean; hidden: ChatView[]; toggle: () => void }
@@ -141,7 +160,7 @@ type RowProps = {
 }
 
 function ChatRow(props: RowProps) {
-  const { row, animate, title, selected, status: own, unread, showEngine, select, menu, fold, reorder, inGroup } = props
+  const { row, animate, title, selected, status: own, unread, showEngine, narrowable = true, select, menu, fold, reorder, inGroup } = props
   const { chat } = row
   const depth = row.depth + (inGroup ? 1 : 0)
   const status = fold?.folded ? BUSIEST.find((s) => [own, ...fold.hidden.map((c) => c.status)].includes(s))! : own
@@ -154,7 +173,7 @@ function ChatRow(props: RowProps) {
     >
       <button
         className={`flex h-control min-w-0 flex-1 items-center gap-8 pr-8 text-left whitespace-nowrap ${INDENTS[Math.min(depth, INDENTS.length - 1)]}`}
-        title={`${title}${chat.worker ? ' (worker)' : ''}${showEngine ? ` · ${chat.engine}` : ''}`}
+        title={`${title} · ${chat.engine}${chat.worker ? ' (worker)' : ''}`}
         onClick={select}
         data-chat-id={chat.id}
         draggable={reorder && row.depth === 0 ? true : undefined}
@@ -166,7 +185,7 @@ function ChatRow(props: RowProps) {
       >
         <span className={`size-7 shrink-0 rounded-full ${DOTS[status]}`} data-status={status} />
         {chat.extension === 'home' && <HouseIcon />}
-        {/* The name takes what the engine label (at most a third of the row) leaves, and always keeps a few letters. */}
+        {/* The name takes what the engine label (at most a third of the row) or mark leaves, and keeps a few letters. */}
         <span
           className={`min-w-[2.5em] flex-1 truncate ${unread ? 'font-semibold' : ''}`}
           data-unread={unread || undefined}
@@ -175,8 +194,21 @@ function ChatRow(props: RowProps) {
         </span>
         {/* Always shown: the ⋯ has its own place, so nothing needs to make room for it on hover. */}
         {showEngine && (
-          <span className="max-w-[33%] min-w-0 truncate text-xs text-faint" data-engine>
+          <span
+            className={`max-w-[33%] min-w-0 truncate text-xs text-faint ${narrowable ? ENGINE_LABEL_WIDE : ''}`}
+            data-engine
+          >
             {chat.engine}
+          </span>
+        )}
+        {/* A narrow sidebar's engine mark: muted letters at the row's end, apart from the round status dot at its start. */}
+        {showEngine && narrowable && (
+          <span
+            aria-hidden
+            className={`shrink-0 font-mono text-[10px] leading-none tracking-wide text-faint ${ENGINE_MARK_WIDE}`}
+            data-engine-mark
+          >
+            {engineMark(chat.engine)}
           </span>
         )}
       </button>
@@ -611,7 +643,7 @@ export function ChatNav({
   const overUngrouped = !!drag?.over && 'into' in drag.over && drag.over.into === ''
 
   return (
-    <nav className="flex min-w-0 flex-1 scroll-inset flex-col gap-1 overflow-x-hidden overflow-y-auto pt-10 pr-0 pb-8 pl-8">
+    <nav className="@container flex min-w-0 flex-1 scroll-inset flex-col gap-1 overflow-x-hidden overflow-y-auto pt-10 pr-0 pb-8 pl-8">
       <AnimatePresence>{tree.active.slice(0, split).filter(shown).map(row)}</AnimatePresence>
       {launchers.length > 0 && (
         <div role="group" aria-label="Extensions" className="flex flex-col gap-1">
@@ -846,6 +878,7 @@ function GroupRow(props: GroupRowProps) {
                     status={space.status}
                     unread={space.unread}
                     showEngine={peek.showEngine}
+                    narrowable={false}
                     select={() => {
                       setPeeking(false)
                       peek.select(space.chat.id)

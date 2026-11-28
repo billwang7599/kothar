@@ -7,7 +7,7 @@ import { domAnimation, LazyMotion, MotionConfig } from 'motion/react'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import { reloadCollapsed } from './collapsed-groups.ts'
-import { ChatNav } from './sidebar.tsx'
+import { ChatNav, engineMark } from './sidebar.tsx'
 import type { ChatView } from './state.ts'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -98,9 +98,9 @@ test('names truncate but keep a few letters, and the engine label takes at most 
   const engine = row('w2').querySelector('[data-engine]')!
   expect(classes(engine)).toEqual(expect.arrayContaining(['truncate', 'min-w-0', 'max-w-[33%]']))
   expect(classes(engine)).not.toContain('shrink-0')
-  // Inside a row's button, only the dot and icons keep their width.
+  // Inside a row's button, only the dot, icons and the two-letter engine mark keep their width.
   for (const el of container.querySelectorAll('nav button[data-chat-id] > *')) {
-    if (classes(el).includes('shrink-0')) expect(el.textContent).toBe('')
+    if (classes(el).includes('shrink-0') && !el.hasAttribute('data-engine-mark')) expect(el.textContent).toBe('')
   }
 })
 
@@ -120,6 +120,39 @@ test("an engine label shows only where it differs from the parent's, and the too
   expect(engineOf('w3')).toBeUndefined()
   expect(engineOf('p')).toBe('pi')
   expect(row('w2').title).toContain('claude-code')
+})
+
+test('in a narrow sidebar the engine label gives way to a two-letter mark, so names keep the room', () => {
+  render()
+  // The sidebar's list is the container the label and mark ask about.
+  expect(classes(container.querySelector('nav'))).toContain('@container')
+  const label = row('w2').querySelector('[data-engine]')!
+  const mark = row('w2').querySelector('[data-engine-mark]')!
+  expect(classes(label)).toEqual(expect.arrayContaining(['hidden', '@min-[216px]:inline']))
+  expect(classes(mark)).toEqual(expect.arrayContaining(['@min-[216px]:hidden', 'font-mono', 'text-faint']))
+  expect(mark.textContent).toBe('CC')
+  // Screen readers get the name from the label and tooltip; the mark is only a visual cue.
+  expect(mark.getAttribute('aria-hidden')).toBe('true')
+  // It sits at the row's end, away from the round status dot at its start.
+  expect(row('w2').firstElementChild?.hasAttribute('data-status')).toBe(true)
+  expect(classes(mark)).not.toContain('rounded-full')
+  expect(row('w1').querySelector('[data-engine-mark]')).toBeNull()
+  expect(row('p').querySelector('[data-engine-mark]')?.textContent).toBe('PI')
+})
+
+test('engine marks: known engines by their usual letters, others by initials', () => {
+  expect(['claude-code', 'codex', 'opencode', 'pi'].map(engineMark)).toEqual(['CC', 'CX', 'OC', 'PI'])
+  expect(engineMark('fake')).toBe('FA')
+  expect(engineMark('gemini-cli')).toBe('GC')
+  expect(engineMark('acp:goose')).toBe('AG')
+  expect(engineMark('x')).toBe('X')
+})
+
+test('every row names its engine in the tooltip, and workers end with "(worker)"', () => {
+  render()
+  expect(row('w1').title).toMatch(/ · fake \(worker\)$/)
+  expect(row('w2').title).toMatch(/ · claude-code \(worker\)$/)
+  expect(row('s').title).toMatch(/ · fake$/)
 })
 
 test('deep workers stop indenting after three levels', () => {
